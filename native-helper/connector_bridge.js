@@ -131,6 +131,17 @@ function createBridge(options = {}) {
   }
   function requireBrowser(req) { return browserIdentity(req, true); }
   function isBrowser(req) { return Boolean(browserIdentity(req, false)); }
+  function sourceConnection(source) {
+    const lastSeenMs = Date.parse(source.lastSeenAt || "");
+    const lastSeenSecondsAgo = Number.isFinite(lastSeenMs)
+      ? Math.max(0, Math.floor((Date.now() - lastSeenMs) / 1000))
+      : null;
+    return {
+      mcpConnected: Number.isInteger(lastSeenSecondsAgo) && lastSeenSecondsAgo <= 90,
+      lastSeenAt: source.lastSeenAt || null,
+      lastSeenSecondsAgo,
+    };
+  }
 
   function saveSources() { writeJson(sourcesPath, { version: 1, updatedAt: now(), sources: [...sources.values()] }); }
   function loadSources() { if (sources.size) return; const payload = readJson(sourcesPath, { sources: [] }); for (const source of Array.isArray(payload.sources) ? payload.sources : []) { if (source?.providerId && source?.installationId && source?.agentId) sources.set(`${source.providerId}|${source.installationId}`, source); } }
@@ -276,7 +287,7 @@ function createBridge(options = {}) {
       if (req.method === "GET" && url.pathname === "/health") return json(res, 200, { ok: true, service: "tianyuan-connector-bridge", protocolVersion: PROTOCOL_VERSION, buildId: BUILD_ID, runtimeCompatibility: compatibility, adapter: "tianyuan-browser", mode: "local", sessionCount: sessions.size, bindingCount: bindings.size, agentSourceCount: sources.size }, origin);
       if (req.method === "GET" && url.pathname === "/api/protocol") return json(res, 200, { ok: true, protocolVersion: PROTOCOL_VERSION, buildId: BUILD_ID, runtimeCompatibility: compatibility, adapter: "tianyuan-browser", capabilities: capabilities(), safety: { genericBrowserAutomation: false, arbitraryJavaScript: false, editLockRequired: true, explicitConfirmationRequired: true, agentBindingRequired: true, singleControlAgentPerPage: true, credentialsStored: false } }, origin);
       if (req.method === "POST" && url.pathname === "/api/agent-sources/register") { const agent = identity(req, true); return json(res, 200, { ok: true, agentIdentity: agent }, origin); }
-      if (req.method === "GET" && url.pathname === "/api/agent-sources") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); return json(res, 200, { ok: true, sources: [...sources.values()].map(publicSource) }, origin); }
+      if (req.method === "GET" && url.pathname === "/api/agent-sources") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); return json(res, 200, { ok: true, sources: [...sources.values()].map((source) => ({ ...publicSource(source), connection: sourceConnection(source) })) }, origin); }
       if (req.method === "POST" && url.pathname === "/api/agent-sources/manual") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const created = manualSource(await body(req)); return json(res, 200, { ok: true, source: publicSource(created.source), workbuddyConfig: { transport: "stdio", command: "node", args: ["~/plugins/tianyuan-browser-connector/runtime/apps/mcp/server.mjs"], env: { TIANYUAN_CONNECTOR_BRIDGE_URL: "http://127.0.0.1:40415", TIANYUAN_CONNECTOR_AGENT_CONFIG_PATH: created.configPath } } }, origin); }
       if (req.method === "GET" && url.pathname === "/api/catalog") { requireBrowser(req); return json(res, 200, { ok: true, ...(await codexCatalog()) }, origin); }
       if (req.method === "POST" && url.pathname === "/api/sessions/register") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const input = await body(req); const sessionId = limited(input.sessionId || id("tianyuan"), 200); const existing = sessions.get(sessionId); const session = { sessionId, status: "online", registeredAt: existing?.registeredAt || now(), lastSeenAt: now(), binding: safePage(input.binding), client: safeClient(input.client), context: safeContext(input.context), capabilities: capabilities() }; sessions.set(sessionId, session); return json(res, 200, { ok: true, session: publicSession(session) }, origin); }

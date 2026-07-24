@@ -45,7 +45,7 @@ fs.writeFileSync(bindingsPath, JSON.stringify({
 }));
 fs.writeFileSync(compatibilityPath, JSON.stringify({
   version: 1,
-  extensionVersion: "0.7.1",
+  extensionVersion: "0.7.3",
   bridgeProtocol: "connector-agent-binding-v3",
   buildId: "test-build",
 }));
@@ -56,7 +56,7 @@ function headers(agent) {
       Origin: extensionOrigin,
       "content-type": "application/json",
       "x-tianyuan-extension-id": "lkflndcnklpeaejohaacoaolnmhgigoc",
-      "x-tianyuan-extension-version": "0.7.1",
+      "x-tianyuan-extension-version": "0.7.3",
     };
   }
   return {
@@ -86,7 +86,7 @@ async function main() {
     const headerOnly = await fetch(`http://127.0.0.1:${port}/api/catalog`, {
       headers: {
         "x-tianyuan-extension-id": "lkflndcnklpeaejohaacoaolnmhgigoc",
-        "x-tianyuan-extension-version": "0.7.1",
+        "x-tianyuan-extension-version": "0.7.3",
       },
     });
     assert.equal(headerOnly.status, 200);
@@ -110,6 +110,12 @@ async function main() {
     const codexStatus = await request("GET", "/api/sessions", undefined, codex);
     assert.equal(codexStatus.status, 200);
     assert.equal(codexStatus.payload.sessions.length, 1);
+    const workbuddyRegistered = await request("POST", "/api/agent-sources/register", {}, workbuddy);
+    assert.equal(workbuddyRegistered.status, 200);
+    const sourceStatuses = await request("GET", "/api/agent-sources");
+    assert.equal(sourceStatuses.status, 200);
+    assert.equal(sourceStatuses.payload.sources.find((source) => source.providerId === "codex").connection.mcpConnected, true);
+    assert.equal(sourceStatuses.payload.sources.find((source) => source.providerId === "workbuddy").connection.mcpConnected, true);
 
     const readBinding = await request("POST", "/api/sessions/session-a/agent-bindings", {
       providerId: "workbuddy", installationId: "workbuddy-test", workspaceId: "workspace-workbuddy", workspaceName: "WorkBuddy Workspace", conversationId: "conversation-workbuddy", conversationTitle: "Manual Conversation", scope: "conversation", accessMode: "read", manualBinding: true,

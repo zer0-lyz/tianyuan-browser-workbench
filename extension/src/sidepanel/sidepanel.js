@@ -2483,13 +2483,26 @@ function renderAgentSources() {
     return;
   }
   for (const source of connectorAgentSources) {
+    const currentBinding = (connectorSession?.agentBindings || []).find((binding) =>
+      binding.agentId === source.agentId
+      && binding.providerId === source.providerId
+      && binding.installationId === source.installationId
+    );
     const row = document.createElement("div");
     row.className = "agent-row";
     const name = document.createElement("strong");
     name.textContent = source.displayName || source.providerId || "未命名来源";
     const meta = document.createElement("span");
-    meta.textContent = `${source.providerId} · ${source.lastSeenAt ? "在线" : "未连接"}${source.manual ? " · 手动" : ""}`;
-    row.append(name, meta);
+    const mcpStatus = source.connection?.mcpConnected ? "MCP 已连接" : "MCP 未连接";
+    const bindingStatus = currentBinding
+      ? `当前页${currentBinding.accessMode === "control" ? "控制" : "只读"}`
+      : "未绑定当前页";
+    meta.textContent = `${mcpStatus} · ${bindingStatus}${source.manual ? " · 手动来源" : ""}`;
+    const activity = document.createElement("small");
+    activity.textContent = source.connection?.mcpConnected
+      ? `最后活动 ${source.connection.lastSeenSecondsAgo ?? 0} 秒前`
+      : (source.lastSeenAt ? "最后活动已超时" : "等待 MCP 启动");
+    row.append(name, meta, activity);
     elements.agentSourceList.appendChild(row);
   }
 }
@@ -2611,6 +2624,7 @@ function renderConnectorSession(session) {
     elements.connectorCodexBindingStatus.textContent = "未绑定";
     elements.connectorBindingId.textContent = "-";
     renderAgentBindings(null);
+    renderAgentSources();
     if (!connectorBindingFormDirty) resetConnectorBindingForm();
     return;
   }
@@ -2634,6 +2648,7 @@ function renderConnectorSession(session) {
   elements.connectorBindingId.textContent = codexBinding?.bindingId || "-";
   if (!connectorBindingFormDirty) renderConnectorBindingForm(codexBinding);
   renderAgentBindings(session);
+  renderAgentSources();
   renderConnectorCapabilities(session.capabilities || connectorProtocol?.capabilities || {});
 }
 
