@@ -353,6 +353,8 @@ Windows 测试包已完成 ZIP 解包、266 个文件逐项 SHA-256、PE x64 架
 
 ## 待办
 
+- 重新加载扩展 `0.8.3` 后，在原批量上传任务点击“继续未完成项”，仅复测 `3.1.4美元招行2025年12月.pdf`；若仍失败，面板应直接显示附件上传或分类批次接口的 HTTP、业务 code 和消息。
+
 - 重新加载扩展，进入“连接配置”，点击“启动 Connector”。
 - 重新加载本机扩展目录 `~/.tianyuan-workbench/projects/天源评估系统/extension`，查看新版 Codex 风格侧栏在真实 Chrome 侧栏中的显示效果。
 - Mac mini 从 `https://github.com/zer0-lyz/tianyuan-browser-workbench` 克隆后，执行 `node scripts/install-local-runtime.mjs`，再按 README 加载浏览器扩展并绑定 Connector。

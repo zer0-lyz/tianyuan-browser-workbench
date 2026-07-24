@@ -1,5 +1,5 @@
 (() => {
-  const ADAPTER_VERSION = "2026-07-24-page-tree-mirror-v26-upload-dialog-root";
+  const ADAPTER_VERSION = "2026-07-24-page-tree-mirror-v27-batch-upload-confirmation";
   const REQUEST_TYPE = "TIANYUAN_WORKBENCH_GET_CONTEXT";
   const RESPONSE_TYPE = "TIANYUAN_WORKBENCH_CONTEXT_RESULT";
   const ACTION_REQUEST_TYPE = "TIANYUAN_WORKBENCH_RUN_ACTION";
@@ -1383,11 +1383,14 @@
       .filter((item) => /attach\/upload|cell_file\/classify_upload|assignment_draft\/save/.test(item.url || ""))
       .map((item) => {
         const parsed = parseNetworkResponse(item.response);
+        const responseBody = parsed.parsed && typeof parsed.parsed === "object" ? parsed.parsed : {};
         return {
           method: item.method,
           url: item.url,
           status: item.status,
           businessSuccess: parsed.success,
+          businessCode: responseBody.code ?? responseBody.status ?? null,
+          businessMessage: String(responseBody.msg || responseBody.message || responseBody.error || "").slice(0, 300),
           response: item.response,
           at: item.at,
         };
@@ -1418,7 +1421,7 @@
     return { ok, reason: ok ? null : "DRAFT_SAVE_NOT_CONFIRMED", saveNetwork };
   }
 
-  async function waitForUploadClassification(networkStart, timeoutMs = 8000) {
+  async function waitForUploadClassification(networkStart, timeoutMs = 15000) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       const evidence = networkEvidenceSince(networkStart);
@@ -1438,6 +1441,34 @@
       await sleep(200);
     }
     return networkEvidenceSince(networkStart);
+  }
+
+  function uploadConfirmationSummary(evidence) {
+    const latest = (pattern) => [...evidence].reverse().find((item) => pattern.test(item.url || "")) || null;
+    const summarize = (item) => item ? {
+      url: item.url,
+      status: item.status,
+      businessSuccess: Boolean(item.businessSuccess),
+      businessCode: item.businessCode,
+      businessMessage: item.businessMessage || "",
+      at: item.at,
+    } : null;
+    return {
+      attach: summarize(latest(/attach\/upload/)),
+      classify: summarize(latest(/cell_file\/classify_upload/)),
+    };
+  }
+
+  async function waitForUploadDialogSettled(timeoutMs = 2500) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (!findVisibleUploadDialog()) {
+        await sleep(350);
+        if (!findVisibleUploadDialog()) return true;
+      }
+      await sleep(150);
+    }
+    return !findVisibleUploadDialog();
   }
 
   function findDialogFileInputs(dialog) {
@@ -1913,6 +1944,7 @@
     result.steps.push({ ok: true, step: "click_upload_dialog_save" });
     const afterUploadNetwork = await waitForUploadClassification(networkStart);
     result.uploadNetwork = afterUploadNetwork;
+    result.uploadConfirmation = uploadConfirmationSummary(afterUploadNetwork);
     const attach = afterUploadNetwork.find((item) =>
       /attach\/upload/.test(item.url || "")
       && item.status >= 200
@@ -1933,11 +1965,20 @@
         procedureAfterUpload: result.target?.procedure || null,
         dialogText: dialog ? textOf(dialog).slice(0, 1600) : "",
         dialogMessages: getPageMessages(),
+        uploadConfirmation: result.uploadConfirmation,
       };
     }
     result.steps.push({ ok: true, step: "upload_and_classify", attachmentUploaded: true, classificationGenerated: true });
+    try {
+      selected.input.value = "";
+      selected.input.dispatchEvent(new Event("input", { bubbles: true }));
+      selected.input.dispatchEvent(new Event("change", { bubbles: true }));
+    } catch {
+      // The completed request evidence is authoritative even if the browser refuses to clear the file input.
+    }
     result.dialogClose = await closeDialogWithoutConfirm(dialog);
-    result.dialogCloseWarning = result.dialogClose.closed ? null : "UPLOAD_DIALOG_CLOSE_PENDING";
+    result.dialogSettled = await waitForUploadDialogSettled();
+    result.dialogCloseWarning = result.dialogSettled ? null : "UPLOAD_DIALOG_CLOSE_PENDING";
 
     const finalNetwork = networkEvidenceSince(networkStart);
     const after = locateAuditUploadCell(payload);

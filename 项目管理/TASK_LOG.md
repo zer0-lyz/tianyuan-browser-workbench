@@ -3063,3 +3063,25 @@ v20 已生效，空 `tag:{isClear:true}` 不再干扰当前最终扫描结果。
 - Mac mini 使用 `https://github.com/zer0-lyz/tianyuan-browser-workbench` 作为克隆地址。
 - 克隆后执行 `node scripts/install-local-runtime.mjs`，然后加载脚本输出的本机 `extensionPath`。
 - 若后续继续发布大安装包，建议使用 GitHub Release 附件，不要把大二进制安装包纳入 Git 历史。
+## 2026-07-24 批量上传第 5 项确认失败修复
+
+### 任务目标
+
+检查银行存款 Sheet 批量上传 5 个文件时，第 5 个文件以 `UPLOAD_OR_CLASSIFY_NOT_CONFIRMED` 停止的原因并修复诊断与连续执行稳定性。
+
+### 执行动作
+
+- 核对批量循环、上传弹窗和网络证据判断逻辑。
+- 确认失败发生在 `/attach/upload` 与 `/cell_file/classify_upload` 同时成功的门禁之前，前 4 项已统一保存。
+- 上传分类等待由 8 秒延长到 15 秒。
+- 网络证据增加 HTTP、业务 code 和消息摘要。
+- 面板失败项显示具体失败接口信息。
+- 单项完成后清空文件输入并等待上传弹窗稳定关闭。
+- 扩展版本升级为 `0.8.3`。
+
+### 验证结果
+
+- JavaScript 语法检查通过。
+- `tests/agent-binding-bridge.test.cjs` 通过。
+- `git diff --check` 通过。
+- 未自动重跑正式上传；应重新加载扩展后使用“继续未完成项”仅处理第 5 个文件。

@@ -91,6 +91,10 @@ async function main() {
   assert.equal(pageAdapterSource.includes(".el-dialog,[role='dialog'],.el-popup-parent--hidden"), false);
   assert.equal(pageAdapterSource.includes("dialogCloseCandidates"), true);
   assert.equal(pageAdapterSource.includes('!button.closest(".el-dialog,[role=\'dialog\']")'), true);
+  assert.equal(pageAdapterSource.includes("timeoutMs = 15000"), true);
+  assert.equal(pageAdapterSource.includes("uploadConfirmationSummary"), true);
+  assert.equal(pageAdapterSource.includes("waitForUploadDialogSettled"), true);
+  assert.equal(sidepanelSource.includes("batchUploadFailureDetail"), true);
 
   await execFileAsync("sqlite3", [workbuddyDbPath, [
     "CREATE TABLE workspaces (path TEXT PRIMARY KEY, last_opened_at INTEGER NOT NULL);",
