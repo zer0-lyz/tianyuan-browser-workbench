@@ -345,11 +345,13 @@ Windows 测试包已完成 ZIP 解包、266 个文件逐项 SHA-256、PE x64 架
 
 第七十三轮当前 UI 版本已固定到 Git：当前 `main` 提交已挂载标签 `baseline-sidepanel-app-ui-20260724`。当前仓库仍未配置 GitHub remote，无法执行 `git push`；需要提供目标 GitHub 仓库地址后才能推送 `main` 和 baseline 标签。
 
+第七十四轮 GitHub 分发已完成：确认既有 `zer0-lyz/tianyuan-valuation-system` 不是同一项目，已新建私有仓库 `zer0-lyz/tianyuan-browser-workbench`。由于本机普通 `git push` 到 GitHub 多次超时，已改用 GitHub API 发布当前完整文件树，远端 `main` 指向提交 `cb2bdf4a760ba943896aea291ccffcb650d0860c`，并已创建标签 `baseline-sidepanel-app-ui-20260724` 和 `baseline-github-distribution-ready-20260724`。
+
 ## 待办
 
 - 重新加载扩展，进入“连接配置”，点击“启动 Connector”。
 - 重新加载本机扩展目录 `~/.tianyuan-workbench/projects/天源评估系统/extension`，查看新版 Codex 风格侧栏在真实 Chrome 侧栏中的显示效果。
-- 提供目标 GitHub 仓库地址，例如 `git@github.com:OWNER/REPO.git` 或 `https://github.com/OWNER/REPO.git`，然后推送 `main` 和 baseline 标签。
+- Mac mini 从 `https://github.com/zer0-lyz/tianyuan-browser-workbench` 克隆后，执行 `node scripts/install-local-runtime.mjs`，再按 README 加载浏览器扩展并绑定 Connector。
 - 重新加载扩展并重新绑定当前页面后，先在一个新行做单行评估核实附件上传复测；若分类批次、底稿保存和回读均通过，再做两行真实批量复测。
 - 重新加载扩展后验证 v20 扫描口径：空 `tag:{isClear:true}` 不应再被计入已有资料索引。
 - 在 Chrome 扩展管理页移除或停用 OneDrive 路径加载的旧扩展，重新加载本机目录 `~/.tianyuan-workbench/projects/天源评估系统/extension`。
