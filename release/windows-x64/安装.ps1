@@ -5,7 +5,7 @@ $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
 $RootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $InstallRoot = Join-Path $env:LOCALAPPDATA "TianyuanWorkbench"
-$ExtensionDir = Join-Path $InstallRoot "extension"
+$ExtensionDir = Join-Path $InstallRoot "projects\天源评估系统\extension"
 $NativeHelperDir = Join-Path $InstallRoot "native-helper"
 $NativeHostExe = Join-Path $NativeHelperDir "native_host.exe"
 $PythonDir = Join-Path $InstallRoot "python"
@@ -13,7 +13,9 @@ $BundledPythonExe = Join-Path $PythonDir "python.exe"
 $PythonExe = $null
 $PrintSkillsDir = Join-Path $InstallRoot "print-format-skills"
 $ManifestPath = Join-Path $NativeHelperDir "com.tianyuan.workbench.helper.json"
-$RegistryPath = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.tianyuan.workbench.helper"
+$RuntimeConfigPath = Join-Path $NativeHelperDir "runtime-config.json"
+$ChromeRegistryPath = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.tianyuan.workbench.helper"
+$EdgeRegistryPath = "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.tianyuan.workbench.helper"
 $TycpvInstaller = Join-Path $RootDir "runtime\tycpv-setup-0.1.0-win-x64.exe"
 $PythonSource = Join-Path $RootDir "runtime\python-portable"
 $WheelDir = Join-Path $RootDir "runtime\python-wheels"
@@ -21,10 +23,19 @@ $ExtensionId = "lkflndcnklpeaejohaacoaolnmhgigoc"
 $LegacyExtensionId = "fdbllnmaaklkcmoacoapbibiggnndkfpa"
 $StartedAt = Get-Date
 $ChecksumIndex = $null
+$CurrentStep = "启动"
 
 function Write-Step([string]$Message) {
+  $script:CurrentStep = $Message
   Write-Host ""
   Write-Host $Message -ForegroundColor Cyan
+}
+
+function Protect-Message([string]$Message) {
+  return $Message `
+    -replace '(?i)(bearer\s+)[^\s"'']+', '$1[REDACTED]' `
+    -replace '(?i)zhmcp_[A-Za-z0-9._-]+', '[REDACTED]' `
+    -replace '(?i)(token\s*[=:]\s*)[^\s"'']+', '$1[REDACTED]'
 }
 
 function Copy-DirectoryContents([string]$Source, [string]$Destination) {
@@ -259,19 +270,24 @@ function Install-PrintDependencies([string]$Candidate) {
   return $LASTEXITCODE -eq 0
 }
 
-function Find-Chrome {
+function Find-Browser {
   foreach ($Candidate in @(
     (Join-Path $env:LOCALAPPDATA "Google\Chrome\Application\chrome.exe"),
     (Join-Path $env:ProgramFiles "Google\Chrome\Application\chrome.exe"),
-    (Join-Path ${env:ProgramFiles(x86)} "Google\Chrome\Application\chrome.exe")
+    (Join-Path ${env:ProgramFiles(x86)} "Google\Chrome\Application\chrome.exe"),
+    (Join-Path $env:LOCALAPPDATA "Microsoft\Edge\Application\msedge.exe"),
+    (Join-Path $env:ProgramFiles "Microsoft\Edge\Application\msedge.exe"),
+    (Join-Path ${env:ProgramFiles(x86)} "Microsoft\Edge\Application\msedge.exe")
   )) {
     if ($Candidate -and (Test-Path -LiteralPath $Candidate)) {
       return $Candidate
     }
   }
-  $Command = Get-Command "chrome.exe" -ErrorAction SilentlyContinue
-  if ($Command) {
-    return $Command.Source
+  foreach ($CommandName in @("chrome.exe", "msedge.exe")) {
+    $Command = Get-Command $CommandName -ErrorAction SilentlyContinue
+    if ($Command) {
+      return $Command.Source
+    }
   }
   return $null
 }
@@ -281,9 +297,9 @@ try {
     throw "此安装包只支持 64 位 Windows。"
   }
 
-  $ChromeExe = Find-Chrome
-  if (-not $ChromeExe) {
-    throw "未找到 Google Chrome，请先安装 Chrome。"
+  $BrowserExe = Find-Browser
+  if (-not $BrowserExe) {
+    throw "未找到 Google Chrome 或 Microsoft Edge，请先安装其中一个浏览器。"
   }
 
   Write-Step "1/7 校验核心文件"
@@ -381,12 +397,17 @@ try {
     throw "Native Host 可执行文件没有安装成功。"
   }
 
-  [Environment]::SetEnvironmentVariable("TYCPV_BIN", $TycpvExe, "User")
-  [Environment]::SetEnvironmentVariable("TIANYUAN_PYTHON_BIN", $PythonExe, "User")
-  [Environment]::SetEnvironmentVariable("TIANYUAN_PRINT_SKILLS_DIR", $PrintSkillsDir, "User")
-  $env:TYCPV_BIN = $TycpvExe
-  $env:TIANYUAN_PYTHON_BIN = $PythonExe
-  $env:TIANYUAN_PRINT_SKILLS_DIR = $PrintSkillsDir
+  $RuntimeConfig = [ordered]@{
+    version = 1
+    tycpvBin = $TycpvExe
+    pythonBin = $PythonExe
+    printSkillsDir = $PrintSkillsDir
+  }
+  [IO.File]::WriteAllText(
+    $RuntimeConfigPath,
+    ($RuntimeConfig | ConvertTo-Json -Depth 3),
+    [Text.UTF8Encoding]::new($false)
+  )
 
   Write-Step "6/7 注册 Chrome Native Messaging"
   $Manifest = [ordered]@{
@@ -401,8 +422,10 @@ try {
   }
   $ManifestJson = $Manifest | ConvertTo-Json -Depth 4
   [IO.File]::WriteAllText($ManifestPath, $ManifestJson, [Text.UTF8Encoding]::new($false))
-  New-Item -Path $RegistryPath -Force | Out-Null
-  Set-Item -Path $RegistryPath -Value $ManifestPath
+  foreach ($RegistryPath in @($ChromeRegistryPath, $EdgeRegistryPath)) {
+    New-Item -Path $RegistryPath -Force | Out-Null
+    Set-Item -Path $RegistryPath -Value $ManifestPath
+  }
 
   Write-Step "7/7 执行环境检查"
   $OpenpyxlVersion = (& $PythonExe -c "import openpyxl; print(openpyxl.__version__)").Trim()
@@ -432,7 +455,9 @@ try {
     "扩展目录：$ExtensionDir"
     "扩展 ID：$ExtensionId"
     "Native Host：$NativeHostExe"
-    "Native Host 注册：$ManifestPath"
+    "Chrome Native Host 注册：$ChromeRegistryPath -> $ManifestPath"
+    "Edge Native Host 注册：$EdgeRegistryPath -> $ManifestPath"
+    "运行配置：$RuntimeConfigPath"
     "Python：$PythonExe"
     "openpyxl：$OpenpyxlVersion"
     "天源 CLI：$TycpvExe"
@@ -445,19 +470,30 @@ try {
   Write-Host "安装完成。" -ForegroundColor Green
   Write-Host "安装模式：$InstallMode"
   Write-Host "耗时：$ElapsedSeconds 秒"
-  Write-Host "请完全退出所有 Chrome 窗口后重新打开 Chrome。"
+  Write-Host "请完全退出所有 Chrome 或 Edge 窗口后重新打开浏览器。"
   Write-Host "然后在扩展管理页加载以下文件夹："
   Write-Host $ExtensionDir -ForegroundColor Yellow
   Write-Host ""
   Write-Host "安装检查结果：$ReportPath"
 
   Start-Process "explorer.exe" -ArgumentList "`"$ExtensionDir`""
-  Start-Process $ChromeExe -ArgumentList "chrome://extensions/"
+  $ExtensionPage = if ($BrowserExe -match '(?i)msedge\.exe$') { "edge://extensions/" } else { "chrome://extensions/" }
+  Start-Process $BrowserExe -ArgumentList $ExtensionPage
   exit 0
 }
 catch {
+  $ReportPath = Join-Path $InstallRoot "安装检查结果.txt"
+  New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
+  @(
+    "天源浏览器工作台 Windows x64"
+    "安装状态：失败"
+    "失败时间：$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    "失败阶段：$CurrentStep"
+    "错误：$(Protect-Message $_.Exception.Message)"
+    "安全：安装失败报告不记录 MCP token、Cookie、Authorization、密码或验证码。"
+  ) | Set-Content -LiteralPath $ReportPath -Encoding UTF8
   Write-Host ""
-  Write-Host "安装失败：$($_.Exception.Message)" -ForegroundColor Red
-  Write-Host "请保留本窗口截图，并把错误信息交给协助人员。"
+  Write-Host "安装失败：$(Protect-Message $_.Exception.Message)" -ForegroundColor Red
+  Write-Host "安装检查结果：$ReportPath"
   exit 1
 }

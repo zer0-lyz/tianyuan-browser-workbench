@@ -3,7 +3,6 @@ const ACTION_REQUEST_TYPE = "TIANYUAN_WORKBENCH_RUN_ACTION_V2";
 const HELPER_BASE_URL = "http://127.0.0.1:8765";
 const CONNECTOR_BASE_URL = "http://127.0.0.1:40415";
 const NATIVE_HOST_NAME = "com.tianyuan.workbench.helper";
-const STORAGE_MCP_TOKEN_KEY = "tianyuanWorkbenchMcpToken";
 const STORAGE_CONNECTOR_SESSION_KEY = "tianyuanWorkbenchConnectorSessionId";
 const STORAGE_LAST_BATCH_RESULT_KEY = "tianyuanWorkbenchLastBatchResult";
 const STORAGE_LAST_EXPORT_RESULT_KEY = "tianyuanWorkbenchLastExportResult";
@@ -135,7 +134,6 @@ const elements = {
   authorizeCli: document.getElementById("authorizeCli"),
   mcpTokenDialog: document.getElementById("mcpTokenDialog"),
   mcpTokenInput: document.getElementById("mcpTokenInput"),
-  rememberMcpToken: document.getElementById("rememberMcpToken"),
   clearMcpToken: document.getElementById("clearMcpToken"),
   cancelMcpToken: document.getElementById("cancelMcpToken"),
   confirmMcpToken: document.getElementById("confirmMcpToken"),
@@ -223,7 +221,6 @@ let busy = false;
 let availableSubjects = [];
 let availableCompanies = [];
 let runtimeMcpToken = "";
-let persistedMcpTokenLoaded = false;
 let connectorSessionId = "";
 let connectorProtocol = null;
 let connectorSession = null;
@@ -266,12 +263,6 @@ function on(element, eventName, handler) {
   if (element) element.addEventListener(eventName, handler);
 }
 
-function storageGet(key) {
-  return new Promise((resolve) => {
-    chrome.storage.local.get([key], (result) => resolve(result?.[key] || ""));
-  });
-}
-
 function storageSet(values) {
   return new Promise((resolve) => chrome.storage.local.set(values, resolve));
 }
@@ -280,15 +271,8 @@ function storageRemove(key) {
   return new Promise((resolve) => chrome.storage.local.remove([key], resolve));
 }
 
-async function loadPersistedMcpToken() {
-  if (persistedMcpTokenLoaded) return runtimeMcpToken;
-  persistedMcpTokenLoaded = true;
-  const saved = await storageGet(STORAGE_MCP_TOKEN_KEY);
-  if (saved) {
-    runtimeMcpToken = String(saved);
-    elements.connectionMessage.textContent = "已读取本机保存的 MCP token";
-  }
-  return runtimeMcpToken;
+async function clearLegacyMcpToken() {
+  await storageRemove("tianyuanWorkbenchMcpToken");
 }
 
 function valueOrDash(value) {
@@ -1926,7 +1910,6 @@ function normalizePageCompanyRows(rows) {
 }
 
 async function fetchHelperJson(path) {
-  await loadPersistedMcpToken();
   if (runtimeMcpToken) {
     return await fetchNativeHelperJson(path);
   }
@@ -3225,7 +3208,6 @@ async function checkConnections() {
 
 function openMcpTokenDialog() {
   elements.mcpTokenInput.value = runtimeMcpToken;
-  elements.rememberMcpToken.checked = false;
   elements.mcpTokenDialog.showModal();
   elements.mcpTokenInput.focus();
 }
@@ -3238,12 +3220,7 @@ async function confirmMcpToken() {
   }
 
   runtimeMcpToken = token;
-  if (elements.rememberMcpToken.checked) {
-    await storageSet({ [STORAGE_MCP_TOKEN_KEY]: token });
-    elements.connectionMessage.textContent = "MCP token 已保存到本机";
-  }
   elements.mcpTokenInput.value = "";
-  elements.rememberMcpToken.checked = false;
   elements.mcpTokenDialog.close();
   setStatus("正在用本次 token 连接 MCP...", "idle");
   await checkConnections();
@@ -3251,9 +3228,8 @@ async function confirmMcpToken() {
 
 async function clearMcpToken() {
   runtimeMcpToken = "";
-  await storageRemove(STORAGE_MCP_TOKEN_KEY);
+  await clearLegacyMcpToken();
   elements.mcpTokenInput.value = "";
-  elements.rememberMcpToken.checked = false;
   elements.mcpTokenDialog.close();
   setConnection(elements.mcpStatus, "未配置 token", "warn");
   setStatus("已清除 MCP token", "warn");
@@ -3976,7 +3952,6 @@ async function copyJson(event) {
 }
 
 async function refreshAll() {
-  await loadPersistedMcpToken();
   await checkConnections();
   return await refreshContext();
 }
@@ -4109,4 +4084,4 @@ on(elements.exitMode, "change", () => {
 });
 
 renderRoute(window.location.hash.slice(1) || "home");
-refreshAll();
+clearLegacyMcpToken().finally(refreshAll);

@@ -25,9 +25,9 @@ node scripts/install-local-runtime.mjs
 - `交给Agent自动配置.md`
 - `docs/INSTALL_FOR_AGENT.md`
 
-## Chrome 加载
+## 浏览器加载
 
-1. 打开 `chrome://extensions`。
+1. Chrome 打开 `chrome://extensions`，或 Edge 打开 `edge://extensions`。
 2. 开启开发者模式。
 3. 选择“加载未打包的扩展程序”。
 4. 选择安装脚本输出的 `extensionPath`。
@@ -40,6 +40,6 @@ node scripts/install-local-runtime.mjs
 
 ## 安全边界
 
-- MCP token 只能由使用者本人在插件面板中输入。
+- MCP token 只能由使用者本人在插件面板中输入，只在当前侧边栏会话中使用。
 - 正式保存、上传、退出编辑等动作必须经过明确确认。
 - 上传成功必须同时满足附件入库、分类批次、底稿保存和单元格回读一致。

@@ -2,11 +2,16 @@ $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
 $InstallRoot = Join-Path $env:LOCALAPPDATA "TianyuanWorkbench"
-$RegistryPath = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.tianyuan.workbench.helper"
+$RegistryPaths = @(
+  "HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.tianyuan.workbench.helper",
+  "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.tianyuan.workbench.helper"
+)
 
 try {
-  if (Test-Path $RegistryPath) {
-    Remove-Item $RegistryPath -Recurse -Force
+  foreach ($RegistryPath in $RegistryPaths) {
+    if (Test-Path $RegistryPath) {
+      Remove-Item $RegistryPath -Recurse -Force
+    }
   }
   foreach ($Name in @("TYCPV_BIN", "TIANYUAN_PYTHON_BIN", "TIANYUAN_PRINT_SKILLS_DIR")) {
     [Environment]::SetEnvironmentVariable($Name, $null, "User")

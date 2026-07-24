@@ -132,12 +132,18 @@ function writeMacNativeHost(nodeBin, pythonBin) {
 function writeWindowsNativeHost(nodeBin, pythonBin) {
   const launcherPath = path.join(nativeRuntimeRoot, "native_host_launcher.cmd");
   const logPath = path.join(nativeRuntimeRoot, "native_host.log");
+  const runtimeConfigPath = path.join(nativeRuntimeRoot, "runtime-config.json");
+  fs.writeFileSync(runtimeConfigPath, JSON.stringify({
+    version: 1,
+    pythonBin,
+    printSkillsDir: printSkillsRoot,
+  }, null, 2) + "\n");
   fs.writeFileSync(
     launcherPath,
     [
       "@echo off",
       `echo %DATE% %TIME% start native host>> ${JSON.stringify(logPath)}`,
-      `set "TIANYUAN_PYTHON_BIN=${pythonBin}"`,
+      `set "TIANYUAN_RUNTIME_CONFIG_PATH=${runtimeConfigPath}"`,
       `${JSON.stringify(nodeBin)} ${JSON.stringify(path.join(nativeRuntimeRoot, "native_host.js"))} 2>> ${JSON.stringify(logPath)}`,
       "",
     ].join("\r\n"),
@@ -150,16 +156,21 @@ function writeWindowsNativeHost(nodeBin, pythonBin) {
     type: "stdio",
     allowed_origins: EXTENSION_IDS.map((id) => `chrome-extension://${id}/`),
   }, null, 2) + "\n");
-  execFileSync("reg", [
-    "add",
+  for (const registryPath of [
     `HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\${HOST_NAME}`,
-    "/ve",
-    "/t",
-    "REG_SZ",
-    "/d",
-    manifestPath,
-    "/f",
-  ], { stdio: "inherit" });
+    `HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\${HOST_NAME}`,
+  ]) {
+    execFileSync("reg", [
+      "add",
+      registryPath,
+      "/ve",
+      "/t",
+      "REG_SZ",
+      "/d",
+      manifestPath,
+      "/f",
+    ], { stdio: "inherit" });
+  }
   return manifestPath;
 }
 
