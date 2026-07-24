@@ -13,7 +13,7 @@ const EXTENSION_IDS = [
   "fdbllnmaaklkcmoacoapbibiggnndkfpa",
 ];
 const PROJECT_NAME = "天源评估系统";
-const CONNECTOR_VERSION = "0.4.0";
+const CONNECTOR_VERSION = "0.4.1";
 const require = createRequire(import.meta.url);
 const connectorBridge = require("../native-helper/connector_bridge.js");
 

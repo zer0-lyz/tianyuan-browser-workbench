@@ -3,6 +3,7 @@ const ACTION_REQUEST_TYPE = "TIANYUAN_WORKBENCH_RUN_ACTION_V2";
 const HELPER_BASE_URL = "http://127.0.0.1:8765";
 const CONNECTOR_BASE_URL = "http://127.0.0.1:40415";
 const EXPECTED_CONNECTOR_PROTOCOL_VERSION = "connector-agent-binding-v3";
+const LOCAL_SCRIPT_PROVIDER_ID = "tianyuan-local-script";
 const NATIVE_HOST_NAME = "com.tianyuan.workbench.helper";
 const STORAGE_CONNECTOR_SESSION_KEY = "tianyuanWorkbenchConnectorSessionId";
 const STORAGE_MCP_TOKEN_KEY = "tianyuanWorkbenchMcpToken";
@@ -58,6 +59,7 @@ const elements = {
   openConnectionsTopCli: document.getElementById("openConnectionsTopCli"),
   openBatchSave: document.getElementById("openBatchSave"),
   openBatchExit: document.getElementById("openBatchExit"),
+  openBatchUpload: document.getElementById("openBatchUpload"),
   openExportDetail: document.getElementById("openExportDetail"),
   openExportDeclare: document.getElementById("openExportDeclare"),
   openFormatDetail: document.getElementById("openFormatDetail"),
@@ -65,6 +67,7 @@ const elements = {
   backFromConnections: document.getElementById("backFromConnections"),
   backFromSave: document.getElementById("backFromSave"),
   backFromExit: document.getElementById("backFromExit"),
+  backFromBatchUpload: document.getElementById("backFromBatchUpload"),
   backFromExportDetail: document.getElementById("backFromExportDetail"),
   backFromExportDeclare: document.getElementById("backFromExportDeclare"),
   backFromFormatDetail: document.getElementById("backFromFormatDetail"),
@@ -73,6 +76,7 @@ const elements = {
   pageConnections: document.getElementById("page-connections"),
   pageBatchSave: document.getElementById("page-batch-save"),
   pageBatchExit: document.getElementById("page-batch-exit"),
+  pageBatchUpload: document.getElementById("page-batch-upload"),
   pageExportDetail: document.getElementById("page-export-detail"),
   pageExportDeclare: document.getElementById("page-export-declare"),
   pageFormatDetail: document.getElementById("page-format-detail"),
@@ -173,6 +177,11 @@ const elements = {
   agentSourceList: document.getElementById("agentSourceList"),
   agentBindingList: document.getElementById("agentBindingList"),
   manualAgentDisplayName: document.getElementById("manualAgentDisplayName"),
+  loadWorkBuddyCatalog: document.getElementById("loadWorkBuddyCatalog"),
+  workbuddyProjectField: document.getElementById("workbuddyProjectField"),
+  workbuddyProjectSelect: document.getElementById("workbuddyProjectSelect"),
+  workbuddyThreadField: document.getElementById("workbuddyThreadField"),
+  workbuddyThreadSelect: document.getElementById("workbuddyThreadSelect"),
   manualAgentWorkspaceId: document.getElementById("manualAgentWorkspaceId"),
   manualAgentWorkspaceName: document.getElementById("manualAgentWorkspaceName"),
   manualAgentConversationId: document.getElementById("manualAgentConversationId"),
@@ -212,6 +221,34 @@ const elements = {
   exitMode: document.getElementById("exitMode"),
   exitConfirm: document.getElementById("exitConfirm"),
   exitConfirmWrap: document.getElementById("exitConfirmWrap"),
+  batchUploadTargetStep: document.getElementById("batchUploadTargetStep"),
+  batchUploadFilesStep: document.getElementById("batchUploadFilesStep"),
+  batchUploadExecuteStep: document.getElementById("batchUploadExecuteStep"),
+  batchUploadStepOne: document.getElementById("batchUploadStepOne"),
+  batchUploadStepTwo: document.getElementById("batchUploadStepTwo"),
+  batchUploadStepThree: document.getElementById("batchUploadStepThree"),
+  refreshBatchUploadTarget: document.getElementById("refreshBatchUploadTarget"),
+  batchUploadSubject: document.getElementById("batchUploadSubject"),
+  batchUploadSheetSelect: document.getElementById("batchUploadSheetSelect"),
+  batchUploadColumnSelect: document.getElementById("batchUploadColumnSelect"),
+  batchUploadColumnFeedback: document.getElementById("batchUploadColumnFeedback"),
+  confirmBatchUploadTarget: document.getElementById("confirmBatchUploadTarget"),
+  chooseBatchUploadFolder: document.getElementById("chooseBatchUploadFolder"),
+  batchUploadFolderSummary: document.getElementById("batchUploadFolderSummary"),
+  batchUploadFileRows: document.getElementById("batchUploadFileRows"),
+  batchUploadMappingFeedback: document.getElementById("batchUploadMappingFeedback"),
+  backToBatchUploadTarget: document.getElementById("backToBatchUploadTarget"),
+  confirmBatchUploadMapping: document.getElementById("confirmBatchUploadMapping"),
+  batchUploadExecutionSummary: document.getElementById("batchUploadExecutionSummary"),
+  batchUploadReview: document.getElementById("batchUploadReview"),
+  batchUploadExecuteConfirm: document.getElementById("batchUploadExecuteConfirm"),
+  batchUploadProgressText: document.getElementById("batchUploadProgressText"),
+  batchUploadProgressPercent: document.getElementById("batchUploadProgressPercent"),
+  batchUploadProgressBar: document.getElementById("batchUploadProgressBar"),
+  batchUploadResultList: document.getElementById("batchUploadResultList"),
+  backToBatchUploadMapping: document.getElementById("backToBatchUploadMapping"),
+  runBatchUpload: document.getElementById("runBatchUpload"),
+  resumeBatchUpload: document.getElementById("resumeBatchUpload"),
   taskLog: document.getElementById("taskLog"),
   taskLogCount: document.getElementById("taskLogCount"),
   projectId: document.getElementById("projectId"),
@@ -241,6 +278,7 @@ let connectorSessionId = "";
 let connectorProtocol = null;
 let connectorSession = null;
 let connectorCatalog = { projects: [], threads: [], updatedAt: null };
+let workbuddyCatalog = { projects: [], threads: [], updatedAt: null };
 let connectorAgentSources = [];
 let connectorBindingFormDirty = false;
 let connectorActionBusy = false;
@@ -250,9 +288,26 @@ let confirmedCompanyValues = null;
 let mcpCompanyListLoaded = false;
 let lastBatchLogEntries = [];
 let currentRoute = "home";
+let batchUploadState = {
+  step: 1,
+  subjectCode: "",
+  sheetName: "",
+  sheetIndex: null,
+  fieldColumn: null,
+  fieldTitle: "",
+  targetPositions: [],
+  targetPayload: null,
+  folderName: "",
+  folderPath: "",
+  files: [],
+  mappings: [],
+  results: [],
+  running: false,
+};
 const moduleScopeStates = {
   "batch-save": null,
   "batch-exit": null,
+  "batch-upload": null,
   "export-detail": null,
   "export-declare": null,
   "format-detail": null,
@@ -268,6 +323,7 @@ const ROUTE_LABELS = {
   connections: "连接配置",
   "batch-save": "批量保存底稿",
   "batch-exit": "批量退出编辑",
+  "batch-upload": "批量上传文件",
   "export-detail": "导出明细表",
   "export-declare": "导出申报表",
   "format-detail": "明细表打印格式",
@@ -351,6 +407,7 @@ function setBusy(nextBusy) {
     elements.openConnectionsTopCli,
     elements.openBatchSave,
     elements.openBatchExit,
+    elements.openBatchUpload,
     elements.openExportDetail,
     elements.openExportDeclare,
     elements.openFormatDetail,
@@ -358,6 +415,7 @@ function setBusy(nextBusy) {
     elements.backFromConnections,
     elements.backFromSave,
     elements.backFromExit,
+    elements.backFromBatchUpload,
     elements.backFromExportDetail,
     elements.backFromExportDeclare,
     elements.backFromFormatDetail,
@@ -366,6 +424,14 @@ function setBusy(nextBusy) {
     elements.copyJson,
     elements.runBatchSave,
     elements.runBatchExit,
+    elements.refreshBatchUploadTarget,
+    elements.confirmBatchUploadTarget,
+    elements.chooseBatchUploadFolder,
+    elements.backToBatchUploadTarget,
+    elements.confirmBatchUploadMapping,
+    elements.backToBatchUploadMapping,
+    elements.runBatchUpload,
+    elements.resumeBatchUpload,
     elements.runExportDetail,
     elements.runExportDeclare,
     elements.chooseDetailOutputPath,
@@ -440,6 +506,7 @@ function isModuleRoute(route = currentRoute) {
   return [
     "batch-save",
     "batch-exit",
+    "batch-upload",
     "export-detail",
     "export-declare",
     "format-detail",
@@ -452,7 +519,7 @@ function routeNeedsSubjects(route = currentRoute) {
 }
 
 function routeNeedsScope(route = currentRoute) {
-  return !["format-detail", "format-declaration"].includes(route);
+  return !["format-detail", "format-declaration", "batch-upload"].includes(route);
 }
 
 function syncSelectedItems() {
@@ -609,6 +676,7 @@ function renderRoute(route) {
     elements.pageConnections,
     elements.pageBatchSave,
     elements.pageBatchExit,
+    elements.pageBatchUpload,
     elements.pageExportDetail,
     elements.pageExportDeclare,
     elements.pageFormatDetail,
@@ -621,9 +689,16 @@ function renderRoute(route) {
   elements.scopeSection?.classList.add("hidden");
   elements.supportSection?.classList.add("hidden");
   if (isModuleRoute(safeRoute)) {
+    if (safeRoute === "batch-upload") {
+      renderBatchUploadStep();
+      elements.subtitle.textContent = ROUTE_LABELS[safeRoute];
+      updateHomePageState();
+      return;
+    }
     const scopeMount = {
       "batch-save": elements.saveScopeMount,
       "batch-exit": elements.exitScopeMount,
+      "batch-upload": null,
       "export-detail": elements.detailScopeMount,
       "export-declare": elements.declareScopeMount,
       "format-detail": null,
@@ -632,6 +707,7 @@ function renderRoute(route) {
     const supportMount = {
       "batch-save": elements.saveSupportMount,
       "batch-exit": elements.exitSupportMount,
+      "batch-upload": null,
       "export-detail": elements.detailSupportMount,
       "export-declare": elements.declareSupportMount,
       "format-detail": elements.detailPrintSupportMount,
@@ -685,6 +761,571 @@ function navigateToRoute(route) {
     renderRoute(route);
   } else {
     window.location.hash = hash;
+  }
+}
+
+const BATCH_UPLOAD_MAX_FILE_BYTES = 20 * 1024 * 1024;
+const BATCH_UPLOAD_MAX_FILES = 200;
+const BATCH_UPLOAD_EXTENSIONS = new Set([
+  ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".xlsm",
+  ".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".zip", ".rar",
+]);
+
+function batchUploadFeedback(element, text, kind = "") {
+  if (!element) return;
+  element.textContent = text;
+  element.dataset.kind = kind;
+}
+
+function renderBatchUploadStep() {
+  const step = Number(batchUploadState.step || 1);
+  elements.batchUploadTargetStep?.classList.toggle("hidden", step !== 1);
+  elements.batchUploadFilesStep?.classList.toggle("hidden", step !== 2);
+  elements.batchUploadExecuteStep?.classList.toggle("hidden", step !== 3);
+  [elements.batchUploadStepOne, elements.batchUploadStepTwo, elements.batchUploadStepThree]
+    .forEach((item, index) => item?.classList.toggle("active", index + 1 === step));
+  if (step === 1 && !batchUploadState.targetPayload) {
+    window.setTimeout(() => {
+      if (currentRoute === "batch-upload" && !busy) inspectBatchUploadTarget();
+    }, 0);
+  }
+}
+
+function batchUploadColumnByValue(value = elements.batchUploadColumnSelect?.value) {
+  return batchUploadState.targetPayload?.columns?.find((item) => String(item.col) === String(value)) || null;
+}
+
+function renderBatchUploadColumnFeedback() {
+  const column = batchUploadColumnByValue();
+  if (!column) {
+    batchUploadFeedback(elements.batchUploadColumnFeedback, "尚未选择目标列", "");
+    if (elements.confirmBatchUploadTarget) elements.confirmBatchUploadTarget.disabled = true;
+    return;
+  }
+  const valid = Boolean(column.uploadCapable);
+  batchUploadFeedback(
+    elements.batchUploadColumnFeedback,
+    valid
+      ? `${column.address} 列可上传文件：已识别 operation-upload-cell`
+      : `${column.address} 列无效：${column.reason || "该列不是可上传文件的单元格列"}`,
+    valid ? "ok" : "error",
+  );
+  if (elements.confirmBatchUploadTarget) elements.confirmBatchUploadTarget.disabled = !valid;
+}
+
+function renderBatchUploadTarget(payload) {
+  batchUploadState.targetPayload = payload;
+  batchUploadState.targetPositions = Array.isArray(payload.positions) ? payload.positions : [];
+  batchUploadState.subjectCode = String(payload.route?.subjectCode || latestContext?.route?.subjectCode || "").trim();
+  elements.batchUploadSubject.value = batchUploadState.subjectCode || "未识别";
+  const sheets = Array.isArray(payload.sheets) ? payload.sheets : [];
+  elements.batchUploadSheetSelect.innerHTML = "";
+  for (const sheet of sheets) {
+    const option = document.createElement("option");
+    option.value = sheet.name || "";
+    option.textContent = `${sheet.name || "未命名"}${sheet.visible === false ? "（隐藏）" : ""}`;
+    elements.batchUploadSheetSelect.appendChild(option);
+  }
+  const selectedSheet = sheets.find((item) => item.name === batchUploadState.sheetName)
+    || sheets.find((item) => item.name === payload.sheetName)
+    || sheets[0];
+  batchUploadState.sheetName = selectedSheet?.name || "";
+  batchUploadState.sheetIndex = Number.isInteger(selectedSheet?.index) ? selectedSheet.index : null;
+  elements.batchUploadSheetSelect.value = batchUploadState.sheetName;
+  const columns = Array.isArray(payload.columns) ? payload.columns : [];
+  elements.batchUploadColumnSelect.innerHTML = "";
+  for (const column of columns) {
+    const option = document.createElement("option");
+    option.value = String(column.col);
+    option.textContent = `${column.address} ${column.title || "未命名列"}${column.uploadCapable ? "" : `（${column.reason || "不可上传"}）`}`;
+    elements.batchUploadColumnSelect.appendChild(option);
+  }
+  const preferredColumn = columns.find((item) => item.uploadCapable && item.title === "查证资料索引")
+    || columns.find((item) => item.uploadCapable)
+    || columns[0];
+  batchUploadState.fieldColumn = Number.isInteger(batchUploadState.fieldColumn)
+    && columns.some((item) => item.col === batchUploadState.fieldColumn)
+    ? batchUploadState.fieldColumn
+    : preferredColumn?.col ?? null;
+  batchUploadState.fieldTitle = columns.find((item) => item.col === batchUploadState.fieldColumn)?.title || "";
+  elements.batchUploadColumnSelect.value = batchUploadState.fieldColumn === null ? "" : String(batchUploadState.fieldColumn);
+  renderBatchUploadColumnFeedback();
+}
+
+async function inspectBatchUploadTarget() {
+  if (busy) return;
+  setBusy(true);
+  setStatus("正在识别当前科目、Sheet 和可上传列...", "idle");
+  try {
+    const tab = await getActiveTab();
+    if (!tab?.id || !tab.url?.startsWith("https://excel.zhrdc.net/ty/")) {
+      throw new Error("请先切换到天源资产基础法底稿页面。");
+    }
+    const result = await sendToTab(tab, {
+      type: ACTION_REQUEST_TYPE,
+      payload: {
+    action: "inspect_batch_upload_target",
+        sheetName: batchUploadState.sheetName || undefined,
+      },
+    });
+    if (!result?.ok) throw new Error(result?.reason || "当前页面无法识别可上传列。");
+    if (!result.route?.isAssetDraftRoute) throw new Error("当前页面不是资产基础法底稿页。");
+    renderBatchUploadTarget(result);
+    batchUploadFeedback(elements.batchUploadColumnFeedback, "已识别当前页面，请选择并确认目标列。", "");
+    renderBatchUploadColumnFeedback();
+    setStatus("已识别当前科目和 Sheet，可选择目标列", "ok");
+  } catch (error) {
+    batchUploadState.targetPayload = null;
+    batchUploadFeedback(elements.batchUploadColumnFeedback, error.message || String(error), "error");
+    setStatus(`批量上传目标识别失败：${error.message || String(error)}`, "error");
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function inspectBatchUploadPositions() {
+  const tab = await getActiveTab();
+  const column = batchUploadColumnByValue();
+  if (!tab?.id || !column?.uploadCapable) throw new Error("请先选择有效的上传目标列。");
+  const result = await sendToTab(tab, {
+    type: ACTION_REQUEST_TYPE,
+    payload: {
+      action: "inspect_batch_upload_positions",
+      sheetName: batchUploadState.sheetName || undefined,
+      fieldColumn: column.col,
+      fieldTitle: column.title,
+      rowNumber: column.sampleRow || 2,
+    },
+  });
+  if (!result?.ok) throw new Error(result?.reason || "无法读取上传弹窗中的目标位置。");
+  const positions = Array.isArray(result.positions) ? result.positions : [];
+  if (!positions.length) throw new Error("上传弹窗未识别到目标位置。");
+  batchUploadState.targetPositions = positions.map((position, index) => ({
+    index: Number.isInteger(position.index) ? position.index : index,
+    label: String(position.label || `位置 ${index + 1}`).trim(),
+  }));
+}
+
+function resetBatchUploadMappings() {
+  batchUploadState.results = [];
+  elements.resumeBatchUpload?.classList.add("hidden");
+  batchUploadState.mappings = batchUploadState.files.map((file) => ({
+    file,
+    rowNumber: "",
+    targetPositionIndex: batchUploadState.targetPositions.length === 1 ? 0 : "",
+    targetPosition: batchUploadState.targetPositions.length === 1
+      ? batchUploadState.targetPositions[0].label
+      : "",
+    status: "待填写",
+    reason: "",
+  }));
+}
+
+function formatFileSize(size) {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function validateBatchUploadMappings() {
+  const seen = new Set();
+  let valid = true;
+  for (const mapping of batchUploadState.mappings) {
+    const rowNumber = Number(mapping.rowNumber);
+    const positionIndex = Number(mapping.targetPositionIndex);
+    const targetKey = `${rowNumber}|${positionIndex}`;
+    if (mapping.status === "已保存" || mapping.status === "待保存") {
+      seen.add(targetKey);
+      continue;
+    }
+    mapping.reason = "";
+    if (!Number.isInteger(positionIndex) || positionIndex < 0 || positionIndex >= batchUploadState.targetPositions.length) {
+      mapping.status = "无效";
+      mapping.reason = "请选择目标位置";
+      valid = false;
+      continue;
+    }
+    if (!Number.isInteger(rowNumber) || rowNumber < 2) {
+      mapping.status = "无效";
+      mapping.reason = "请输入大于等于 2 的整数行号";
+      valid = false;
+      continue;
+    }
+    if (seen.has(targetKey)) {
+      mapping.status = "无效";
+      mapping.reason = "同一行和目标位置重复";
+      valid = false;
+      continue;
+    }
+    seen.add(targetKey);
+    mapping.status = "待执行";
+  }
+  return valid && batchUploadState.mappings.length > 0;
+}
+
+function renderBatchUploadFileRows() {
+  elements.batchUploadFileRows.innerHTML = "";
+  if (!batchUploadState.mappings.length) {
+    elements.batchUploadFileRows.innerHTML = '<tr><td colspan="5" class="empty-list">选择文件夹后显示文件</td></tr>';
+    return;
+  }
+  for (const mapping of batchUploadState.mappings) {
+    const row = document.createElement("tr");
+    const name = document.createElement("td");
+    name.textContent = mapping.file.name;
+    name.title = mapping.file.relativePath || mapping.file.name;
+    const size = document.createElement("td");
+    size.textContent = formatFileSize(mapping.file.size);
+    const inputCell = document.createElement("td");
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = "2";
+    input.step = "1";
+    input.inputMode = "numeric";
+    input.value = mapping.rowNumber;
+    input.placeholder = "如 2";
+    input.className = "batch-upload-row-input";
+    input.addEventListener("input", () => {
+      mapping.rowNumber = input.value.trim();
+      mapping.status = "待执行";
+      mapping.reason = "";
+      const valid = validateBatchUploadMappings();
+      [...elements.batchUploadFileRows.querySelectorAll("tr")].forEach((tableRow, rowIndex) => {
+        const current = batchUploadState.mappings[rowIndex];
+        const statusCell = tableRow.lastElementChild;
+        if (!current || !statusCell) return;
+        statusCell.textContent = current.reason || current.status;
+        statusCell.className = current.status === "无效" ? "batch-upload-invalid" : "";
+      });
+      batchUploadFeedback(
+        elements.batchUploadMappingFeedback,
+        valid ? "文件与行号映射有效，可以确认。" : "请修正无效或重复的行号。",
+        valid ? "ok" : "error",
+      );
+    });
+    inputCell.appendChild(input);
+    const positionCell = document.createElement("td");
+    const positionSelect = document.createElement("select");
+    positionSelect.className = "batch-upload-position-select";
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "请选择";
+    positionSelect.appendChild(placeholder);
+    for (const position of batchUploadState.targetPositions) {
+      const option = document.createElement("option");
+      option.value = String(position.index);
+      option.textContent = position.label;
+      positionSelect.appendChild(option);
+    }
+    positionSelect.value = mapping.targetPositionIndex === "" ? "" : String(mapping.targetPositionIndex);
+    positionSelect.addEventListener("change", () => {
+      mapping.targetPositionIndex = positionSelect.value === "" ? "" : Number(positionSelect.value);
+      mapping.targetPosition = batchUploadState.targetPositions[Number(mapping.targetPositionIndex)]?.label || "";
+      mapping.status = "待执行";
+      mapping.reason = "";
+      validateBatchUploadMappings();
+      renderBatchUploadFileRows();
+      batchUploadFeedback(
+        elements.batchUploadMappingFeedback,
+        validateBatchUploadMappings() ? "文件、行号和目标位置映射有效，可以确认。" : "请修正无效的文件、行号或目标位置。",
+        validateBatchUploadMappings() ? "ok" : "error",
+      );
+    });
+    positionCell.appendChild(positionSelect);
+    const status = document.createElement("td");
+    status.textContent = mapping.reason || mapping.status;
+    status.className = mapping.status === "无效" ? "batch-upload-invalid" : "";
+    row.append(name, size, inputCell, positionCell, status);
+    elements.batchUploadFileRows.appendChild(row);
+  }
+}
+
+function handleBatchUploadFolder(files, folderPath = "") {
+  const accepted = [];
+  let invalidCount = 0;
+  let truncatedCount = 0;
+  for (const file of Array.isArray(files) ? files : []) {
+    const extension = pathExtension(file.name);
+    if (!BATCH_UPLOAD_EXTENSIONS.has(extension) || file.size <= 0 || file.size > BATCH_UPLOAD_MAX_FILE_BYTES) {
+      invalidCount += 1;
+      continue;
+    }
+    if (accepted.length >= BATCH_UPLOAD_MAX_FILES) {
+      truncatedCount += 1;
+      continue;
+    }
+    accepted.push(file);
+  }
+  batchUploadState.files = accepted.sort((a, b) => String(a.relativePath || a.name).localeCompare(String(b.relativePath || b.name), "zh-CN"));
+  batchUploadState.folderPath = String(folderPath || "");
+  batchUploadState.folderName = batchUploadState.folderPath.split(/[\\/]/).filter(Boolean).pop() || "已选择文件夹";
+  resetBatchUploadMappings();
+  renderBatchUploadFileRows();
+  const rejectedText = invalidCount ? `，已跳过 ${invalidCount} 个不支持或超大文件` : "";
+  const truncatedText = truncatedCount ? `，仅保留前 ${BATCH_UPLOAD_MAX_FILES} 个` : "";
+  const mappingText = truncatedCount
+    ? `文件较多，已限制为前 ${BATCH_UPLOAD_MAX_FILES} 个；请先完成这一批映射。`
+    : (batchUploadState.files.length ? "请输入目标行号，并选择每个文件对应的目标位置。" : "文件夹中没有可上传文件。");
+  elements.batchUploadFolderSummary.textContent = `${batchUploadState.folderName}：${batchUploadState.files.length} 个可上传文件${rejectedText}${truncatedText}`;
+  batchUploadFeedback(
+    elements.batchUploadMappingFeedback,
+    mappingText,
+    truncatedCount
+      ? "error"
+      : (batchUploadState.files.length ? "" : "error"),
+  );
+}
+
+async function chooseBatchUploadFolder() {
+  if (busy) return;
+  setBusy(true);
+  setStatus("正在打开本机文件夹选择器...", "idle");
+  try {
+    const selected = await sendNativeMessage({ action: "select_batch_upload_directory" }, 130000);
+    if (!selected?.ok || !selected.path) {
+      if (selected?.cancelled) return;
+      throw new Error(selected?.reason || "未选择文件夹。");
+    }
+    const listed = await sendNativeMessage({
+      action: "list_batch_upload_directory",
+      path: selected.path,
+    }, 30000);
+    if (!listed?.ok) throw new Error(listed?.reason || "无法读取所选文件夹。");
+    handleBatchUploadFolder(listed.files || [], listed.path || selected.path);
+    const suffix = listed.truncated ? "，已限制为前 200 个文件" : "";
+    setStatus(`已读取 ${batchUploadState.files.length} 个文件${suffix}`, "ok");
+  } catch (error) {
+    batchUploadFeedback(elements.batchUploadMappingFeedback, error.message || String(error), "error");
+    setStatus(`文件夹读取失败：${error.message || String(error)}`, "error");
+  } finally {
+    setBusy(false);
+  }
+}
+
+function renderBatchUploadReview() {
+  elements.batchUploadReview.innerHTML = "";
+  const summary = document.createElement("p");
+  summary.textContent = `科目：${batchUploadState.subjectCode || "-"} / Sheet：${batchUploadState.sheetName || "-"} / 目标列：${batchUploadState.fieldTitle || "-"} / 文件：${batchUploadState.mappings.length} 个`;
+  elements.batchUploadReview.appendChild(summary);
+  const list = document.createElement("ul");
+  list.className = "batch-upload-review-list";
+  for (const mapping of batchUploadState.mappings) {
+    const item = document.createElement("li");
+    item.textContent = `${mapping.file.name} → 第 ${mapping.rowNumber} 行 → ${mapping.targetPosition || "未选择位置"}`;
+    list.appendChild(item);
+  }
+  elements.batchUploadReview.appendChild(list);
+  elements.batchUploadExecutionSummary.textContent = `${batchUploadState.mappings.length} 个文件待执行`;
+}
+
+function pathExtension(name = "") {
+  const dot = String(name).lastIndexOf(".");
+  return dot >= 0 ? String(name).slice(dot).toLowerCase() : "";
+}
+
+async function waitForBatchUploadAction(actionId, timeoutMs = 180000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const payload = await connectorFetch(
+      `/api/sessions/${encodeURIComponent(connectorSessionId)}/ui-actions/${encodeURIComponent(actionId)}`,
+    );
+    if (["completed", "failed", "cancelled"].includes(payload.action?.status)) {
+      return payload.action;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 500));
+  }
+  throw new Error("批量上传任务等待超时，请检查天源页面和工作台侧栏是否保持打开。");
+}
+
+function batchUploadResultKey(item) {
+  return item.filePath || item.fileName || "";
+}
+
+function recordBatchUploadResult(mapping, result) {
+  const item = {
+    filePath: mapping.file.filePath,
+    fileName: mapping.file.name,
+    rowNumber: mapping.rowNumber,
+    targetPosition: mapping.targetPosition,
+    ...result,
+  };
+  const key = batchUploadResultKey(item);
+  batchUploadState.results = (batchUploadState.results || []).filter((entry) => batchUploadResultKey(entry) !== key);
+  batchUploadState.results.push(item);
+}
+
+async function saveBatchUploadMappings(tab, controlBinding, mappings) {
+  if (!mappings.length) return { ok: true, skipped: true };
+  elements.batchUploadProgressText.textContent = `已完成 ${mappings.length} 个文件上传，正在统一保存并回读...`;
+  const submitted = await connectorFetch(
+    `/api/sessions/${encodeURIComponent(connectorSessionId)}/ui-actions`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        action: "save_batch_upload_draft",
+        bindingId: controlBinding.bindingId,
+        projectId: controlBinding.workspaceId || "",
+        threadId: controlBinding.conversationId || "",
+        subjectCode: batchUploadState.subjectCode,
+        sheetName: batchUploadState.sheetName,
+        fieldColumn: batchUploadState.fieldColumn,
+        fieldTitle: batchUploadState.fieldTitle,
+        rowNumbers: mappings.map((mapping) => Number(mapping.rowNumber)),
+        confirmText: "确认批量上传并保存",
+      }),
+    },
+  );
+  const action = await waitForBatchUploadAction(submitted.action.actionId);
+  return action.result || { ok: action.status === "completed" };
+}
+
+async function runBatchUploadModule() {
+  if (busy || batchUploadState.running) return;
+  if (!batchUploadState.targetPayload || !batchUploadColumnByValue()) {
+    setStatus("请先确认可上传的目标列。", "warn");
+    return;
+  }
+  if (!validateBatchUploadMappings()) {
+    batchUploadFeedback(elements.batchUploadMappingFeedback, "请先修正文件映射中的行号或目标位置。", "error");
+    return;
+  }
+  if (!elements.batchUploadExecuteConfirm.checked) {
+    setStatus("请先勾选执行确认。", "warn");
+    return;
+  }
+  const uploadMappings = batchUploadState.mappings.filter((mapping) =>
+    !["已保存", "待保存"].includes(mapping.status)
+  );
+  const saveOnlyMappings = batchUploadState.mappings.filter((mapping) => mapping.status === "待保存");
+  if (!uploadMappings.length && !saveOnlyMappings.length) {
+    setStatus("当前没有未完成的文件。", "ok");
+    elements.resumeBatchUpload?.classList.add("hidden");
+    return;
+  }
+  setBusy(true);
+  batchUploadState.running = true;
+  batchUploadState.results = (batchUploadState.results || []).filter((item) => item.kind !== "batch-save");
+  elements.batchUploadProgressBar.value = 0;
+  elements.batchUploadProgressPercent.textContent = "0%";
+  try {
+    const tab = await getActiveTab();
+    const context = await sendToTab(tab, { type: REQUEST_TYPE });
+    if (!context?.ok || !context.route?.isAssetDraftRoute) throw new Error("当前页面已不是资产基础法底稿页。");
+    if (batchUploadState.subjectCode && context.route.subjectCode !== batchUploadState.subjectCode) {
+      throw new Error(`当前科目已变化：${context.route.subjectCode || "未知"}。`);
+    }
+    const session = await ensureCurrentPageConnectorSession();
+    const controlBinding = await ensureLocalScriptControlBinding(session);
+    if (!connectorSessionId || !controlBinding?.bindingId) {
+      setStatus("已取消本机脚本控制授权。", "warn");
+      return;
+    }
+    const successfulMappings = [...saveOnlyMappings];
+    let stoppedOnFailure = null;
+    for (let index = 0; index < uploadMappings.length; index += 1) {
+      const mapping = uploadMappings[index];
+      elements.batchUploadProgressText.textContent = `正在处理未完成项 ${index + 1}/${uploadMappings.length}：${mapping.file.name}`;
+      mapping.status = "上传中";
+      const submitted = await connectorFetch(
+        `/api/sessions/${encodeURIComponent(connectorSessionId)}/ui-actions`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            action: "upload_audit_attachment",
+            bindingId: controlBinding.bindingId,
+            projectId: controlBinding.workspaceId || "",
+            threadId: controlBinding.conversationId || "",
+            subjectCode: batchUploadState.subjectCode,
+            sheetName: batchUploadState.sheetName,
+            fieldColumn: batchUploadState.fieldColumn,
+            fieldTitle: batchUploadState.fieldTitle,
+            rowNumber: Number(mapping.rowNumber),
+            moduleIndex: Number(mapping.targetPositionIndex),
+            moduleName: mapping.targetPosition,
+            filePath: mapping.file.filePath,
+            deferSave: true,
+            confirmText: "确认上传并保存",
+          }),
+        },
+      );
+      elements.batchUploadProgressText.textContent = `正在等待上传和分类确认：${mapping.file.name}`;
+      const action = await waitForBatchUploadAction(submitted.action.actionId);
+      const result = action.result || { ok: action.status === "completed" };
+      recordBatchUploadResult(mapping, result);
+      if (!result.ok) {
+        mapping.status = "失败";
+        mapping.reason = result.reason || "未知失败";
+        stoppedOnFailure = mapping;
+        renderBatchUploadResultList();
+        break;
+      }
+      mapping.status = "待保存";
+      mapping.reason = "";
+      successfulMappings.push(mapping);
+      const completedCount = batchUploadState.mappings.filter((item) => item.status === "已保存").length + successfulMappings.length;
+      const percent = Math.round((completedCount / batchUploadState.mappings.length) * 100);
+      elements.batchUploadProgressBar.value = Math.min(99, percent);
+      elements.batchUploadProgressPercent.textContent = `${Math.min(99, percent)}%`;
+      renderBatchUploadResultList();
+    }
+    const saveResult = await saveBatchUploadMappings(tab, controlBinding, successfulMappings);
+    if (saveResult.ok) {
+      for (const mapping of successfulMappings) {
+        mapping.status = "已保存";
+        mapping.reason = "";
+      }
+      elements.batchUploadResultList.dataset.saveStatus = "ok";
+    } else if (successfulMappings.length) {
+      for (const mapping of successfulMappings) {
+        mapping.status = "待保存";
+        mapping.reason = saveResult.reason || "统一保存失败";
+      }
+      batchUploadState.results.push({
+        kind: "batch-save",
+        fileName: "已完成文件的统一保存与回读",
+        rowNumber: "-",
+        targetPosition: "",
+        ok: false,
+        reason: saveResult.reason || "统一保存失败",
+      });
+    }
+    if (stoppedOnFailure) {
+      elements.resumeBatchUpload?.classList.remove("hidden");
+      const savedMessage = successfulMappings.length
+        ? (saveResult.ok ? `前 ${successfulMappings.length} 项已保存` : `前 ${successfulMappings.length} 项上传成功但待保存`)
+        : "失败前没有可保存项";
+      elements.batchUploadProgressText.textContent = `已停止：${stoppedOnFailure.file.name}失败；${savedMessage}，可修改后继续`;
+      setStatus(`批量上传已在失败项停止，${savedMessage}，可继续未完成项`, "warn");
+    } else {
+      const unfinished = batchUploadState.mappings.some((mapping) => mapping.status !== "已保存");
+      elements.resumeBatchUpload?.classList.toggle("hidden", !unfinished);
+      elements.batchUploadProgressText.textContent = unfinished
+        ? "统一保存失败，可继续未完成项"
+        : "全部上传、统一保存并回读完成";
+      setStatus(unfinished ? "部分完成，可继续未完成项" : "批量上传全部完成", unfinished ? "warn" : "ok");
+    }
+    const savedCount = batchUploadState.mappings.filter((mapping) => mapping.status === "已保存").length;
+    elements.batchUploadProgressBar.value = Math.round((savedCount / batchUploadState.mappings.length) * 100);
+    elements.batchUploadProgressPercent.textContent = `${elements.batchUploadProgressBar.value}%`;
+    renderBatchUploadResultList();
+    await readContextForTab(tab, { preserveBatchSelections: true });
+  } catch (error) {
+    elements.batchUploadProgressText.textContent = `执行失败：${error.message || String(error)}`;
+    setStatus(`批量上传失败：${error.message || String(error)}`, "error");
+  } finally {
+    batchUploadState.running = false;
+    setBusy(false);
+  }
+}
+
+function renderBatchUploadResultList(results = batchUploadState.results || []) {
+  elements.batchUploadResultList.innerHTML = "";
+  for (const item of results) {
+    const row = document.createElement("div");
+    row.className = `batch-upload-result ${item.ok ? "ok" : "error"}`;
+    const position = item.targetPosition ? ` → ${item.targetPosition}` : "";
+    row.textContent = `${item.ok ? "完成" : "失败"}：${item.fileName} → 第 ${item.rowNumber} 行${position}${item.ok ? "" : `，${item.reason || "未知原因"}`}`;
+    elements.batchUploadResultList.appendChild(row);
   }
 }
 
@@ -2471,8 +3112,52 @@ function agentBindingLabel(binding = {}) {
   return `${source} / ${target}`;
 }
 
+function currentControlBinding(session = connectorSession) {
+  return (session?.agentBindings || []).find((binding) => binding.accessMode === "control") || null;
+}
+
+async function ensureLocalScriptSource() {
+  const result = await connectorFetch("/api/agent-sources/local", {
+    method: "POST",
+    body: JSON.stringify({ displayName: "天源工作台本机脚本" }),
+  });
+  return result.source || null;
+}
+
+async function ensureLocalScriptControlBinding(session = connectorSession) {
+  const current = currentControlBinding(session);
+  if (current) return current;
+  const localSource = await ensureLocalScriptSource();
+  if (!localSource) throw new Error("LOCAL_SCRIPT_SOURCE_UNAVAILABLE");
+  const existing = (session?.agentBindings || []).find((binding) =>
+    binding.providerId === LOCAL_SCRIPT_PROVIDER_ID
+    && binding.installationId === localSource.installationId
+  );
+  if (!window.confirm("当前页面没有控制 Agent。确认由“天源工作台本机脚本”执行本次页面操作？")) return null;
+  const result = existing
+    ? await connectorFetch(
+      `/api/sessions/${encodeURIComponent(session.sessionId)}/agent-bindings/${encodeURIComponent(existing.bindingId)}/access`,
+      { method: "POST", body: JSON.stringify({ accessMode: "control" }) },
+    )
+    : await connectorFetch(`/api/sessions/${encodeURIComponent(session.sessionId)}/agent-bindings`, {
+      method: "POST",
+      body: JSON.stringify({
+        providerId: localSource.providerId,
+        installationId: localSource.installationId,
+        workspaceId: session.binding?.projectId || "",
+        workspaceName: session.binding?.projectName || "当前天源项目",
+        scope: "workspace",
+        accessMode: "control",
+        manualBinding: false,
+      }),
+    });
+  renderConnectorSession(result.session);
+  await loadAgentSources();
+  return currentControlBinding(result.session);
+}
+
 function codexControlBinding(session = connectorSession) {
-  return (session?.agentBindings || []).find((binding) => binding.providerId === "codex" && binding.accessMode === "control") || null;
+  return currentControlBinding(session);
 }
 
 function renderAgentSources() {
@@ -2493,15 +3178,19 @@ function renderAgentSources() {
     const name = document.createElement("strong");
     name.textContent = source.displayName || source.providerId || "未命名来源";
     const meta = document.createElement("span");
-    const mcpStatus = source.connection?.mcpConnected ? "MCP 已连接" : "MCP 未连接";
+    const mcpStatus = source.local
+      ? "本机脚本已就绪"
+      : (source.connection?.mcpConnected ? "MCP 已连接" : "MCP 未连接");
     const bindingStatus = currentBinding
       ? `当前页${currentBinding.accessMode === "control" ? "控制" : "只读"}`
       : "未绑定当前页";
     meta.textContent = `${mcpStatus} · ${bindingStatus}${source.manual ? " · 手动来源" : ""}`;
     const activity = document.createElement("small");
-    activity.textContent = source.connection?.mcpConnected
-      ? `最后活动 ${source.connection.lastSeenSecondsAgo ?? 0} 秒前`
-      : (source.lastSeenAt ? "最后活动已超时" : "等待 MCP 启动");
+    activity.textContent = source.local
+      ? "扩展身份已验证"
+      : (source.connection?.mcpConnected
+        ? `最后活动 ${source.connection.lastSeenSecondsAgo ?? 0} 秒前`
+        : (source.lastSeenAt ? "最后活动已超时" : "等待 MCP 启动"));
     row.append(name, meta, activity);
     elements.agentSourceList.appendChild(row);
   }
@@ -2538,12 +3227,99 @@ async function loadAgentSources() {
     const result = await connectorFetch("/api/agent-sources");
     connectorAgentSources = Array.isArray(result.sources) ? result.sources : [];
     renderAgentSources();
+    if (connectorAgentSources.some((source) => source.providerId === "workbuddy")) {
+      await loadWorkBuddyCatalog({ silent: true });
+    }
     return connectorAgentSources;
   } catch (error) {
     connectorAgentSources = [];
     renderAgentSources();
     setConnectorBindingFeedback(`Agent 来源读取失败：${error.message}`, "warn");
     return [];
+  }
+}
+
+function selectedWorkBuddyProject() {
+  return workbuddyCatalog.projects.find((item) => String(item.projectId) === elements.workbuddyProjectSelect.value) || null;
+}
+
+function workbuddyProjectThreads(project = selectedWorkBuddyProject()) {
+  const projectId = String(project?.projectId || "");
+  const projectPath = String(project?.projectPath || project?.path || "").replace(/[\\/]+$/, "");
+  return workbuddyCatalog.threads.filter((thread) => {
+    const threadPath = String(thread.projectPath || thread.cwd || "").replace(/[\\/]+$/, "");
+    return (
+      (projectId && String(thread.projectId || "") === projectId)
+      || (projectPath && threadPath === projectPath)
+    );
+  });
+}
+
+function applySelectedWorkBuddyBinding() {
+  const project = selectedWorkBuddyProject();
+  const threadId = elements.workbuddyThreadSelect.value;
+  const thread = workbuddyCatalog.threads.find((item) => String(item.threadId || item.id || "") === threadId) || null;
+  elements.manualAgentWorkspaceId.value = project?.projectId || "";
+  elements.manualAgentWorkspaceName.value = project?.projectName || "";
+  elements.manualAgentConversationId.value = thread?.threadId || "";
+  elements.manualAgentConversationTitle.value = thread?.title || "";
+}
+
+function renderWorkBuddyCatalog() {
+  const hasProjects = workbuddyCatalog.projects.length > 0;
+  elements.workbuddyProjectField.classList.toggle("hidden", !hasProjects);
+  elements.workbuddyThreadField.classList.toggle("hidden", !hasProjects);
+  elements.workbuddyProjectSelect.innerHTML = "";
+  const projectPlaceholder = document.createElement("option");
+  projectPlaceholder.value = "";
+  projectPlaceholder.textContent = hasProjects ? "请选择 WorkBuddy 项目" : "未发现 WorkBuddy 项目";
+  elements.workbuddyProjectSelect.appendChild(projectPlaceholder);
+  for (const project of workbuddyCatalog.projects) {
+    const option = document.createElement("option");
+    option.value = project.projectId || "";
+    option.textContent = project.projectName || project.projectId || "未命名项目";
+    option.title = project.projectPath || project.path || "";
+    elements.workbuddyProjectSelect.appendChild(option);
+  }
+  elements.workbuddyThreadSelect.innerHTML = "";
+  const threadPlaceholder = document.createElement("option");
+  threadPlaceholder.value = "";
+  threadPlaceholder.textContent = hasProjects ? "请选择 WorkBuddy 对话" : "请先加载项目";
+  elements.workbuddyThreadSelect.appendChild(threadPlaceholder);
+}
+
+function renderWorkBuddyThreadOptions() {
+  const threads = workbuddyProjectThreads();
+  elements.workbuddyThreadSelect.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = threads.length ? "请选择 WorkBuddy 对话" : "该项目暂无可识别对话";
+  elements.workbuddyThreadSelect.appendChild(placeholder);
+  for (const thread of threads) {
+    const option = document.createElement("option");
+    option.value = thread.threadId || thread.id || "";
+    option.textContent = thread.title || thread.threadId || "未命名对话";
+    option.title = [thread.status, thread.projectPath || thread.cwd].filter(Boolean).join("\n");
+    elements.workbuddyThreadSelect.appendChild(option);
+  }
+}
+
+async function loadWorkBuddyCatalog({ silent = false } = {}) {
+  try {
+    const catalog = await connectorFetch("/api/catalog?providerId=workbuddy");
+    workbuddyCatalog = {
+      projects: Array.isArray(catalog.projects) ? catalog.projects : [],
+      threads: Array.isArray(catalog.threads) ? catalog.threads : [],
+      updatedAt: catalog.updatedAt || null,
+    };
+    renderWorkBuddyCatalog();
+    elements.manualAgentFeedback.textContent = `已加载 ${workbuddyCatalog.projects.length} 个 WorkBuddy 项目、${workbuddyCatalog.threads.length} 个对话，请选择后确认绑定。`;
+    return catalog;
+  } catch (error) {
+    workbuddyCatalog = { projects: [], threads: [], updatedAt: null };
+    renderWorkBuddyCatalog();
+    if (!silent) elements.manualAgentFeedback.textContent = `WorkBuddy 项目/对话暂不可用：${error.message}`;
+    return null;
   }
 }
 
@@ -2583,13 +3359,23 @@ async function addManualAgent() {
   setBusy(true);
   try {
     const session = await ensureCurrentPageConnectorSession();
-    const sourceResult = await connectorFetch("/api/agent-sources/manual", {
-      method: "POST",
-      body: JSON.stringify({ providerId: "workbuddy", displayName: elements.manualAgentDisplayName.value.trim() || "WorkBuddy" }),
-    });
+    let source = connectorAgentSources.find((item) => item.providerId === "workbuddy") || null;
+    let sourceResult = { source, workbuddyConfig: null };
+    if (!source) {
+      sourceResult = await connectorFetch("/api/agent-sources/manual", {
+        method: "POST",
+        body: JSON.stringify({ providerId: "workbuddy", displayName: elements.manualAgentDisplayName.value.trim() || "WorkBuddy" }),
+      });
+      source = sourceResult.source;
+    }
+    const existingBinding = (session.agentBindings || []).find((binding) =>
+      binding.providerId === source.providerId
+      && binding.installationId === source.installationId
+    );
     const result = await connectorFetch(`/api/sessions/${encodeURIComponent(session.sessionId)}/agent-bindings`, {
       method: "POST",
       body: JSON.stringify({
+        bindingId: existingBinding?.bindingId || "",
         providerId: sourceResult.source.providerId,
         installationId: sourceResult.source.installationId,
         workspaceId,
@@ -2605,7 +3391,9 @@ async function addManualAgent() {
     renderConnectorSession(result.session);
     await loadAgentSources();
     const configPath = sourceResult.workbuddyConfig?.env?.TIANYUAN_CONNECTOR_AGENT_CONFIG_PATH || "";
-    elements.manualAgentFeedback.textContent = `已创建手动来源并绑定当前页面。WorkBuddy stdio 配置路径：${configPath}`;
+    elements.manualAgentFeedback.textContent = configPath
+      ? `已创建来源并绑定当前页面。WorkBuddy stdio 配置路径：${configPath}`
+      : "已使用现有 WorkBuddy 来源并绑定当前页面。";
   } catch (error) {
     elements.manualAgentFeedback.textContent = `添加失败：${error.message}`;
   } finally {
@@ -3110,6 +3898,7 @@ async function checkConnectorConnection({ silent = false } = {}) {
     connectorProtocol = protocol;
     setConnection(elements.connectorStatus, health.sessionCount ? "已绑定" : "已启动", "ok");
     renderConnectorCapabilities(protocol.capabilities || {});
+    await ensureLocalScriptSource().catch(() => null);
     await loadAgentSources();
 
     await loadConnectorSessionId();
@@ -3273,7 +4062,7 @@ async function navigateConnectorActionTarget(tab, target = {}) {
 }
 
 async function reportConnectorActionResult(actionId, result) {
-  const binding = codexControlBinding() || {};
+  const binding = currentControlBinding() || {};
   return await connectorFetch(
     `/api/sessions/${encodeURIComponent(connectorSessionId)}/actions/${encodeURIComponent(actionId)}/result`,
     {
@@ -3291,16 +4080,16 @@ async function reportConnectorActionResult(actionId, result) {
 async function processConnectorActionQueue() {
   if (
     connectorActionBusy
-    || busy
+    || (busy && !batchUploadState.running)
     || document.visibilityState !== "visible"
     || !connectorSessionId
-    || !codexControlBinding()?.bindingId
+    || !currentControlBinding()?.bindingId
   ) return;
 
   connectorActionBusy = true;
   let claimedAction = null;
   try {
-    const binding = codexControlBinding();
+    const binding = currentControlBinding();
     const query = new URLSearchParams({
       bindingId: binding.bindingId,
       projectId: binding.projectId || "",
@@ -3315,6 +4104,7 @@ async function processConnectorActionQueue() {
     const actionLabels = {
       upload_audit_attachment: "附件上传任务",
       batch_upload_audit_attachments: "附件批量上传任务",
+      save_batch_upload_draft: "批量上传统一保存",
       preview_audit_attachment_upload: "附件上传预演",
       inspect_audit_check_row: "查证核对情况读取",
       set_audit_check_result: "查证核对情况填写",
@@ -3322,10 +4112,10 @@ async function processConnectorActionQueue() {
       batch_set_audit_check_results: "查证核对情况批量填写",
     };
     setConnectorBindingFeedback(
-      `Codex 已下达${actionLabels[claimedAction.type] || "天源页面任务"}，正在通过当前天源页面执行...`,
+      `${binding.displayName || binding.providerId || "当前 Agent"} 已下达${actionLabels[claimedAction.type] || "天源页面任务"}，正在通过当前天源页面执行...`,
       "idle",
     );
-    setStatus("正在执行 Codex 天源页面任务...", "idle");
+    setStatus(`正在执行${binding.displayName || binding.providerId || "当前 Agent"}天源页面任务...`, "idle");
     let tab = await connectorBoundTab();
     tab = await navigateConnectorActionTarget(tab, claimedAction.target || {});
     const context = await sendToTab(tab, { type: REQUEST_TYPE });
@@ -3342,11 +4132,11 @@ async function processConnectorActionQueue() {
     await reportConnectorActionResult(claimedAction.actionId, result);
     setConnectorBindingFeedback(
       result?.ok
-        ? `${actionLabels[claimedAction.type] || "天源页面任务"}完成，结果已回传 Codex`
-        : `Codex 页面任务被阻断：${result?.reason || result?.message || "未知原因"}`,
+        ? `${actionLabels[claimedAction.type] || "天源页面任务"}完成，结果已回传 ${binding.displayName || binding.providerId || "当前 Agent"}`
+        : `${binding.displayName || binding.providerId || "当前 Agent"} 页面任务被阻断：${result?.reason || result?.message || "未知原因"}`,
       result?.ok ? "ok" : "warn",
     );
-    setStatus(result?.ok ? "Codex 页面任务完成" : "Codex 页面任务被阻断", result?.ok ? "ok" : "warn");
+    setStatus(result?.ok ? "页面任务完成" : "页面任务被阻断", result?.ok ? "ok" : "warn");
     await checkConnectorConnection({ silent: true });
   } catch (error) {
     const result = {
@@ -3367,8 +4157,8 @@ async function processConnectorActionQueue() {
         // The visible feedback remains useful if the Bridge disconnected.
       }
     }
-    setConnectorBindingFeedback(`Codex 页面任务失败：${result.message}`, "error");
-    setStatus(`Codex 页面任务失败：${result.message}`, "error");
+    setConnectorBindingFeedback(`页面任务失败：${result.message}`, "error");
+    setStatus(`页面任务失败：${result.message}`, "error");
   } finally {
     connectorActionBusy = false;
   }
@@ -4194,6 +4984,7 @@ on(elements.openConnectionsTopMcp, "click", () => navigateToRoute("connections")
 on(elements.openConnectionsTopCli, "click", () => navigateToRoute("connections"));
 on(elements.openBatchSave, "click", () => navigateToRoute("batch-save"));
 on(elements.openBatchExit, "click", () => navigateToRoute("batch-exit"));
+on(elements.openBatchUpload, "click", () => navigateToRoute("batch-upload"));
 on(elements.openExportDetail, "click", () => navigateToRoute("export-detail"));
 on(elements.openExportDeclare, "click", () => navigateToRoute("export-declare"));
 on(elements.openFormatDetail, "click", () => navigateToRoute("format-detail"));
@@ -4201,6 +4992,7 @@ on(elements.openFormatDeclaration, "click", () => navigateToRoute("format-declar
 on(elements.backFromConnections, "click", () => navigateToRoute("home"));
 on(elements.backFromSave, "click", () => navigateToRoute("home"));
 on(elements.backFromExit, "click", () => navigateToRoute("home"));
+on(elements.backFromBatchUpload, "click", () => navigateToRoute("home"));
 on(elements.backFromExportDetail, "click", () => navigateToRoute("home"));
 on(elements.backFromExportDeclare, "click", () => navigateToRoute("home"));
 on(elements.backFromFormatDetail, "click", () => navigateToRoute("home"));
@@ -4223,7 +5015,13 @@ on(elements.startConnector, "click", startConnector);
 on(elements.bindCurrentPage, "click", bindCurrentPage);
 on(elements.refreshConnectorCatalog, "click", loadConnectorCatalog);
 on(elements.refreshAgentSources, "click", loadAgentSources);
+on(elements.loadWorkBuddyCatalog, "click", () => loadWorkBuddyCatalog());
 on(elements.addManualAgent, "click", addManualAgent);
+on(elements.workbuddyProjectSelect, "change", () => {
+  renderWorkBuddyThreadOptions();
+  applySelectedWorkBuddyBinding();
+});
+on(elements.workbuddyThreadSelect, "change", applySelectedWorkBuddyBinding);
 on(elements.connectorProjectPickerButton, "click", () => openConnectorPicker("project"));
 on(elements.connectorThreadPickerButton, "click", () => openConnectorPicker("thread"));
 on(elements.connectorProjectFilter, "input", renderConnectorProjectPicker);
@@ -4260,6 +5058,67 @@ on(elements.cancelMcpToken, "click", () => elements.mcpTokenDialog.close());
 on(elements.copyJson, "click", copyJson);
 on(elements.runBatchSave, "click", runBatchSave);
 on(elements.runBatchExit, "click", runBatchExitEdit);
+on(elements.refreshBatchUploadTarget, "click", inspectBatchUploadTarget);
+on(elements.batchUploadSheetSelect, "change", async () => {
+  batchUploadState.sheetName = elements.batchUploadSheetSelect.value;
+  batchUploadState.fieldColumn = null;
+  await inspectBatchUploadTarget();
+});
+on(elements.batchUploadColumnSelect, "change", () => {
+  batchUploadState.fieldColumn = elements.batchUploadColumnSelect.value === ""
+    ? null
+    : Number(elements.batchUploadColumnSelect.value);
+  batchUploadState.fieldTitle = batchUploadColumnByValue()?.title || "";
+  renderBatchUploadColumnFeedback();
+});
+on(elements.confirmBatchUploadTarget, "click", async () => {
+  const column = batchUploadColumnByValue();
+  if (!column?.uploadCapable) {
+    renderBatchUploadColumnFeedback();
+    return;
+  }
+  setBusy(true);
+  setStatus("正在读取上传弹窗中的目标位置...", "idle");
+  try {
+    await inspectBatchUploadPositions();
+  } catch (error) {
+    setStatus(`目标位置读取失败：${error.message || String(error)}`, "error");
+    batchUploadFeedback(elements.batchUploadMappingFeedback, error.message || String(error), "error");
+    return;
+  } finally {
+    setBusy(false);
+  }
+  batchUploadState.fieldColumn = column.col;
+  batchUploadState.fieldTitle = column.title;
+  batchUploadState.step = 2;
+  batchUploadState.files = [];
+  resetBatchUploadMappings();
+  renderBatchUploadFileRows();
+  renderBatchUploadStep();
+  setStatus("输入对象已确认，请选择文件夹并填写行号、目标位置映射", "ok");
+});
+on(elements.chooseBatchUploadFolder, "click", chooseBatchUploadFolder);
+on(elements.backToBatchUploadTarget, "click", () => {
+  batchUploadState.step = 1;
+  renderBatchUploadStep();
+});
+on(elements.confirmBatchUploadMapping, "click", () => {
+  if (!validateBatchUploadMappings()) {
+    renderBatchUploadFileRows();
+    batchUploadFeedback(elements.batchUploadMappingFeedback, "请修正无效的行号或目标位置。", "error");
+    return;
+  }
+  batchUploadState.step = 3;
+  renderBatchUploadReview();
+  renderBatchUploadStep();
+  setStatus("文件映射已确认，请检查清单后执行", "ok");
+});
+on(elements.backToBatchUploadMapping, "click", () => {
+  batchUploadState.step = 2;
+  renderBatchUploadStep();
+});
+on(elements.runBatchUpload, "click", runBatchUploadModule);
+on(elements.resumeBatchUpload, "click", runBatchUploadModule);
 on(elements.chooseDetailOutputPath, "click", () => chooseExportDirectory("asset_detail_table"));
 on(elements.chooseDeclareOutputPath, "click", () => chooseExportDirectory("asset_declare_table"));
 on(elements.runExportDetail, "click", () => runCliExport("asset_detail_table"));

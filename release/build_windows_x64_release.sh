@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="$(node -p "require(process.argv[1]).version" "$ROOT_DIR/extension/manifest.json")"
-REVISION="r2"
-RELEASE_DATE="20260723"
+REVISION="r3"
+RELEASE_DATE="${RELEASE_DATE:-$(date +%Y%m%d)}"
 PACKAGE_NAME="天源浏览器工作台-v${VERSION}-Windows-x64-测试版-${REVISION}"
 BUILD_ROOT="$ROOT_DIR/release/.build/${PACKAGE_NAME}-$(date +%s)"
 STAGE="$BUILD_ROOT/$PACKAGE_NAME"
@@ -106,6 +106,16 @@ cp "$WINDOWS_NODE" "$STAGE/native-helper/native_host.exe"
   "$SEA_BLOB" \
   --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
 cp "$ROOT_DIR/native-helper/native_host.js" "$STAGE/native-helper/native_host.js"
+cp "$ROOT_DIR/native-helper/connector_bridge.js" "$STAGE/native-helper/connector_bridge.js"
+cat > "$STAGE/native-helper/runtime-compat.json" <<EOF
+{
+  "version": 1,
+  "extensionVersion": "$VERSION",
+  "bridgeProtocol": "connector-agent-binding-v3",
+  "buildId": "2026-07-24-browser-contract-v2-capability-matrix",
+  "generatedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
 
 /usr/bin/unzip -q "$PYTHON_ARCHIVE" -d "$STAGE/runtime/python-portable"
 for wheel in "$WHEEL_CACHE"/openpyxl-3.1.5-*.whl "$WHEEL_CACHE"/et_xmlfile-2.0.0-*.whl; do

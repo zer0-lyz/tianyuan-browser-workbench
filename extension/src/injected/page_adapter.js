@@ -1,5 +1,5 @@
 (() => {
-  const ADAPTER_VERSION = "2026-07-24-page-tree-mirror-v21-clear-audit-test-data";
+  const ADAPTER_VERSION = "2026-07-24-page-tree-mirror-v26-upload-dialog-root";
   const REQUEST_TYPE = "TIANYUAN_WORKBENCH_GET_CONTEXT";
   const RESPONSE_TYPE = "TIANYUAN_WORKBENCH_CONTEXT_RESULT";
   const ACTION_REQUEST_TYPE = "TIANYUAN_WORKBENCH_RUN_ACTION";
@@ -26,6 +26,18 @@
       n = Math.floor((n - 1) / 26);
     }
     return s;
+  }
+
+  function resolveSheet(spread, requestedName = "") {
+    const active = spread?.getActiveSheet?.();
+    const name = String(requestedName || "").trim();
+    if (!name) return active;
+    const count = Number(spread?.getSheetCount?.() || 0);
+    for (let index = 0; index < Math.min(count, 80); index += 1) {
+      const sheet = spread.getSheet?.(index);
+      if (sheet?.name?.() === name) return sheet;
+    }
+    return null;
   }
 
   function parseRoute() {
@@ -89,8 +101,49 @@
       });
   }
 
+  function elementDepth(element) {
+    let depth = 0;
+    let current = element;
+    while (current?.parentElement) {
+      depth += 1;
+      current = current.parentElement;
+    }
+    return depth;
+  }
+
+  function findVisibleUploadDialog() {
+    const candidates = new Set();
+    const inputs = [...document.querySelectorAll('input[type="file"]:not([disabled])')];
+    for (const input of inputs) {
+      let current = input.parentElement;
+      while (current && current !== document.body && current !== document.documentElement) {
+        if (isVisible(current)) {
+          const text = textOf(current);
+          const hasSave = [...current.querySelectorAll("button,.el-button,[role='button']")]
+            .filter(isVisible)
+            .some((button) => textOf(button) === "保存");
+          const hasClose = Boolean(current.querySelector(
+            ".el-dialog__headerbtn,.el-dialog__close,[aria-label='Close'],[aria-label='关闭'],[title='关闭'],[class*='__close'],[class$='-close']"
+          )) || [...current.querySelectorAll("button,[role='button'],a,span,i,svg")]
+            .filter(isVisible)
+            .some((element) => ["×", "✕", "关闭", "Close"].includes(textOf(element)));
+          if (hasSave && hasClose && /上传/.test(text)) candidates.add(current);
+        }
+        current = current.parentElement;
+      }
+    }
+    return [...candidates]
+      .sort((left, right) => {
+        const inputDelta = right.querySelectorAll('input[type="file"]:not([disabled])').length
+          - left.querySelectorAll('input[type="file"]:not([disabled])').length;
+        return inputDelta || elementDepth(right) - elementDepth(left);
+      })[0] || null;
+  }
+
   function findLatestVisibleDialog() {
-    const dialogs = [...document.querySelectorAll(".el-dialog,[role='dialog'],.el-popup-parent--hidden")]
+    const uploadDialog = findVisibleUploadDialog();
+    if (uploadDialog) return uploadDialog;
+    const dialogs = [...document.querySelectorAll(".el-dialog,[role='dialog']")]
       .filter(isVisible);
     return dialogs[dialogs.length - 1] || null;
   }
@@ -600,20 +653,102 @@
     };
   }
 
-  function closeDialogWithoutConfirm() {
-    const dialog = findLatestVisibleDialog();
-    const cancel = findVisibleElementByText("取消", "button,.el-button");
-    if (cancel) {
-      clickElement(cancel);
-      return { closedBy: "cancel" };
+  function dialogVisibilityRoot(dialog) {
+    if (!dialog) return null;
+    return dialog.closest?.(".el-dialog__wrapper,.el-overlay,[role='presentation']") || dialog;
+  }
+
+  function isDialogOpen(dialog) {
+    const root = dialogVisibilityRoot(dialog);
+    if (!dialog?.isConnected || !root?.isConnected) return false;
+    for (const element of [dialog, root]) {
+      const style = getComputedStyle(element);
+      if (style.display === "none" || style.visibility === "hidden" || element.getAttribute("aria-hidden") === "true") {
+        return false;
+      }
     }
-    const close = dialog?.querySelector?.(".el-dialog__headerbtn,.el-dialog__close,[aria-label='Close']");
-    if (close) {
+    return isVisible(dialog) && isVisible(root);
+  }
+
+  async function waitForDialogClosed(dialog, timeoutMs = 2500) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (!isDialogOpen(dialog)) return true;
+      await sleep(100);
+    }
+    return !isDialogOpen(dialog);
+  }
+
+  function dialogCloseCandidates(dialog) {
+    const standardSelectors = [
+      ".el-dialog__headerbtn",
+      ".el-dialog__close",
+      "button[aria-label='Close']",
+      "button[aria-label='关闭']",
+      "[role='button'][aria-label='Close']",
+      "[role='button'][aria-label='关闭']",
+      "button[title='关闭']",
+      "[class*='dialog-close']",
+      "[class*='modal-close']",
+      "[class*='__close']",
+      "[class$='-close']",
+    ].join(",");
+    const semanticSelectors = "button,.el-button,[role='button'],a,span,i,svg";
+    const candidates = [...dialog.querySelectorAll(standardSelectors)];
+    for (const element of dialog.querySelectorAll(semanticSelectors)) {
+      const label = String(
+        element.getAttribute?.("aria-label")
+        || element.getAttribute?.("title")
+        || textOf(element)
+        || ""
+      ).trim();
+      if (["×", "✕", "关闭", "Close"].includes(label)) candidates.push(element);
+    }
+    const expanded = [];
+    for (const candidate of candidates) {
+      const clickable = candidate.closest?.("button,.el-button,[role='button'],a") || candidate;
+      expanded.push(clickable, candidate);
+    }
+    return [...new Set(expanded)].filter((element) => element && isVisible(element));
+  }
+
+  async function closeDialogWithoutConfirm(targetDialog = null) {
+    const dialog = targetDialog || findLatestVisibleDialog();
+    if (!dialog || !isDialogOpen(dialog)) return { closed: true, closedBy: "not_open", attempts: [] };
+    const attempts = [];
+    const closeCandidates = dialogCloseCandidates(dialog);
+    for (const close of closeCandidates) {
+      attempts.push("close_button");
       clickElement(close);
-      return { closedBy: "close_button" };
+      if (await waitForDialogClosed(dialog, 700)) {
+        return { closed: true, closedBy: "close_button", attempts };
+      }
     }
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    return { closedBy: "escape" };
+    const cancel = [...dialog.querySelectorAll("button,.el-button,[role='button']")]
+      .filter(isVisible)
+      .find((button) => ["取消", "关闭"].includes(textOf(button)));
+    if (cancel) {
+      attempts.push("cancel");
+      clickElement(cancel);
+      if (await waitForDialogClosed(dialog, 700)) return { closed: true, closedBy: "cancel", attempts };
+    }
+    attempts.push("escape");
+    dialog.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }));
+    if (await waitForDialogClosed(dialog, 700)) {
+      return { closed: true, closedBy: "escape", attempts };
+    }
+    const wrapper = dialogVisibilityRoot(dialog);
+    if (wrapper && wrapper !== dialog) {
+      attempts.push("overlay");
+      clickElement(wrapper);
+    }
+    return {
+      closed: await waitForDialogClosed(dialog),
+      closedBy: attempts.includes("overlay") ? "overlay" : "escape",
+      attempts,
+    };
   }
 
   async function listCompaniesFromSelector() {
@@ -680,9 +815,9 @@
         raw: { attrs: item.attrs },
       }));
     result.dialogText = textOf(dialog).slice(0, 1500);
-    result.close = closeDialogWithoutConfirm();
-    await sleep(300);
-    result.ok = true;
+    result.close = await closeDialogWithoutConfirm(dialog);
+    result.ok = Boolean(result.close.closed);
+    result.reason = result.ok ? null : "DIALOG_CLOSE_FAILED";
     return result;
   }
 
@@ -1261,7 +1396,11 @@
 
   async function saveDraftWithNetworkEvidence(networkStart, waitMs = 7000) {
     const saveButtons = findVisibleElementsByText("保存", "button,.el-button,[role='button']");
-    const pageSave = saveButtons.find((button) => !button.disabled && button.getAttribute("aria-disabled") !== "true");
+    const pageSave = saveButtons.find((button) =>
+      !button.closest(".el-dialog,[role='dialog']")
+      && !button.disabled
+      && button.getAttribute("aria-disabled") !== "true"
+    );
     if (!pageSave) return { ok: false, reason: "DRAFT_SAVE_BUTTON_NOT_AVAILABLE", saveNetwork: [] };
     clickElement(pageSave);
     await sleep(1000);
@@ -1277,6 +1416,28 @@
       item.status >= 200 && item.status < 300 && item.businessSuccess
     );
     return { ok, reason: ok ? null : "DRAFT_SAVE_NOT_CONFIRMED", saveNetwork };
+  }
+
+  async function waitForUploadClassification(networkStart, timeoutMs = 8000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const evidence = networkEvidenceSince(networkStart);
+      const attach = evidence.find((item) =>
+        /attach\/upload/.test(item.url || "")
+        && item.status >= 200
+        && item.status < 300
+        && item.businessSuccess
+      );
+      const classify = evidence.find((item) =>
+        /cell_file\/classify_upload/.test(item.url || "")
+        && item.status >= 200
+        && item.status < 300
+        && item.businessSuccess
+      );
+      if (attach && classify) return evidence;
+      await sleep(200);
+    }
+    return networkEvidenceSince(networkStart);
   }
 
   function findDialogFileInputs(dialog) {
@@ -1305,6 +1466,37 @@
         label: "",
       };
     });
+  }
+
+  function directTextOf(node) {
+    return [...(node?.childNodes || [])]
+      .filter((child) => child.nodeType === Node.TEXT_NODE)
+      .map((child) => String(child.textContent || "").replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+  }
+
+  function describeDialogUploadPositions(dialog) {
+    const blocked = new Set(["保存", "取消", "确定", "确认", "批量删除", "关联", "下载"]);
+    const dialogTitle = textOf(dialog.querySelector(".el-dialog__title,[role='heading']"));
+    const candidates = [...dialog.querySelectorAll("label,.el-form-item__label,[role='option'],li,span,div")]
+      .filter(isVisible)
+      .map((node) => directTextOf(node))
+      .map((text) => text.replace(/\s+/g, " ").trim())
+      .filter((text) => text.length >= 1 && text.length <= 40)
+      .filter((text) => text !== dialogTitle && !/-上传$/.test(text))
+      .filter((text) => !blocked.has(text))
+      .filter((text) => !/支持扩展名|上传文件|取消选择|请选择/.test(text))
+      .filter((text) => !/\.(pdf|docx?|xlsx?|xlsm|jpg|jpeg|png)$/i.test(text))
+      .filter((text) => !/^[\d\s.,:/_-]+$/.test(text));
+    const unique = [...new Set(candidates)];
+    const inputCount = findDialogFileInputs(dialog).length;
+    const fallback = Array.from({ length: inputCount }, (_, index) => `位置 ${index + 1}`);
+    return Array.from({ length: inputCount }, (_, index) => ({
+      index,
+      label: unique[index] || fallback[index],
+    }));
   }
 
   function selectedDialogFiles(dialog) {
@@ -1345,18 +1537,23 @@
   function locateAuditUploadCell(payload) {
     const host = document.querySelector(".spreadWrapper");
     const spread = window.GC?.Spread?.Sheets?.findControl?.(host);
-    const sheet = spread?.getActiveSheet?.();
+    const sheet = resolveSheet(spread, payload?.sheetName);
     if (!host || !spread || !sheet) {
       return { ok: false, reason: "SPREAD_CONTROL_NOT_READY" };
     }
     const fieldTitle = String(payload?.fieldTitle || FIELD_TITLE).trim();
     const columnCount = Number(sheet.getColumnCount?.() || 0);
-    let col = -1;
-    for (let candidate = 0; candidate < columnCount; candidate += 1) {
-      const title = String(sheet.getText?.(0, candidate) || sheet.getValue?.(0, candidate) || "").trim();
-      if (title === fieldTitle) {
-        col = candidate;
-        break;
+    const requestedColumn = Number(payload?.fieldColumn);
+    let col = Number.isInteger(requestedColumn) && requestedColumn >= 0 && requestedColumn < columnCount
+      ? requestedColumn
+      : -1;
+    if (col < 0) {
+      for (let candidate = 0; candidate < columnCount; candidate += 1) {
+        const title = String(sheet.getText?.(0, candidate) || sheet.getValue?.(0, candidate) || "").trim();
+        if (title === fieldTitle) {
+          col = candidate;
+          break;
+        }
       }
     }
     if (col < 0) return { ok: false, reason: "FIELD_NOT_FOUND", fieldTitle };
@@ -1388,6 +1585,73 @@
       return { ok: false, reason: "NOT_UPLOAD_CELL", location };
     }
     return { ok: true, ...location, rawCellType: cellType };
+  }
+
+  async function inspectBatchUploadTarget(payload = {}) {
+    const context = collectContext();
+    const gate = assertDraftPage(context);
+    if (!gate.ok) return { ok: false, action: "inspect_batch_upload_target", gate, reason: gate.reason };
+    const host = document.querySelector(".spreadWrapper");
+    const spread = window.GC?.Spread?.Sheets?.findControl?.(host);
+    const sheet = resolveSheet(spread, payload.sheetName);
+    if (!host || !spread || !sheet) {
+      return { ok: false, action: "inspect_batch_upload_target", reason: "SHEET_NOT_FOUND", sheets: context.spread?.sheetNames || [] };
+    }
+    const columnCount = Number(sheet.getColumnCount?.() || 0);
+    const rowCount = Number(sheet.getRowCount?.() || 0);
+    const columns = [];
+    const sampleRows = [];
+    for (let row = 1; row < Math.min(rowCount, 16); row += 1) sampleRows.push(row);
+    for (let col = 0; col < Math.min(columnCount, MAX_HEADER_COLUMNS); col += 1) {
+      const title = String(sheet.getText?.(0, col) || sheet.getValue?.(0, col) || "").trim();
+      const samples = sampleRows.map((row) => {
+        const cellType = sheet.getCellType?.(row, col);
+        return {
+          row: row + 1,
+          domId: cellType?.domId || null,
+          isReadOnly: Boolean(cellType?.isReadOnly),
+          hasActivateEditor: typeof cellType?.activateEditor === "function",
+        };
+      });
+      const uploadSample = samples.find((item) => item.domId === "operation-upload-cell" && item.hasActivateEditor);
+      const manualOnly = title === "查证核对情况";
+      columns.push({
+        col,
+        address: colName(col),
+        title,
+        uploadCapable: !manualOnly && Boolean(uploadSample),
+        manualOnly,
+        sampleRow: uploadSample?.row || null,
+        reason: manualOnly
+          ? "该列暂由人工填写"
+          : (uploadSample ? null : (title ? "未识别为 operation-upload-cell" : "列标题为空")),
+      });
+    }
+    return {
+      ok: true,
+      action: "inspect_batch_upload_target",
+      route: context.route,
+      sheetName: sheet.name?.() || "",
+      sheets: context.spread?.sheetNames || [],
+      rowCount,
+      columns,
+      security: { readOnly: true, writesPerformed: false, credentialsCaptured: false },
+    };
+  }
+
+  async function inspectBatchUploadPositions(payload = {}) {
+    const preview = await prepareAuditAttachmentUpload(payload);
+    return {
+      ...preview,
+      action: "inspect_batch_upload_positions",
+      positions: preview.dialog?.positions || [],
+      security: {
+        ...(preview.security || {}),
+        readOnly: true,
+        writesPerformed: false,
+        credentialsCaptured: false,
+      },
+    };
   }
 
   async function ensureAuditProcedureForRow(spread, sheet, row, procedureText) {
@@ -1500,10 +1764,12 @@
     result.dialog = {
       text: textOf(dialog).slice(0, 1600),
       inputs: describeDialogFileInputs(dialog),
+      positions: describeDialogUploadPositions(dialog),
     };
-    result.ok = true;
     result.steps = [{ ok: true, step: "locate_upload_dialog", message: "已打开评估核实附件分类弹窗，未注入文件。" }];
-    closeDialogWithoutConfirm();
+    result.dialogClose = await closeDialogWithoutConfirm(dialog);
+    result.ok = Boolean(result.dialogClose.closed);
+    result.reason = result.ok ? null : "UPLOAD_DIALOG_CLOSE_FAILED";
     return result;
   }
 
@@ -1520,7 +1786,7 @@
   }
 
   async function uploadAuditAttachment(payload) {
-    closeDialogWithoutConfirm();
+    const initialDialogClose = await closeDialogWithoutConfirm();
     await sleep(200);
     const context = collectContext();
     const gate = assertDraftPage(context);
@@ -1538,6 +1804,9 @@
       },
     };
     if (!gate.ok) return result;
+    if (!initialDialogClose.closed && findLatestVisibleDialog()) {
+      return { ...result, ok: false, reason: "UPLOAD_DIALOG_BLOCKING_NEXT", dialogClose: initialDialogClose };
+    }
     if (payload?.confirmText !== "确认上传并保存") {
       return { ...result, ok: false, reason: "UPLOAD_CONFIRM_TEXT_REQUIRED" };
     }
@@ -1589,7 +1858,7 @@
     const residualFiles = selectedDialogFiles(dialog);
     const dialogTextBeforeInject = textOf(dialog).slice(0, 1600);
     if (residualFiles.length || (payload.file?.name && dialogTextBeforeInject.includes(payload.file.name))) {
-      closeDialogWithoutConfirm();
+      await closeDialogWithoutConfirm(dialog);
       return {
         ...result,
         ok: false,
@@ -1642,8 +1911,7 @@
     clickElement(saveDialogButton);
     result.security.uploadPerformed = true;
     result.steps.push({ ok: true, step: "click_upload_dialog_save" });
-    await sleep(8000);
-    const afterUploadNetwork = networkEvidenceSince(networkStart);
+    const afterUploadNetwork = await waitForUploadClassification(networkStart);
     result.uploadNetwork = afterUploadNetwork;
     const attach = afterUploadNetwork.find((item) =>
       /attach\/upload/.test(item.url || "")
@@ -1668,30 +1936,77 @@
       };
     }
     result.steps.push({ ok: true, step: "upload_and_classify", attachmentUploaded: true, classificationGenerated: true });
-    if (isVisible(dialog)) {
-      return {
-        ...result,
-        ok: false,
-        reason: "UPLOAD_DIALOG_DID_NOT_CLOSE",
-        dialogText: textOf(dialog).slice(0, 1600),
-      };
-    }
+    result.dialogClose = await closeDialogWithoutConfirm(dialog);
+    result.dialogCloseWarning = result.dialogClose.closed ? null : "UPLOAD_DIALOG_CLOSE_PENDING";
 
-    const draftSaveResult = await saveDraftWithNetworkEvidence(networkStart, 8000);
     const finalNetwork = networkEvidenceSince(networkStart);
-    const draftSave = draftSaveResult.saveNetwork.find((item) =>
-      item.status >= 200 && item.status < 300 && item.businessSuccess
-    );
     const after = locateAuditUploadCell(payload);
     const afterText = after.ok ? { text: after.text, value: after.value, tag: after.tag } : null;
     const afterMessages = getPageMessages();
     result.saveNetwork = finalNetwork.filter((item) => /assignment_draft\/save/.test(item.url || ""));
     result.after = afterText;
     result.messages = afterMessages;
+    result.readbackConsistent = Boolean(afterText?.text || afterText?.value || afterText?.tag);
+    if (payload?.deferSave) {
+      result.saveDeferred = true;
+      result.security.writesPerformed = false;
+      result.ok = Boolean(attach && classify);
+      result.reason = result.ok ? null : "UPLOAD_OR_CLASSIFY_NOT_CONFIRMED";
+      return result;
+    }
+    const draftSaveResult = await saveDraftWithNetworkEvidence(networkStart, 8000);
+    const draftSave = draftSaveResult.saveNetwork.find((item) =>
+      item.status >= 200 && item.status < 300 && item.businessSuccess
+    );
+    result.saveNetwork = [...result.saveNetwork, ...draftSaveResult.saveNetwork];
     result.readbackConsistent = Boolean(draftSave && (afterText?.text || afterText?.value || afterText?.tag));
     result.security.writesPerformed = Boolean(draftSave);
     result.ok = Boolean(draftSave && result.readbackConsistent);
     result.reason = result.ok ? null : (draftSave ? "DRAFT_CELL_READBACK_EMPTY" : "DRAFT_SAVE_NOT_CONFIRMED");
+    return result;
+  }
+
+  async function saveBatchUploadDraft(payload = {}) {
+    const dialogClose = await closeDialogWithoutConfirm();
+    const context = collectContext();
+    const gate = assertDraftPage(context);
+    const result = {
+      ok: gate.ok,
+      action: "save_batch_upload_draft",
+      collectedAt: new Date().toISOString(),
+      gate,
+      security: { credentialsCaptured: false, uploadPerformed: false, writesPerformed: false },
+    };
+    if (!gate.ok) return result;
+    result.dialogClose = dialogClose;
+    if (!dialogClose.closed && findLatestVisibleDialog()) {
+      return { ...result, ok: false, reason: "UPLOAD_DIALOG_BLOCKING_SAVE" };
+    }
+    if (payload?.confirmText !== "确认批量上传并保存") {
+      return { ...result, ok: false, reason: "BATCH_UPLOAD_CONFIRM_TEXT_REQUIRED" };
+    }
+    if (context.page?.saveButton?.disabled || context.page?.lockText || context.page?.permissionText) {
+      return { ...result, ok: false, reason: "READONLY_OR_LOCKED" };
+    }
+    const rowNumbers = [...new Set((Array.isArray(payload.rowNumbers) ? payload.rowNumbers : [])
+      .map(Number)
+      .filter((row) => Number.isInteger(row) && row >= 2))];
+    if (!rowNumbers.length) return { ...result, ok: false, reason: "BATCH_UPLOAD_ROWS_REQUIRED" };
+    installUploadNetworkMonitor();
+    const networkStart = window.__tianyuanWorkbenchUploadNetworkLog.length;
+    const save = await saveDraftWithNetworkEvidence(networkStart, 8000);
+    const readbacks = rowNumbers.map((rowNumber) => {
+      const target = locateAuditUploadCell({ ...payload, rowNumber });
+      const after = target.ok ? { text: target.text, value: target.value, tag: target.tag } : null;
+      return { rowNumber, ok: Boolean(target.ok && (after?.text || after?.value || after?.tag)), after };
+    });
+    const readbackConsistent = readbacks.every((item) => item.ok);
+    result.saveNetwork = save.saveNetwork || [];
+    result.readbacks = readbacks;
+    result.readbackConsistent = Boolean(save.ok && readbackConsistent);
+    result.security.writesPerformed = Boolean(save.ok);
+    result.ok = result.readbackConsistent;
+    result.reason = result.ok ? null : (save.ok ? "DRAFT_CELL_READBACK_EMPTY" : save.reason || "DRAFT_SAVE_NOT_CONFIRMED");
     return result;
   }
 
@@ -1744,10 +2059,11 @@
         uploadNetwork: rowResult?.uploadNetwork || [],
         saveNetwork: rowResult?.saveNetwork || [],
         readbackConsistent: Boolean(rowResult?.readbackConsistent),
+        saveDeferred: Boolean(rowResult?.saveDeferred),
       });
       if (rowResult?.security?.uploadPerformed) result.security.uploadPerformed = true;
       if (rowResult?.security?.writesPerformed) result.security.writesPerformed = true;
-      closeDialogWithoutConfirm();
+      await closeDialogWithoutConfirm();
       await sleep(800);
     }
     const successRows = result.rows.filter((row) => row.ok);
@@ -2727,8 +3043,17 @@
     if (payload?.action === "preview_audit_attachment_upload") {
       return await prepareAuditAttachmentUpload(payload);
     }
+    if (payload?.action === "inspect_batch_upload_target") {
+      return await inspectBatchUploadTarget(payload);
+    }
+    if (payload?.action === "inspect_batch_upload_positions") {
+      return await inspectBatchUploadPositions(payload);
+    }
     if (payload?.action === "upload_audit_attachment") {
       return await uploadAuditAttachment(payload);
+    }
+    if (payload?.action === "save_batch_upload_draft") {
+      return await saveBatchUploadDraft(payload);
     }
     if (payload?.action === "batch_upload_audit_attachments") {
       return await batchUploadAuditAttachments(payload);

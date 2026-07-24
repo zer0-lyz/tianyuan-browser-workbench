@@ -1,4 +1,4 @@
-const ADAPTER_VERSION = "2026-07-24-page-tree-mirror-v21-clear-audit-test-data";
+const ADAPTER_VERSION = "2026-07-24-page-tree-mirror-v26-upload-dialog-root";
 const INJECTED_SCRIPT_ID = `tianyuan-workbench-page-adapter-${ADAPTER_VERSION}`;
 const EXT_REQUEST_TYPE = "TIANYUAN_WORKBENCH_GET_CONTEXT_V2";
 const EXT_ACTION_REQUEST_TYPE = "TIANYUAN_WORKBENCH_RUN_ACTION_V2";

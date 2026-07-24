@@ -1,6 +1,6 @@
 # 天源浏览器连接器
 
-版本 `0.4.0`。此插件把已注册的本机 Agent 路由到其有权访问的天源浏览器页面。
+版本 `0.4.1`。此插件把已注册的本机 Agent 路由到其有权访问的天源浏览器页面。
 
 ## 来源与绑定
 
@@ -17,9 +17,9 @@ Connector 启动时从本机 `runtime/agent-config.json` 或 `TIANYUAN_CONNECTOR
 
 安装脚本会注册 Codex 本机来源。侧栏仍可自动读取本机 Codex 项目和对话目录，并将当前页面绑定到工作区或对话。
 
-## WorkBuddy 手动配置
+## WorkBuddy 配置
 
-当前没有假设或伪造 WorkBuddy 项目、对话或窗口 API。请在侧栏“Agent 控制者管理”创建 WorkBuddy 手动来源，填写本机可见的工作区和对话标识。侧栏会生成一个本机 `agent-config.json` 路径，可用于通用 stdio MCP：
+侧栏在发现 WorkBuddy 手动来源后，会只读加载 `~/.workbuddy/workbuddy.db` 中的工作区和会话元数据。用户可选择项目和对话后确认绑定；不读取对话正文，也不依赖窗口扫描。若本机目录不可用，仍可在“Agent 控制者管理”中手动填写工作区和对话标识。侧栏会生成一个本机 `agent-config.json` 路径，可用于通用 stdio MCP：
 
 ```json
 {
@@ -41,6 +41,10 @@ Connector 启动时从本机 `runtime/agent-config.json` 或 `TIANYUAN_CONNECTOR
 ## 页面控制权
 
 同一页面可以有多个 `read` Agent，但只能有一个 `control` Agent。切换控制权必须由侧栏明确确认；旧控制者未执行或已领取的队列动作会标记为 `AGENT_CONTROL_REVOKED`，不会继续执行。
+
+## 本机脚本模式
+
+浏览器扩展会自动注册 `tianyuan-local-script` 来源。批量上传、清理和其他侧栏写入模块可以在没有外部 Agent MCP 的情况下使用；首次执行前，侧栏会请求将当前页面控制权授予“天源工作台本机脚本”。该来源只接受已安装扩展的身份请求，不提供 MCP credential，也不会把 token 写入文件。Native Host 和本机 Bridge 仍需通过安装脚本完成注册。
 
 ## 固定能力
 

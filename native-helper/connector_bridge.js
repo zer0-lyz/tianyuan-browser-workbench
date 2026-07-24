@@ -8,7 +8,7 @@ const os = require("node:os");
 const path = require("node:path");
 
 const PROTOCOL_VERSION = "connector-agent-binding-v3";
-const BUILD_ID = "2026-07-24-browser-contract-v1";
+const BUILD_ID = "2026-07-24-browser-contract-v2-capability-matrix";
 const ACTION_TTL_MS = 5 * 60 * 1000;
 const ACTION_RESULT_TTL_MS = 15 * 60 * 1000;
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
@@ -54,7 +54,7 @@ function safeContext(value = {}) {
 }
 function safeClient(value = {}) { return { name: limited(value.name || "tianyuan-browser-workbench", 120), version: limited(value.version, 80), extensionId: limited(value.extensionId, 120) }; }
 function publicSource(source) {
-  return source ? { agentId: source.agentId, providerId: source.providerId, displayName: source.displayName, installationId: source.installationId, manual: Boolean(source.manual), createdAt: source.createdAt || null, updatedAt: source.updatedAt || null, lastSeenAt: source.lastSeenAt || null } : null;
+  return source ? { agentId: source.agentId, providerId: source.providerId, displayName: source.displayName, installationId: source.installationId, local: Boolean(source.local), manual: Boolean(source.manual), createdAt: source.createdAt || null, updatedAt: source.updatedAt || null, lastSeenAt: source.lastSeenAt || null } : null;
 }
 function publicBinding(binding) {
   return binding ? { bindingId: binding.bindingId, agentId: binding.agentId, providerId: binding.providerId, displayName: binding.displayName, installationId: binding.installationId, workspaceId: binding.workspaceId, workspaceName: binding.workspaceName, workspacePath: binding.workspacePath, conversationId: binding.conversationId, conversationTitle: binding.conversationTitle, scope: binding.scope, accessMode: binding.accessMode, pageKey: binding.pageKey, manualBinding: Boolean(binding.manualBinding), createdAt: binding.createdAt || null, updatedAt: binding.updatedAt || null } : null;
@@ -93,10 +93,14 @@ function resolveCredential(reference) {
 
 function createBridge(options = {}) {
   const home = os.homedir();
-  const bindingsPath = options.bindingsPath || process.env.TIANYUAN_CONNECTOR_BINDINGS_PATH || path.join(home, ".tianyuan-workbench", "native-helper", "connector-bindings.json");
-  const sourcesPath = options.sourcesPath || process.env.TIANYUAN_CONNECTOR_AGENT_SOURCES_PATH || path.join(home, ".tianyuan-workbench", "native-helper", "agent-sources.json");
-  const configDir = options.configDir || process.env.TIANYUAN_CONNECTOR_AGENT_CONFIG_DIR || path.join(home, ".tianyuan-workbench", "agent-sources");
+  const runtimeRoot = process.platform === "win32"
+    ? path.join(process.env.LOCALAPPDATA || path.join(home, "AppData", "Local"), "TianyuanWorkbench")
+    : path.join(home, ".tianyuan-workbench");
+  const bindingsPath = options.bindingsPath || process.env.TIANYUAN_CONNECTOR_BINDINGS_PATH || path.join(runtimeRoot, "native-helper", "connector-bindings.json");
+  const sourcesPath = options.sourcesPath || process.env.TIANYUAN_CONNECTOR_AGENT_SOURCES_PATH || path.join(runtimeRoot, "native-helper", "agent-sources.json");
+  const configDir = options.configDir || process.env.TIANYUAN_CONNECTOR_AGENT_CONFIG_DIR || path.join(runtimeRoot, "agent-sources");
   const codexStatePath = options.codexStatePath || process.env.TIANYUAN_CODEX_GLOBAL_STATE_PATH || path.join(home, ".codex", ".codex-global-state.json");
+  const workbuddyDbPath = options.workbuddyDbPath || process.env.TIANYUAN_WORKBUDDY_DB_PATH || path.join(home, ".workbuddy", "workbuddy.db");
   const compatibilityPath = options.compatibilityPath || process.env.TIANYUAN_CONNECTOR_RUNTIME_COMPATIBILITY_PATH || path.join(__dirname, "runtime-compat.json");
   const platformUrl = process.env.TIANYUAN_CONNECTOR_PLATFORM_URL || "http://127.0.0.1:40315";
   const sessions = new Map(); const actions = new Map(); const bindings = new Map(); const sources = new Map();
@@ -217,21 +221,44 @@ function createBridge(options = {}) {
     return binding;
   }
   function capabilities() { return {
-    agentSourceRegistration: { supported: true, level: "routing", label: "已注册 Agent 来源" }, agentBinding: { supported: true, level: "routing", label: "工作区或对话页面绑定" }, sharedRead: { supported: true, level: "read", label: "多 Agent 只读访问" }, exclusiveControl: { supported: true, level: "confirm", label: "页面唯一控制权" }, contextRead: { supported: true, level: "read", label: "读取当前页面上下文" }, previewAuditAttachmentUpload: { supported: true, level: "preview", label: "评估核实附件上传预演" }, executeAuditAttachmentUpload: { supported: true, level: "confirm", label: "确认后上传评估核实附件并保存" }, inspectAuditCheckRow: { supported: true, level: "read", label: "读取查证核对情况" }, executeAuditCheckResult: { supported: true, level: "confirm", label: "确认后填写查证核对情况并保存" }, genericBrowserAutomation: { supported: false, level: "unsupported", label: "任意浏览器自动操作" }, arbitraryJavaScript: { supported: false, level: "unsupported", label: "任意 JavaScript 执行" } }; }
+    agentSourceRegistration: { supported: true, level: "routing", label: "已注册 Agent 来源" },
+    agentBinding: { supported: true, level: "routing", label: "绑定 Agent 工作区或对话" },
+    contextRead: { supported: true, level: "read", label: "读取当前页面上下文" },
+    projectBinding: { supported: true, level: "read", label: "绑定项目与标签页" },
+    companyList: { supported: true, level: "read", label: "读取公司清单" },
+    subjectList: { supported: true, level: "read", label: "读取科目清单" },
+    subjectTreeMirror: { supported: true, level: "read", label: "镜像页面显示科目树" },
+    previewBatchSave: { supported: true, level: "preview", label: "批量保存预演" },
+    previewExitEdit: { supported: true, level: "preview", label: "批量退出编辑预演" },
+    executeBatchSave: { supported: true, level: "confirm", label: "确认后批量保存" },
+    executeExitEdit: { supported: true, level: "confirm", label: "确认后批量退出编辑" },
+    previewAuditAttachmentUpload: { supported: true, level: "preview", label: "评估核实附件上传预演" },
+    executeAuditAttachmentUpload: { supported: true, level: "confirm", label: "确认后上传评估核实附件并保存" },
+    batchAuditAttachmentUpload: { supported: true, level: "confirm", label: "确认后批量上传评估核实附件并保存" },
+    clearAuditTestRows: { supported: true, level: "confirm", label: "确认后清理测试数据并保存" },
+    inspectAuditCheckRow: { supported: true, level: "read", label: "读取查证核对情况" },
+    executeAuditCheckResult: { supported: true, level: "confirm", label: "确认后填写查证核对情况并保存" },
+    scanAuditIndexCheckRows: { supported: true, level: "read", label: "批量扫描查证资料索引核查状态" },
+    batchAuditCheckResult: { supported: true, level: "confirm", label: "确认后批量填写查证核对情况并保存" },
+    cliExport: { supported: true, level: "local", label: "CLI 表格导出" },
+    printFormat: { supported: true, level: "local", label: "本地打印格式处理" },
+    genericBrowserAutomation: { supported: false, level: "unsupported", label: "任意浏览器自动操作" },
+    arbitraryJavaScript: { supported: false, level: "unsupported", label: "任意 JavaScript 执行" },
+  }; }
   function prune() { const instant = Date.now(); for (const [key, session] of sessions) if (instant - Date.parse(session.lastSeenAt) > 120000) sessions.delete(key); for (const [key, action] of actions) { const age = Date.parse(action.completedAt || action.createdAt); const ttl = action.completedAt ? ACTION_RESULT_TTL_MS : ACTION_TTL_MS; if (!Number.isFinite(age) || instant - age > ttl) actions.delete(key); } }
   function attachment(filePath) { const resolved = path.resolve(String(filePath || "")); if (!path.isAbsolute(String(filePath || ""))) throw error("ATTACHMENT_PATH_MUST_BE_ABSOLUTE"); const stat = fs.statSync(resolved); if (!stat.isFile()) throw error("ATTACHMENT_NOT_A_FILE"); if (stat.size <= 0) throw error("ATTACHMENT_FILE_EMPTY"); if (stat.size > MAX_ATTACHMENT_BYTES) throw error("ATTACHMENT_FILE_TOO_LARGE"); const extension = path.extname(resolved).toLowerCase(); if (!ATTACHMENT_EXTENSIONS.has(extension)) throw error("ATTACHMENT_FILE_TYPE_NOT_ALLOWED"); return { path: resolved, name: path.basename(resolved), size: stat.size, type: "application/octet-stream" }; }
-  function actionIsWrite(type) { return ["upload_audit_attachment", "batch_upload_audit_attachments", "clear_audit_test_rows", "set_audit_check_result", "batch_set_audit_check_results"].includes(type); }
+  function actionIsWrite(type) { return ["upload_audit_attachment", "batch_upload_audit_attachments", "save_batch_upload_draft", "clear_audit_test_rows", "set_audit_check_result", "batch_set_audit_check_results"].includes(type); }
   function createAction(session, agent, input) {
-    const type = limited(input.action, 80); const allowed = new Set(["preview_audit_attachment_upload", "upload_audit_attachment", "batch_upload_audit_attachments", "inspect_audit_check_row", "set_audit_check_result", "scan_audit_index_check_rows", "batch_set_audit_check_results", "clear_audit_test_rows"]); if (!allowed.has(type)) throw error("ACTION_NOT_ALLOWED");
+    const type = limited(input.action, 80); const allowed = new Set(["preview_audit_attachment_upload", "upload_audit_attachment", "batch_upload_audit_attachments", "save_batch_upload_draft", "inspect_audit_check_row", "set_audit_check_result", "scan_audit_index_check_rows", "batch_set_audit_check_results", "clear_audit_test_rows"]); if (!allowed.has(type)) throw error("ACTION_NOT_ALLOWED");
     const binding = authorize(session, agent, input, actionIsWrite(type)); if (session.status !== "online") throw error("SESSION_NOT_ONLINE", 409); if (!session.binding.projectId || !session.binding.companyId || session.binding.pageType !== "asset-draft") throw error("ASSET_DRAFT_SESSION_REQUIRED", 409);
     const rowNumbers = Array.isArray(input.rowNumbers) ? input.rowNumbers.map(Number).filter((row) => Number.isInteger(row) && row >= 2 && row <= 100000) : [];
     const rowNumber = Number(input.rowNumber); if (!rowNumbers.length && !["scan_audit_index_check_rows"].includes(type) && (!Number.isInteger(rowNumber) || rowNumber < 2)) throw error("ROW_NUMBER_INVALID");
     const subjectCode = limited(input.subjectCode === "current" ? "" : input.subjectCode || session.binding.subjectCode, 120); if (subjectCode && !/^C\d+(?:-\d+)*$/.test(subjectCode)) throw error("SUBJECT_CODE_INVALID");
-    if (["upload_audit_attachment", "batch_upload_audit_attachments"].includes(type) && input.confirmText !== (type === "batch_upload_audit_attachments" ? "确认批量上传并保存" : "确认上传并保存")) throw error("UPLOAD_CONFIRM_TEXT_REQUIRED");
+    if (["upload_audit_attachment", "batch_upload_audit_attachments", "save_batch_upload_draft"].includes(type) && input.confirmText !== (type === "upload_audit_attachment" ? "确认上传并保存" : "确认批量上传并保存")) throw error("UPLOAD_CONFIRM_TEXT_REQUIRED");
     if (type === "clear_audit_test_rows" && input.confirmText !== "确认清理测试数据并保存") throw error("CLEAR_TEST_DATA_CONFIRM_TEXT_REQUIRED");
     if (type === "set_audit_check_result" && input.confirmText !== "确认填写核对情况并保存") throw error("AUDIT_CHECK_CONFIRM_TEXT_REQUIRED");
     if (type === "batch_set_audit_check_results" && input.confirmText !== "确认批量填写核对情况并保存") throw error("BATCH_AUDIT_CHECK_CONFIRM_TEXT_REQUIRED");
-    const action = { actionId: id("action"), sessionId: session.sessionId, bindingId: binding.bindingId, agentId: agent.agentId, providerId: agent.providerId, installationId: agent.installationId, controlEpoch: binding.updatedAt, type, status: "queued", target: { projectId: session.binding.projectId, companyId: session.binding.companyId, subjectCode, rowNumber: rowNumbers.length ? 0 : rowNumber, rowNumbers, expectedIndexValues: Array.isArray(input.expectedIndexValues) ? input.expectedIndexValues.map((value) => limited(value, 120)) : [], fieldTitle: limited(input.fieldTitle || (type.includes("check") ? "查证核对情况" : "查证资料索引"), 80), resultText: limited(input.resultText, 80), procedureText: limited(input.procedureText, 80), moduleName: limited(input.moduleName, 80), moduleIndex: Number.isInteger(input.moduleIndex) ? input.moduleIndex : 0, maxRows: Math.max(2, Math.min(Number(input.maxRows || 500), 5000)) }, file: ["upload_audit_attachment", "batch_upload_audit_attachments"].includes(type) ? attachment(input.filePath) : null, confirmText: limited(input.confirmText, 80), createdAt: now() }; actions.set(action.actionId, action); return action;
+    const action = { actionId: id("action"), sessionId: session.sessionId, bindingId: binding.bindingId, agentId: agent.agentId, providerId: agent.providerId, installationId: agent.installationId, controlEpoch: binding.updatedAt, type, status: "queued", target: { projectId: session.binding.projectId, companyId: session.binding.companyId, subjectCode, rowNumber: rowNumbers.length ? 0 : rowNumber, rowNumbers, expectedIndexValues: Array.isArray(input.expectedIndexValues) ? input.expectedIndexValues.map((value) => limited(value, 120)) : [], fieldTitle: limited(input.fieldTitle || (type.includes("check") ? "查证核对情况" : "查证资料索引"), 80), fieldColumn: Number.isInteger(input.fieldColumn) ? input.fieldColumn : null, sheetName: limited(input.sheetName, 200), resultText: limited(input.resultText, 80), procedureText: limited(input.procedureText, 80), moduleName: limited(input.moduleName, 80), moduleIndex: Number.isInteger(input.moduleIndex) ? input.moduleIndex : 0, deferSave: Boolean(input.deferSave), maxRows: Math.max(2, Math.min(Number(input.maxRows || 500), 5000)) }, file: ["upload_audit_attachment", "batch_upload_audit_attachments"].includes(type) ? attachment(input.filePath) : null, confirmText: limited(input.confirmText, 80), createdAt: now() }; actions.set(action.actionId, action); return action;
   }
   function publicAction(action) { return action ? { actionId: action.actionId, sessionId: action.sessionId, bindingId: action.bindingId, type: action.type, status: action.status, target: action.target, file: action.file ? { name: action.file.name, size: action.file.size, type: action.file.type } : null, createdAt: action.createdAt, claimedAt: action.claimedAt || null, completedAt: action.completedAt || null, cancellationReason: action.cancellationReason || null, result: action.result || null } : null; }
 
@@ -273,6 +300,28 @@ function createBridge(options = {}) {
     const source = { agentId: limited(input.agentId || `${providerId}-${randomUUID()}`, 160), providerId, displayName: limited(input.displayName || providerId, 120), installationId, credentialRef: createCredentialRef(providerId, installationId), manual: true, createdAt: now(), updatedAt: now(), lastSeenAt: null };
     sources.set(key, source); saveSources(); fs.mkdirSync(configDir, { recursive: true, mode: 0o700 }); const configPath = path.join(configDir, `${providerId}-${installationId}.json`); writeJson(configPath, { providerId, installationId, credentialRef: source.credentialRef }); return { source, configPath };
   }
+  function localScriptSource(extensionId) {
+    const providerId = "tianyuan-local-script";
+    const installationId = `extension-${limited(extensionId, 120)}`;
+    const key = `${providerId}|${installationId}`;
+    const existing = sources.get(key);
+    const timestamp = now();
+    const source = {
+      agentId: existing?.agentId || `local-script-${limited(extensionId, 120)}`,
+      providerId,
+      displayName: "天源工作台本机脚本",
+      installationId,
+      local: true,
+      manual: false,
+      credentialRef: "extension-bound",
+      createdAt: existing?.createdAt || timestamp,
+      updatedAt: timestamp,
+      lastSeenAt: timestamp,
+    };
+    sources.set(key, source);
+    saveSources();
+    return source;
+  }
   async function codexCatalog() {
     try { const response = await fetch(`${platformUrl}/api/catalog`); const payload = await response.json(); if (response.ok && payload?.ok) return { projects: Array.isArray(payload.projects) ? payload.projects : [], threads: Array.isArray(payload.threads) ? payload.threads : [], updatedAt: payload.updatedAt || null, source: "connector-platform" }; } catch { /* local fallback */ }
     const state = readJson(codexStatePath, {}); const projects = new Map(); const add = (item = {}) => { const projectId = limited(item.projectId || item.id, 200); if (!projectId) return; const projectPath = normalizePath(item.projectPath || item.path || item.cwd || item.rootPaths?.[0]); projects.set(projectId, { projectId, projectName: limited(item.projectName || item.name || path.basename(projectPath) || projectId, 200), projectPath, path: projectPath, updatedAt: Number(item.updatedAt || 0) || null }); };
@@ -281,15 +330,89 @@ function createBridge(options = {}) {
     return { projects: [...projects.values()], threads, updatedAt: now(), source: "local-codex-state" };
   }
 
+  function sqliteRows(query) {
+    if (!fs.existsSync(workbuddyDbPath)) throw error("WORKBUDDY_CATALOG_UNAVAILABLE", 503);
+    try {
+      const output = execFileSync("sqlite3", ["-json", workbuddyDbPath, query], {
+        encoding: "utf8",
+        maxBuffer: 2 * 1024 * 1024,
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+      return output ? JSON.parse(output) : [];
+    } catch {
+      throw error("WORKBUDDY_CATALOG_UNAVAILABLE", 503);
+    }
+  }
+
+  async function workbuddyCatalog() {
+    const workspaces = sqliteRows("SELECT path, last_opened_at FROM workspaces ORDER BY last_opened_at DESC LIMIT 100;");
+    const sessions = sqliteRows("SELECT id, cwd, COALESCE(NULLIF(custom_title, ''), NULLIF(title, ''), '') AS title, status, created_at, updated_at, last_activity_at, project_id FROM sessions WHERE deleted_at IS NULL ORDER BY COALESCE(last_activity_at, updated_at, created_at) DESC LIMIT 200;");
+    const projects = new Map();
+    const addProject = (input = {}) => {
+      const projectPath = normalizePath(input.path || input.cwd);
+      const explicitId = limited(input.projectId, 200);
+      const projectId = explicitId || (projectPath ? `workbuddy-workspace:${projectPath}` : "");
+      if (!projectId) return null;
+      const projectName = limited(input.projectName || path.basename(projectPath) || projectId, 200);
+      const previous = projects.get(projectId);
+      const project = {
+        projectId,
+        projectName,
+        projectPath,
+        path: projectPath,
+        updatedAt: Number(input.updatedAt || previous?.updatedAt || 0) || null,
+        source: explicitId ? "workbuddy-db" : "workbuddy-derived-local",
+      };
+      projects.set(projectId, project);
+      return project;
+    };
+
+    for (const workspace of workspaces) {
+      addProject({ path: workspace?.path, updatedAt: workspace?.last_opened_at });
+    }
+
+    const threads = sessions.map((session) => {
+      const project = addProject({
+        projectId: session?.project_id,
+        cwd: session?.cwd,
+        updatedAt: session?.last_activity_at || session?.updated_at || session?.created_at,
+      });
+      if (!session?.id || !project) return null;
+      return {
+        threadId: limited(session.id, 200),
+        title: limited(session.title || `WorkBuddy 对话 ${String(session.id).slice(0, 8)}`, 300),
+        projectId: project.projectId,
+        projectName: project.projectName,
+        projectPath: project.projectPath,
+        cwd: project.projectPath,
+        status: limited(session.status, 80),
+        recencyAt: Number(session.last_activity_at || session.updated_at || session.created_at || 0) || null,
+        source: "workbuddy-db",
+      };
+    }).filter(Boolean);
+
+    return {
+      projects: [...projects.values()].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0)),
+      threads,
+      updatedAt: now(),
+      source: "workbuddy-local-db",
+    };
+  }
+
+  async function agentCatalog(providerId = "codex") {
+    return providerId === "workbuddy" ? workbuddyCatalog() : codexCatalog();
+  }
+
   async function handle(req, res) {
     const origin = allowedOrigin(req); const suppliedOrigin = String(req.headers.origin || ""); if (suppliedOrigin && !origin) return fail(res, error("CONNECTOR_ORIGIN_FORBIDDEN", 403)); if (req.method === "OPTIONS") return json(res, 204, { ok: true }, origin); prune(); loadBindings(); const url = new URL(req.url, "http://127.0.0.1"); const parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
     try {
       if (req.method === "GET" && url.pathname === "/health") return json(res, 200, { ok: true, service: "tianyuan-connector-bridge", protocolVersion: PROTOCOL_VERSION, buildId: BUILD_ID, runtimeCompatibility: compatibility, adapter: "tianyuan-browser", mode: "local", sessionCount: sessions.size, bindingCount: bindings.size, agentSourceCount: sources.size }, origin);
       if (req.method === "GET" && url.pathname === "/api/protocol") return json(res, 200, { ok: true, protocolVersion: PROTOCOL_VERSION, buildId: BUILD_ID, runtimeCompatibility: compatibility, adapter: "tianyuan-browser", capabilities: capabilities(), safety: { genericBrowserAutomation: false, arbitraryJavaScript: false, editLockRequired: true, explicitConfirmationRequired: true, agentBindingRequired: true, singleControlAgentPerPage: true, credentialsStored: false } }, origin);
       if (req.method === "POST" && url.pathname === "/api/agent-sources/register") { const agent = identity(req, true); return json(res, 200, { ok: true, agentIdentity: agent }, origin); }
+      if (req.method === "POST" && url.pathname === "/api/agent-sources/local") { const browser = requireBrowser(req); return json(res, 200, { ok: true, source: publicSource(localScriptSource(browser.extensionId)) }, origin); }
       if (req.method === "GET" && url.pathname === "/api/agent-sources") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); return json(res, 200, { ok: true, sources: [...sources.values()].map((source) => ({ ...publicSource(source), connection: sourceConnection(source) })) }, origin); }
       if (req.method === "POST" && url.pathname === "/api/agent-sources/manual") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const created = manualSource(await body(req)); return json(res, 200, { ok: true, source: publicSource(created.source), workbuddyConfig: { transport: "stdio", command: "node", args: ["~/plugins/tianyuan-browser-connector/runtime/apps/mcp/server.mjs"], env: { TIANYUAN_CONNECTOR_BRIDGE_URL: "http://127.0.0.1:40415", TIANYUAN_CONNECTOR_AGENT_CONFIG_PATH: created.configPath } } }, origin); }
-      if (req.method === "GET" && url.pathname === "/api/catalog") { requireBrowser(req); return json(res, 200, { ok: true, ...(await codexCatalog()) }, origin); }
+      if (req.method === "GET" && url.pathname === "/api/catalog") { requireBrowser(req); const providerId = limited(url.searchParams.get("providerId") || "codex", 80).toLowerCase(); if (!["codex", "workbuddy"].includes(providerId)) throw error("AGENT_PROVIDER_UNSUPPORTED", 400); return json(res, 200, { ok: true, providerId, ...(await agentCatalog(providerId)) }, origin); }
       if (req.method === "POST" && url.pathname === "/api/sessions/register") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const input = await body(req); const sessionId = limited(input.sessionId || id("tianyuan"), 200); const existing = sessions.get(sessionId); const session = { sessionId, status: "online", registeredAt: existing?.registeredAt || now(), lastSeenAt: now(), binding: safePage(input.binding), client: safeClient(input.client), context: safeContext(input.context), capabilities: capabilities() }; sessions.set(sessionId, session); return json(res, 200, { ok: true, session: publicSession(session) }, origin); }
       if (req.method === "GET" && url.pathname === "/api/sessions") { const agent = isBrowser(req) ? null : identity(req, true); const result = [...sessions.values()].filter((session) => !agent || bindingsFor(session.binding).some((binding) => binding.agentId === agent.agentId && binding.providerId === agent.providerId && binding.installationId === agent.installationId)).map((session) => publicSession(session, agent)); return json(res, 200, { ok: true, sessions: result }, origin); }
       if (req.method === "POST" && parts.length === 4 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "heartbeat") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const input = await body(req); session.lastSeenAt = now(); if (input.binding) session.binding = safePage(input.binding); if (input.context) session.context = safeContext(input.context); return json(res, 200, { ok: true, session: publicSession(session) }, origin); }
@@ -300,13 +423,15 @@ function createBridge(options = {}) {
       if (req.method === "DELETE" && parts.length === 4 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "binding") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const target = bindingsFor(session.binding).find((binding) => binding.providerId === "codex"); if (target) { bindings.delete(target.bindingId); cancelControllerActions(target.bindingId); saveBindings(); } return json(res, 200, { ok: true, cleared: Boolean(target), session: publicSession(session) }, origin); }
       if (parts.length === 3 && parts[0] === "api" && parts[1] === "sessions" && req.method === "GET") { const session = sessionForBinding(parts[2]); const agent = isBrowser(req) ? null : identity(req, true); if (agent && !bindingsFor(session.binding).some((binding) => binding.agentId === agent.agentId && binding.providerId === agent.providerId && binding.installationId === agent.installationId)) throw error("AGENT_BINDING_MISMATCH", 403); return json(res, 200, { ok: true, session: publicSession(session, agent) }, origin); }
       if (req.method === "POST" && parts.length === 4 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "actions") { const agent = identity(req, true); const session = sessionForBinding(parts[2]); const action = createAction(session, agent, await body(req)); return json(res, 200, { ok: true, action: publicAction(action), security: { fileContentsReturned: false } }, origin); }
+      if (req.method === "POST" && parts.length === 4 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "ui-actions") { requireBrowser(req); const session = sessionForBinding(parts[2]); const controller = currentController(session); if (!controller) throw error("AGENT_CONTROL_CONFLICT", 409); const input = await body(req); const agent = { agentId: controller.agentId, providerId: controller.providerId, installationId: controller.installationId, displayName: controller.displayName }; const action = createAction(session, agent, { ...input, bindingId: controller.bindingId, projectId: input.projectId || controller.workspaceId, threadId: input.threadId || controller.conversationId }); return json(res, 200, { ok: true, action: publicAction(action), security: { fileContentsReturned: false } }, origin); }
       if (req.method === "GET" && parts.length === 5 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "actions" && parts[4] === "next") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const binding = browserBinding(session, url.searchParams.get("bindingId"), false); const action = [...actions.values()].filter((item) => item.sessionId === session.sessionId && item.bindingId === binding.bindingId && item.status === "queued").sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))[0] || null; if (!action) return json(res, 200, { ok: true, action: null }, origin); if (actionIsWrite(action.type)) browserBinding(session, binding.bindingId, true); action.status = "claimed"; action.claimedAt = now(); const file = action.file ? { name: action.file.name, size: action.file.size, type: action.file.type, base64: fs.readFileSync(action.file.path).toString("base64") } : null; return json(res, 200, { ok: true, action: { ...publicAction(action), payload: { action: action.type, ...action.target, confirmText: action.confirmText, file } }, security: { filePathReturned: false, fileContentsEphemeral: Boolean(file) } }, origin); }
       if (req.method === "POST" && parts.length === 6 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "actions" && parts[5] === "result") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const input = await body(req); const action = actions.get(parts[4]); if (!action || action.sessionId !== session.sessionId) throw error("ACTION_NOT_FOUND", 404); browserBinding(session, input.bindingId, actionIsWrite(action.type)); if (action.status === "cancelled") throw error("AGENT_CONTROL_REVOKED", 409); if (!["claimed", "running"].includes(action.status)) throw error("ACTION_NOT_CLAIMED", 409); action.result = input.result && typeof input.result === "object" ? input.result : {}; action.status = action.result.ok ? "completed" : "failed"; action.completedAt = now(); return json(res, 200, { ok: true, action: publicAction(action) }, origin); }
+      if (req.method === "GET" && parts.length === 5 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "ui-actions") { requireBrowser(req); const session = sessionForBinding(parts[2]); const action = actions.get(parts[4]); const controller = currentController(session); if (!action || action.sessionId !== session.sessionId) throw error("ACTION_NOT_FOUND", 404); if (!controller || action.bindingId !== controller.bindingId) throw error("AGENT_CONTROL_CONFLICT", 409); return json(res, 200, { ok: true, action: publicAction(action) }, origin); }
       if (req.method === "GET" && parts.length === 5 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "actions") { const agent = identity(req, true); const session = sessionForBinding(parts[2]); const action = actions.get(parts[4]); if (!action || action.sessionId !== session.sessionId) throw error("ACTION_NOT_FOUND", 404); authorize(session, agent, { bindingId: action.bindingId, workspaceId: url.searchParams.get("workspaceId") || url.searchParams.get("projectId") || "", conversationId: url.searchParams.get("conversationId") || url.searchParams.get("threadId") || "" }, actionIsWrite(action.type)); return json(res, 200, { ok: true, action: publicAction(action) }, origin); }
       throw error("NOT_FOUND", 404);
     } catch (cause) { return fail(res, cause, origin); }
   }
-  return { async start(port) { const server = createServer((req, res) => { handle(req, res).catch((cause) => fail(res, cause)); }); await new Promise((resolve) => server.listen(Number(port || 40415), "127.0.0.1", resolve)); return server; }, handle, paths: { bindingsPath, sourcesPath, configDir } };
+  return { async start(port) { const server = createServer((req, res) => { handle(req, res).catch((cause) => fail(res, cause)); }); await new Promise((resolve) => server.listen(Number(port || 40415), "127.0.0.1", resolve)); return server; }, handle, paths: { bindingsPath, sourcesPath, configDir, workbuddyDbPath } };
 }
 
 async function health(port = 40415) { try { const response = await fetch(`http://127.0.0.1:${Number(port)}/health`); return response.ok ? await response.json() : { ok: false, reason: `CONNECTOR_HTTP_${response.status}` }; } catch { return { ok: false, reason: "CONNECTOR_NOT_RUNNING" }; } }

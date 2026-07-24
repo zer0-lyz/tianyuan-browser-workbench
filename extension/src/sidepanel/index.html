@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>天源工作台</title>
-    <link rel="stylesheet" href="./styles.css?v=20260724-agent-binding-v2">
+    <link rel="stylesheet" href="./styles.css?v=20260724-batch-upload-target-position-v1">
   </head>
   <body>
     <main class="app">
@@ -43,7 +43,7 @@
             <h2>功能模块</h2>
             <p>选择一个功能开始处理</p>
           </div>
-          <span class="badge">6 个模块</span>
+          <span class="badge">7 个模块</span>
         </div>
         <div class="module-grid">
           <button id="openBatchSave" type="button" class="module-card">
@@ -65,6 +65,17 @@
             </span>
             <strong>批量退出编辑</strong>
             <small>选择公司和科目后批量退出编辑</small>
+          </button>
+          <button id="openBatchUpload" type="button" class="module-card">
+            <span class="module-icon module-icon-upload" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path class="ph-duotone" d="M4.5 19.5h15a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5h-15A1.5 1.5 0 0 0 3 6v12a1.5 1.5 0 0 0 1.5 1.5"></path>
+                <path d="M12 15.75a.75.75 0 0 1-.75-.75V8.81l-2.47 2.47a.75.75 0 0 1-1.06-1.06l3.75-3.75a.75.75 0 0 1 1.06 0l3.75 3.75a.75.75 0 1 1-1.06 1.06l-2.47-2.47V15a.75.75 0 0 1-.75.75"></path>
+                <path d="M21 18v-6h-1.5v6a.75.75 0 0 1-.75.75h-13A.75.75 0 0 1 5 18v-6H3.5v6a2.25 2.25 0 0 0 2.25 2.25h13A2.25 2.25 0 0 0 21 18"></path>
+              </svg>
+            </span>
+            <strong>批量上传文件</strong>
+            <small>选择目标列、文件夹和对应行号后批量上传</small>
           </button>
           <button id="openExportDetail" type="button" class="module-card">
             <span class="module-icon module-icon-detail" aria-hidden="true">
@@ -139,7 +150,7 @@
           <div class="section-title-row">
             <div>
               <h2>页面连接</h2>
-              <p class="section-description">绑定当前天源标签页，并查看工作台可稳定提供的操作能力。</p>
+              <p class="section-description">绑定当前天源标签页，并查看工作台可稳定提供的操作能力。本机脚本无需配置外部 Agent。</p>
             </div>
             <div class="button-row">
               <button id="startConnector" type="button" class="tiny">启动 Connector</button>
@@ -212,12 +223,18 @@
                 <button id="refreshAgentSources" type="button" class="tiny">刷新</button>
               </div>
               <div id="agentSourceList" class="agent-list"><div class="empty-list">启动 Connector 后显示来源</div></div>
+              <p class="binding-feedback">本机脚本来源由浏览器扩展自动注册；执行写入前会请求当前页面控制权。</p>
               <div class="field-header"><span>当前页面权限</span></div>
               <div id="agentBindingList" class="agent-list"><div class="empty-list">当前页面尚未绑定 Agent</div></div>
               <details class="manual-agent-panel">
                 <summary>添加 WorkBuddy 手动来源</summary>
                 <div class="form-grid">
                   <label><span>显示名称</span><input id="manualAgentDisplayName" type="text" value="WorkBuddy"></label>
+                  <div class="button-row">
+                    <button id="loadWorkBuddyCatalog" type="button" class="tiny secondary">自动加载 WorkBuddy 项目/对话</button>
+                  </div>
+                  <label class="field-block hidden" id="workbuddyProjectField"><span>选择 WorkBuddy 项目</span><select id="workbuddyProjectSelect"><option value="">请先加载项目</option></select></label>
+                  <label class="field-block hidden" id="workbuddyThreadField"><span>选择 WorkBuddy 对话</span><select id="workbuddyThreadSelect"><option value="">请先选择项目</option></select></label>
                   <label><span>工作区标识</span><input id="manualAgentWorkspaceId" type="text" placeholder="本机可见标识"></label>
                   <label><span>工作区名称</span><input id="manualAgentWorkspaceName" type="text" placeholder="可选"></label>
                   <label><span>对话标识</span><input id="manualAgentConversationId" type="text" placeholder="可选"></label>
@@ -225,8 +242,8 @@
                   <label><span>绑定范围</span><select id="manualAgentScope"><option value="conversation">对话</option><option value="workspace">工作区</option></select></label>
                   <label><span>权限</span><select id="manualAgentAccess"><option value="read">只读</option><option value="control">控制</option></select></label>
                 </div>
-                <div class="button-row"><button id="addManualAgent" type="button" class="tiny">添加并绑定</button></div>
-                <p id="manualAgentFeedback" class="binding-feedback">手动来源不会假设 WorkBuddy 项目或对话 API；生成的本机配置仅包含 credentialRef，不含密钥。</p>
+                <div class="button-row"><button id="addManualAgent" type="button" class="tiny">确认选择并绑定</button></div>
+                <p id="manualAgentFeedback" class="binding-feedback">可自动读取 WorkBuddy 本机项目/对话元数据；无法读取时仍可手动填写。只读取标识、名称、路径和时间，不读取对话正文。</p>
               </details>
             </div>
           </details>
@@ -342,6 +359,107 @@
           </div>
         </section>
         <div id="exitSupportMount" class="page-mount"></div>
+      </section>
+
+      <section id="page-batch-upload" class="route-page hidden" data-route="batch-upload">
+        <div class="page-heading">
+          <div>
+            <h2>批量上传文件</h2>
+            <p>先确认科目、Sheet 和目标列，再建立文件与行号映射</p>
+          </div>
+          <button id="backFromBatchUpload" type="button" class="secondary">功能中心</button>
+        </div>
+        <section class="section feature-module batch-upload-module">
+          <div class="batch-upload-steps" aria-label="批量上传步骤">
+            <span id="batchUploadStepOne" class="batch-upload-step active">1 目标对象</span>
+            <span id="batchUploadStepTwo" class="batch-upload-step">2 文件映射</span>
+            <span id="batchUploadStepThree" class="batch-upload-step">3 执行确认</span>
+          </div>
+
+          <section id="batchUploadTargetStep" class="batch-upload-step-panel">
+            <div class="section-title-row feature-title">
+              <div>
+                <h2>确认输入对象</h2>
+            <p class="section-description">当前科目和 Sheet 来自天源页面；查证核对情况列暂由人工填写，上传目标列必须是可上传文件的单元格列。</p>
+              </div>
+              <button id="refreshBatchUploadTarget" type="button" class="tiny secondary">重新识别</button>
+            </div>
+            <div class="form-grid">
+              <label>
+                <span>当前科目</span>
+                <input id="batchUploadSubject" type="text" readonly placeholder="等待识别">
+              </label>
+              <label>
+                <span>Sheet 页</span>
+                <select id="batchUploadSheetSelect">
+                  <option value="">等待识别</option>
+                </select>
+              </label>
+              <label>
+                <span>上传目标列</span>
+                <select id="batchUploadColumnSelect">
+                  <option value="">请先识别 Sheet</option>
+                </select>
+              </label>
+            </div>
+            <div id="batchUploadColumnFeedback" class="inline-feedback">尚未校验目标列</div>
+            <div class="button-row">
+              <button id="confirmBatchUploadTarget" type="button">确认输入对象</button>
+            </div>
+          </section>
+
+          <section id="batchUploadFilesStep" class="batch-upload-step-panel hidden">
+            <div class="section-title-row feature-title">
+              <div>
+                <h2>建立文件映射</h2>
+                <p class="section-description">选择一个文件夹后，为每个文件手工填写目标行号并选择目标位置；空行不会执行。</p>
+              </div>
+              <button id="chooseBatchUploadFolder" type="button" class="tiny">选择文件夹</button>
+            </div>
+            <div id="batchUploadFolderSummary" class="selection-summary">尚未选择文件夹</div>
+            <div class="batch-upload-table-wrap">
+              <table class="batch-upload-table">
+                <thead>
+                  <tr><th>文件名</th><th>大小</th><th>目标行号</th><th>目标位置</th><th>状态</th></tr>
+                </thead>
+                <tbody id="batchUploadFileRows">
+                  <tr><td colspan="5" class="empty-list">选择文件夹后显示文件</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="batchUploadMappingFeedback" class="inline-feedback">等待文件夹</div>
+            <div class="button-row">
+              <button id="backToBatchUploadTarget" type="button" class="secondary">返回修改目标</button>
+              <button id="confirmBatchUploadMapping" type="button">确认文件映射</button>
+            </div>
+          </section>
+
+          <section id="batchUploadExecuteStep" class="batch-upload-step-panel hidden">
+            <div class="section-title-row feature-title">
+              <div>
+                <h2>执行批量上传</h2>
+                <p class="section-description">每个文件独立执行上传、分类、保存和回读；失败项会保留原因。</p>
+              </div>
+              <span id="batchUploadExecutionSummary" class="badge">尚未确认</span>
+            </div>
+            <div id="batchUploadReview" class="batch-upload-review"></div>
+            <label id="batchUploadExecuteConfirmWrap" class="check-row">
+              <input id="batchUploadExecuteConfirm" type="checkbox">
+              <span>确认使用当前登录态操作当前天源页面，并逐项保存上传结果。</span>
+            </label>
+            <div class="progress-heading">
+              <span id="batchUploadProgressText">等待执行</span>
+              <strong id="batchUploadProgressPercent">0%</strong>
+            </div>
+            <progress id="batchUploadProgressBar" max="100" value="0"></progress>
+            <div id="batchUploadResultList" class="batch-upload-result-list"></div>
+            <div class="button-row">
+              <button id="backToBatchUploadMapping" type="button" class="secondary">返回修改映射</button>
+              <button id="resumeBatchUpload" type="button" class="secondary hidden">继续未完成项</button>
+              <button id="runBatchUpload" type="button">开始执行</button>
+            </div>
+          </section>
+        </section>
       </section>
 
       <section id="page-export-detail" class="route-page hidden" data-route="export-detail">

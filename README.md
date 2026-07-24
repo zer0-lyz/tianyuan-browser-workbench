@@ -34,6 +34,8 @@ node scripts/install-local-runtime.mjs
 4. 选择安装脚本输出的 `extensionPath`。
 5. 打开天源系统页面，在侧栏中进入连接配置并绑定当前页面。
 
+安装本机运行组件后，批量上传等页面写入模块不需要配置 Codex、WorkBuddy 或其他 Agent MCP。扩展会自动注册“天源工作台本机脚本”来源；首次执行写入时只需确认当前页面控制权。仅加载扩展文件而未注册 Native Messaging Host 时，文件夹选择和本机 Bridge 不会工作。
+
 ## 运行目录
 
 - macOS：`~/.tianyuan-workbench/projects/天源评估系统/extension`
@@ -50,4 +52,10 @@ node scripts/install-local-runtime.mjs
 
 ## 其他 Agent
 
-Codex 安装时自动注册本机来源并继续读取本机项目/对话目录。WorkBuddy 尚未集成其项目或对话 API；请在侧栏“Agent 控制者管理”添加手动来源，填写本机可见的工作区/对话标识，然后使用侧栏生成的 stdio MCP 配置。该配置只引用本机 `credentialRef`，不包含密钥或 MCP token。
+Codex 安装时自动注册本机来源并继续读取本机项目/对话目录。WorkBuddy 来源注册后，侧栏可只读加载 `~/.workbuddy/workbuddy.db` 中的工作区和会话元数据，选择后再确认绑定；如果本机目录不可用，可退回手动填写。该配置只引用本机 `credentialRef`，不包含密钥或 MCP token。
+
+## 统一 MCP 能力
+
+浏览器扩展、Native Helper、Bridge 和 `tianyuan-browser-connector` 是共享运行层；Codex、WorkBuddy 和后续 Agent 使用同一份工具定义和同一套只读/控制门禁，不分别开发上传、查证核对或清理能力。WorkBuddy 的 `connector-proxy` 会聚合这套 MCP 工具，Agent 只携带自己的来源身份和页面绑定。
+
+若 WorkBuddy 已连接但工具没有出现在 Agent 工具列表，优先检查其自定义 MCP 是否已启用并通过 Trust；不要重新开发或复制 Connector 工具。
