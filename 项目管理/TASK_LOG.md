@@ -3033,3 +3033,33 @@ v20 已生效，空 `tag:{isClear:true}` 不再干扰当前最终扫描结果。
 - `项目管理/PROJECT_MEMORY.md`
 - `项目管理/PROJECT_STATE.md`
 - `项目管理/TASK_LOG.md`
+
+## 2026-07-24 09:45 CST
+
+### 任务目标
+
+按用户要求判断 `tianyuan-valuation-system` 是否与当前浏览器工作台为同一项目；如不是，则新建 GitHub 仓库并推送当前完整版本。
+
+### 执行动作
+
+- 读取 GitHub 账号 `zer0-lyz` 下既有仓库。
+- 检查 `zer0-lyz/tianyuan-valuation-system` 远端根目录，确认其结构为旧天源评估系统/MCP/skill 项目，不包含当前浏览器工作台的 `extension/`、`native-helper/`、`plugins/tianyuan-browser-connector/`、`release/` 等完整结构。
+- 新建私有仓库 `zer0-lyz/tianyuan-browser-workbench`。
+- 对当前项目执行敏感信息扫描，未发现明文 MCP token、Bearer token 或 GitHub token。
+- 普通 `git push` 多次因 GitHub HTTPS 传输超时或 HTTP2 framing 错误失败。
+- 改为导出当前 HEAD 文件树，生成干净发布仓库，再通过 GitHub API 上传 131 个当前版本文件，创建完整 tree、commit、`main` 引用和 baseline 标签。
+
+### 验证结果
+
+- GitHub 仓库：`https://github.com/zer0-lyz/tianyuan-browser-workbench`。
+- 远端 `main` 提交：`cb2bdf4a760ba943896aea291ccffcb650d0860c`。
+- 远端根目录已读回：`.gitignore`、`README.md`、`docs`、`extension`、`native-helper`、`plugins`、`release`、`scripts`、`skills`、`交给Agent自动配置.md`、`项目管理`。
+- 远端标签已读回：
+  - `baseline-sidepanel-app-ui-20260724`
+  - `baseline-github-distribution-ready-20260724`
+
+### 后续建议
+
+- Mac mini 使用 `https://github.com/zer0-lyz/tianyuan-browser-workbench` 作为克隆地址。
+- 克隆后执行 `node scripts/install-local-runtime.mjs`，然后加载脚本输出的本机 `extensionPath`。
+- 若后续继续发布大安装包，建议使用 GitHub Release 附件，不要把大二进制安装包纳入 Git 历史。
