@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>天源工作台</title>
+    <link rel="stylesheet" href="./styles.css?v=20260724-picker-refine">
+  </head>
+  <body>
+    <main class="app">
+      <header class="header">
+        <div class="brand-block">
+          <button id="goHome" type="button" class="brand-button">天源工作台</button>
+          <p id="subtitle">首页</p>
+        </div>
+        <button id="refresh" type="button" class="icon-text-button">刷新</button>
+      </header>
+
+      <nav class="connection-bar" aria-label="连接状态">
+        <button id="openConnectionsTopConnector" type="button" class="connection-pill">
+          <span>Connector</span>
+          <strong id="connectorStatus" class="conn conn-idle">未检查</strong>
+        </button>
+        <button id="openConnectionsTop" type="button" class="connection-pill">
+          <span>Helper</span>
+          <strong id="helperStatus" class="conn conn-idle">未检查</strong>
+        </button>
+        <button id="openConnectionsTopMcp" type="button" class="connection-pill">
+          <span>MCP</span>
+          <strong id="mcpStatus" class="conn conn-idle">未检查</strong>
+        </button>
+        <button id="openConnectionsTopCli" type="button" class="connection-pill">
+          <span>CLI</span>
+          <strong id="cliStatus" class="conn conn-idle">未检查</strong>
+        </button>
+      </nav>
+
+      <section id="status" class="status status-idle">等待读取当前页面</section>
+
+      <section id="page-home" class="route-page" data-route="home">
+        <div class="page-heading">
+          <div>
+            <h2>功能模块</h2>
+            <p>选择一个功能开始处理</p>
+          </div>
+          <span class="badge">6 个模块</span>
+        </div>
+        <div class="module-grid">
+          <button id="openBatchSave" type="button" class="module-card">
+            <span class="module-icon module-icon-save" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path class="ph-duotone" d="M20.25 4.5v15a.75.75 0 0 1-.75.75h-15a.75.75 0 0 1-.75-.75v-15a.75.75 0 0 1 .75-.75h15a.75.75 0 0 1 .75.75"></path>
+                <path d="M16.28 9.22a.75.75 0 0 1 0 1.06l-5.25 5.25a.75.75 0 0 1-1.06 0l-2.25-2.25a.75.75 0 0 1 1.06-1.06l1.72 1.72 4.72-4.72a.75.75 0 0 1 1.06 0M21 4.5v15A1.5 1.5 0 0 1 19.5 21h-15A1.5 1.5 0 0 1 3 19.5v-15A1.5 1.5 0 0 1 4.5 3h15A1.5 1.5 0 0 1 21 4.5m-1.5 15v-15h-15v15z"></path>
+              </svg>
+            </span>
+            <strong>批量保存底稿</strong>
+            <small>选择公司和科目后批量执行保存</small>
+          </button>
+          <button id="openBatchExit" type="button" class="module-card">
+            <span class="module-icon module-icon-exit" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path class="ph-duotone" d="M21 5.25v13.5a1.5 1.5 0 0 1-1.5 1.5h-15V3.75h15A1.5 1.5 0 0 1 21 5.25"></path>
+                <path d="M11.25 20.25a.75.75 0 0 1-.75.75h-6a.75.75 0 0 1-.75-.75V3.75A.75.75 0 0 1 4.5 3h6a.75.75 0 0 1 0 1.5H5.25v15h5.25a.75.75 0 0 1 .75.75m10.28-8.78-3.75-3.75a.75.75 0 0 0-1.06 1.06l2.47 2.47H10.5a.75.75 0 0 0 0 1.5h8.69l-2.47 2.47a.75.75 0 0 0 1.06 1.06l3.75-3.75a.75.75 0 0 0 0-1.06"></path>
+              </svg>
+            </span>
+            <strong>批量退出编辑</strong>
+            <small>选择公司和科目后批量退出编辑</small>
+          </button>
+          <button id="openExportDetail" type="button" class="module-card">
+            <span class="module-icon module-icon-detail" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path class="ph-duotone" d="M8.25 9.75v9h-5.25v-9Z"></path>
+                <path d="M21 4.5H3a.75.75 0 0 0-.75.75V18A1.5 1.5 0 0 0 3.75 19.5h16.5a1.5 1.5 0 0 0 1.5-1.5V5.25A.75.75 0 0 0 21 4.5M3.75 10.5H7.5v3H3.75Zm5.25 0h11.25v3H9Zm11.25-4.5v3H3.75V6ZM3.75 15H7.5v3H3.75Zm16.5 3H9v-3h11.25z"></path>
+              </svg>
+            </span>
+            <strong>导出明细表</strong>
+            <small>选择公司和本机目录后导出资产基础法明细表</small>
+          </button>
+          <button id="openExportDeclare" type="button" class="module-card">
+            <span class="module-icon module-icon-declare" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path class="ph-duotone" d="M19.5 8.25h-5.25V3Z"></path>
+                <path d="m20.03 7.72-5.25-5.25A.75.75 0 0 0 14.25 2.25h-9A1.5 1.5 0 0 0 3.75 3.75v16.5a1.5 1.5 0 0 0 1.5 1.5h13.5a1.5 1.5 0 0 0 1.5-1.5v-12a.75.75 0 0 0-.22-.53M15 4.81 17.69 7.5H15Zm3.75 15.44H5.25V3.75H13.5v4.5a.75.75 0 0 0 .75.75h4.5zm-3.97-5.78a.75.75 0 0 1 0 1.06l-2.25 2.25a.75.75 0 0 1-1.06 0l-2.25-2.25a.75.75 0 0 1 1.06-1.06l.97.97v-4.19a.75.75 0 0 1 1.5 0v4.19l.97-.97a.75.75 0 0 1 1.06 0"></path>
+              </svg>
+            </span>
+            <strong>导出申报表</strong>
+            <small>选择公司和本机目录后导出资产基础法申报表</small>
+          </button>
+          <button id="openFormatDetail" type="button" class="module-card">
+            <span class="module-icon module-icon-print-detail" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path class="ph-duotone" d="M21.75 9v7.5H18v-2.25H6v2.25H2.25V9c0-.83.73-1.5 1.63-1.5h16.24c.9 0 1.63.67 1.63 1.5"></path>
+                <path d="M20.13 6.75H18.75v-3a.75.75 0 0 0-.75-.75H6a.75.75 0 0 0-.75.75v3H3.87C2.56 6.75 1.5 7.76 1.5 9v7.5a.75.75 0 0 0 .75.75h3v3A.75.75 0 0 0 6 21h12a.75.75 0 0 0 .75-.75v-3h3a.75.75 0 0 0 .75-.75V9c0-1.24-1.06-2.25-2.37-2.25M6.75 4.5h10.5v2.25H6.75Zm10.5 15H6.75V15h10.5ZM21 15.75h-2.25v-1.5A.75.75 0 0 0 18 13.5H6a.75.75 0 0 0-.75.75v1.5H3V9c0-.41.39-.75.87-.75h16.26c.48 0 .87.34.87.75zm-2.25-4.88a1.12 1.12 0 1 1-1.12-1.12 1.12 1.12 0 0 1 1.12 1.12"></path>
+              </svg>
+            </span>
+            <strong>明细表打印格式</strong>
+            <small>批量调整明细表的打印区域、列宽、分页和页边距</small>
+          </button>
+          <button id="openFormatDeclaration" type="button" class="module-card">
+            <span class="module-icon module-icon-print-declare" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path class="ph-duotone" d="M21.75 9v7.5H18v-2.25H6v2.25H2.25V9c0-.83.73-1.5 1.63-1.5h16.24c.9 0 1.63.67 1.63 1.5"></path>
+                <path d="M20.13 6.75H18.75v-3a.75.75 0 0 0-.75-.75H6a.75.75 0 0 0-.75.75v3H3.87C2.56 6.75 1.5 7.76 1.5 9v7.5a.75.75 0 0 0 .75.75h3v3A.75.75 0 0 0 6 21h12a.75.75 0 0 0 .75-.75v-3h3a.75.75 0 0 0 .75-.75V9c0-1.24-1.06-2.25-2.37-2.25M6.75 4.5h10.5v2.25H6.75Zm10.5 15H6.75V15h10.5ZM21 15.75h-2.25v-1.5A.75.75 0 0 0 18 13.5H6a.75.75 0 0 0-.75.75v1.5H3V9c0-.41.39-.75.87-.75h16.26c.48 0 .87.34.87.75zm-2.25-4.88a1.12 1.12 0 1 1-1.12-1.12 1.12 1.12 0 0 1 1.12 1.12"></path>
+              </svg>
+            </span>
+            <strong>申报表打印格式</strong>
+            <small>批量生成适合打印的资产评估申报表</small>
+          </button>
+        </div>
+        <div class="home-note">
+          <span>当前页面</span>
+          <strong id="homePageState">等待读取</strong>
+        </div>
+      </section>
+
+      <section id="page-connections" class="route-page hidden" data-route="connections">
+        <div class="page-heading">
+          <div>
+            <h2>连接配置</h2>
+            <p>配置和检查工作台运行依赖</p>
+          </div>
+          <button id="backFromConnections" type="button" class="secondary">返回首页</button>
+        </div>
+        <section class="section connection-section">
+          <div class="section-title-row">
+            <h2>连接操作</h2>
+            <div class="button-row">
+              <button id="configureMcp" type="button" class="tiny">配置 MCP</button>
+              <button id="authorizeCli" type="button" class="tiny">授权 CLI</button>
+              <button id="checkConnections" type="button" class="tiny">启动/检查</button>
+            </div>
+          </div>
+          <dl class="kv compact-kv">
+            <div><dt>扩展 ID</dt><dd id="extensionId">-</dd></div>
+            <div><dt>连接信息</dt><dd id="connectionMessage">-</dd></div>
+          </dl>
+        </section>
+        <section class="section connector-section">
+          <div class="section-title-row">
+            <div>
+              <h2>页面连接</h2>
+              <p class="section-description">绑定当前天源标签页，并查看工作台可稳定提供的操作能力。</p>
+            </div>
+            <div class="button-row">
+              <button id="startConnector" type="button" class="tiny">启动 Connector</button>
+              <button id="bindCurrentPage" type="button" class="tiny">绑定当前页面</button>
+            </div>
+          </div>
+          <dl class="kv compact-kv connector-binding">
+            <div><dt>绑定状态</dt><dd id="connectorBindingStatus">尚未绑定</dd></div>
+            <div><dt>Session</dt><dd id="connectorSessionId">-</dd></div>
+            <div><dt>当前项目</dt><dd id="connectorProject">-</dd></div>
+            <div><dt>当前页面</dt><dd id="connectorPage">-</dd></div>
+            <div><dt>最后心跳</dt><dd id="connectorLastSeen">-</dd></div>
+            <div><dt>Codex 绑定</dt><dd id="connectorCodexBindingStatus">未绑定</dd></div>
+            <div><dt>Binding ID</dt><dd id="connectorBindingId">-</dd></div>
+          </dl>
+          <details class="codex-binding-panel" open>
+            <summary>Codex 项目与对话绑定</summary>
+            <div class="codex-binding-form">
+              <div class="field-header">
+                <span>选择项目</span>
+                <button id="refreshConnectorCatalog" type="button" class="tiny">刷新</button>
+              </div>
+              <select id="connectorProjectSelect">
+                <option value="">加载项目列表...</option>
+              </select>
+              <div class="connector-picker" id="connectorProjectPicker">
+                <button id="connectorProjectPickerButton" class="picker-button" type="button">
+                  <span class="picker-title">加载项目列表...</span>
+                </button>
+                <div id="connectorProjectPickerMenu" class="picker-menu hidden">
+                  <input id="connectorProjectFilter" type="text" placeholder="搜索项目名称或路径">
+                  <div id="connectorProjectPickerList" class="picker-list"></div>
+                </div>
+              </div>
+              <label class="field-block">
+                <span>绑定范围</span>
+                <select id="connectorBindingScope">
+                  <option value="thread">仅当前对话（推荐）</option>
+                  <option value="project">整个项目</option>
+                </select>
+              </label>
+              <label class="field-block" id="connectorThreadField">
+                <span>选择对话</span>
+                <select id="connectorThreadSelect">
+                  <option value="">请先选择项目</option>
+                </select>
+                <div class="connector-picker" id="connectorThreadPicker">
+                  <button id="connectorThreadPickerButton" class="picker-button" type="button">
+                    <span class="picker-title">请先选择项目</span>
+                  </button>
+                  <div id="connectorThreadPickerMenu" class="picker-menu hidden">
+                    <input id="connectorThreadFilter" type="text" placeholder="搜索对话标题">
+                    <div id="connectorThreadPickerList" class="picker-list"></div>
+                  </div>
+                </div>
+              </label>
+              <div class="button-row binding-actions">
+                <button id="saveConnectorBinding" type="button" class="tiny">保存绑定</button>
+                <button id="bindConnectorCurrentThread" type="button" class="tiny secondary">绑定当前对话</button>
+                <button id="clearConnectorBinding" type="button" class="tiny secondary">解除绑定</button>
+              </div>
+              <p id="connectorBindingFeedback" class="binding-feedback">未绑定 Codex 项目或对话时，Codex 不能控制当前页面。</p>
+            </div>
+          </details>
+          <details class="capability-panel">
+            <summary>
+              <span>操作能力</span>
+              <em id="connectorCapabilitySummary" class="inline-status">等待连接</em>
+            </summary>
+            <div id="connectorCapabilities" class="capability-list">
+              <div class="empty-list">启动并绑定后显示能力矩阵</div>
+            </div>
+          </details>
+        </section>
+        <details class="section diagnostic-section">
+          <summary>页面诊断</summary>
+          <div class="diagnostic-grid">
+            <div>
+              <h2>页面</h2>
+              <dl class="kv">
+                <div><dt>项目 ID</dt><dd id="projectId">-</dd></div>
+                <div><dt>主体 ID</dt><dd id="companyId">-</dd></div>
+                <div><dt>科目</dt><dd id="subjectCode">-</dd></div>
+                <div><dt>公司列表</dt><dd id="isEquityList">-</dd></div>
+                <div><dt>底稿页</dt><dd id="isDraft">-</dd></div>
+              </dl>
+            </div>
+            <div>
+              <h2>表格</h2>
+              <dl class="kv">
+                <div><dt>SpreadJS</dt><dd id="spreadFound">-</dd></div>
+                <div><dt>Sheet</dt><dd id="sheetName">-</dd></div>
+                <div><dt>活动单元格</dt><dd id="activeCell">-</dd></div>
+                <div><dt>查证资料索引</dt><dd id="auditField">-</dd></div>
+                <div><dt>上传单元格</dt><dd id="uploadCell">-</dd></div>
+              </dl>
+            </div>
+            <div>
+              <h2>门禁</h2>
+              <dl class="kv">
+                <div><dt>保存按钮</dt><dd id="saveButton">-</dd></div>
+                <div><dt>登录状态</dt><dd id="loginState">-</dd></div>
+                <div><dt>编辑锁</dt><dd id="lockText">-</dd></div>
+                <div><dt>权限提示</dt><dd id="permissionText">-</dd></div>
+              </dl>
+            </div>
+          </div>
+        </details>
+      </section>
+
+      <section id="page-batch-save" class="route-page hidden" data-route="batch-save">
+        <div class="page-heading">
+          <div>
+            <h2>批量保存底稿</h2>
+            <p>选择本功能的公司和科目范围后执行</p>
+          </div>
+          <button id="backFromSave" type="button" class="secondary">功能中心</button>
+        </div>
+        <div id="saveScopeMount" class="page-mount"></div>
+        <section class="section feature-module">
+          <div class="section-title-row feature-title">
+            <h2>保存设置</h2>
+            <span class="badge">功能 1</span>
+          </div>
+          <div class="form-grid">
+            <label>
+              <span>执行方式</span>
+              <select id="saveMode">
+                <option value="dry_run">预演，不点击保存</option>
+                <option value="execute">正式执行，点击保存</option>
+              </select>
+            </label>
+            <label id="executeConfirmWrap" class="check-row hidden">
+              <input id="executeConfirm" type="checkbox">
+              <span>确认执行保存。保存会使用当前登录态操作天源页面。</span>
+            </label>
+          </div>
+          <div class="task-actions">
+            <button id="runBatchSave" type="button">运行保存</button>
+          </div>
+        </section>
+        <div id="saveSupportMount" class="page-mount"></div>
+      </section>
+
+      <section id="page-batch-exit" class="route-page hidden" data-route="batch-exit">
+        <div class="page-heading">
+          <div>
+            <h2>批量退出编辑</h2>
+            <p>选择本功能的公司和科目范围后执行</p>
+          </div>
+          <button id="backFromExit" type="button" class="secondary">功能中心</button>
+        </div>
+        <div id="exitScopeMount" class="page-mount"></div>
+        <section class="section feature-module">
+          <div class="section-title-row feature-title">
+            <h2>退出编辑设置</h2>
+            <span class="badge">功能 2</span>
+          </div>
+          <div class="form-grid">
+            <label>
+              <span>执行方式</span>
+              <select id="exitMode">
+                <option value="dry_run">预演，不点击退出编辑</option>
+                <option value="execute">正式执行，点击退出编辑</option>
+              </select>
+            </label>
+            <label id="exitConfirmWrap" class="check-row hidden">
+              <input id="exitConfirm" type="checkbox">
+              <span>确认执行退出编辑。退出编辑会使用当前登录态操作天源页面。</span>
+            </label>
+          </div>
+          <div class="task-actions">
+            <button id="runBatchExit" type="button">运行退出编辑</button>
+          </div>
+        </section>
+        <div id="exitSupportMount" class="page-mount"></div>
+      </section>
+
+      <section id="page-export-detail" class="route-page hidden" data-route="export-detail">
+        <div class="page-heading">
+          <div>
+            <h2>导出资产基础法明细表</h2>
+            <p>选择公司和存放目录后由 CLI 执行导出</p>
+          </div>
+          <button id="backFromExportDetail" type="button" class="secondary">功能中心</button>
+        </div>
+        <div id="detailScopeMount" class="page-mount"></div>
+        <section class="section export-panel">
+          <div class="section-title-row feature-title">
+            <h2>导出设置</h2>
+            <span class="badge">功能 3</span>
+          </div>
+          <div class="directory-field">
+            <span>存放路径</span>
+            <div class="directory-row">
+              <input id="detailOutputPath" type="text" readonly placeholder="请选择本机文件夹">
+              <button id="chooseDetailOutputPath" type="button" class="secondary">选择</button>
+            </div>
+          </div>
+          <div class="export-progress" aria-live="polite">
+            <div class="progress-heading">
+              <span id="detailProgressText">等待导出</span>
+              <strong id="detailProgressPercent">0%</strong>
+            </div>
+            <progress id="detailProgressBar" max="100" value="0"></progress>
+          </div>
+          <div class="task-actions">
+            <button id="runExportDetail" type="button">导出明细表</button>
+          </div>
+        </section>
+        <div id="detailSupportMount" class="page-mount"></div>
+      </section>
+
+      <section id="page-export-declare" class="route-page hidden" data-route="export-declare">
+        <div class="page-heading">
+          <div>
+            <h2>导出资产基础法申报表</h2>
+            <p>选择公司和存放目录后由 CLI 执行导出</p>
+          </div>
+          <button id="backFromExportDeclare" type="button" class="secondary">功能中心</button>
+        </div>
+        <div id="declareScopeMount" class="page-mount"></div>
+        <section class="section export-panel">
+          <div class="section-title-row feature-title">
+            <h2>导出设置</h2>
+            <span class="badge">功能 4</span>
+          </div>
+          <div class="directory-field">
+            <span>存放路径</span>
+            <div class="directory-row">
+              <input id="declareOutputPath" type="text" readonly placeholder="请选择本机文件夹">
+              <button id="chooseDeclareOutputPath" type="button" class="secondary">选择</button>
+            </div>
+          </div>
+          <div class="export-progress" aria-live="polite">
+            <div class="progress-heading">
+              <span id="declareProgressText">等待导出</span>
+              <strong id="declareProgressPercent">0%</strong>
+            </div>
+            <progress id="declareProgressBar" max="100" value="0"></progress>
+          </div>
+          <div class="task-actions">
+            <button id="runExportDeclare" type="button">导出申报表</button>
+          </div>
+        </section>
+        <div id="declareSupportMount" class="page-mount"></div>
+      </section>
+
+      <section id="page-format-detail" class="route-page hidden" data-route="format-detail">
+        <div class="page-heading">
+          <div>
+            <h2>明细表打印格式</h2>
+            <p>支持选择多个文件或整个文件夹批量处理</p>
+          </div>
+          <button id="backFromFormatDetail" type="button" class="secondary">功能中心</button>
+        </div>
+        <section class="section print-format-panel">
+          <div class="section-title-row feature-title">
+            <h2>处理设置</h2>
+            <span class="badge">功能 5</span>
+          </div>
+          <div class="file-source-field">
+            <span>输入文件</span>
+            <div class="button-row source-buttons">
+              <button id="chooseDetailPrintFiles" type="button" class="secondary">选择文件</button>
+              <button id="chooseDetailPrintFolder" type="button" class="secondary">选择文件夹</button>
+            </div>
+            <div id="detailPrintInputSummary" class="selection-summary">尚未选择文件</div>
+          </div>
+          <label class="field-block">
+            <span>输出方式</span>
+            <select id="detailPrintOutputMode">
+              <option value="copy_in_source">在源文件夹创建打印版副本</option>
+              <option value="overwrite">覆盖源文件</option>
+              <option value="new_directory">保存到新的位置</option>
+            </select>
+          </label>
+          <div id="detailPrintOutputDirectoryWrap" class="directory-field hidden">
+            <span>新的存放位置</span>
+            <div class="directory-row">
+              <input id="detailPrintOutputPath" type="text" readonly placeholder="请选择本机文件夹">
+              <button id="chooseDetailPrintOutputPath" type="button" class="secondary">选择</button>
+            </div>
+          </div>
+          <div class="export-progress" aria-live="polite">
+            <div class="progress-heading">
+              <span id="detailPrintProgressText">等待执行</span>
+              <strong id="detailPrintProgressPercent">0%</strong>
+            </div>
+            <progress id="detailPrintProgressBar" max="100" value="0"></progress>
+          </div>
+          <div class="task-actions">
+            <button id="runDetailPrintFormat" type="button">执行调整</button>
+          </div>
+        </section>
+        <div id="detailPrintSupportMount" class="page-mount"></div>
+      </section>
+
+      <section id="page-format-declaration" class="route-page hidden" data-route="format-declaration">
+        <div class="page-heading">
+          <div>
+            <h2>申报表打印格式</h2>
+            <p>支持选择多个文件或整个文件夹批量处理</p>
+          </div>
+          <button id="backFromFormatDeclaration" type="button" class="secondary">功能中心</button>
+        </div>
+        <section class="section print-format-panel">
+          <div class="section-title-row feature-title">
+            <h2>处理设置</h2>
+            <span class="badge">功能 6</span>
+          </div>
+          <div class="file-source-field">
+            <span>输入文件</span>
+            <div class="button-row source-buttons">
+              <button id="chooseDeclarationPrintFiles" type="button" class="secondary">选择文件</button>
+              <button id="chooseDeclarationPrintFolder" type="button" class="secondary">选择文件夹</button>
+            </div>
+            <div id="declarationPrintInputSummary" class="selection-summary">尚未选择文件</div>
+          </div>
+          <label class="field-block">
+            <span>输出方式</span>
+            <select id="declarationPrintOutputMode">
+              <option value="copy_in_source">在源文件夹创建打印版副本</option>
+              <option value="overwrite">覆盖源文件</option>
+              <option value="new_directory">保存到新的位置</option>
+            </select>
+          </label>
+          <div id="declarationPrintOutputDirectoryWrap" class="directory-field hidden">
+            <span>新的存放位置</span>
+            <div class="directory-row">
+              <input id="declarationPrintOutputPath" type="text" readonly placeholder="请选择本机文件夹">
+              <button id="chooseDeclarationPrintOutputPath" type="button" class="secondary">选择</button>
+            </div>
+          </div>
+          <div class="export-progress" aria-live="polite">
+            <div class="progress-heading">
+              <span id="declarationPrintProgressText">等待执行</span>
+              <strong id="declarationPrintProgressPercent">0%</strong>
+            </div>
+            <progress id="declarationPrintProgressBar" max="100" value="0"></progress>
+          </div>
+          <div class="task-actions">
+            <button id="runDeclarationPrintFormat" type="button">执行调整</button>
+          </div>
+        </section>
+        <div id="declarationPrintSupportMount" class="page-mount"></div>
+      </section>
+
+      <section id="scopeSection" class="section scope-section shared-panel hidden">
+        <div class="section-title-row">
+          <h2>工作范围</h2>
+          <span class="badge">先确认</span>
+        </div>
+        <div class="scope-stack">
+          <details id="companyScopePanel" class="scope-panel" open>
+            <summary>
+              <span>公司清单</span>
+              <em id="companySelectionStatus" class="inline-status">默认当前公司</em>
+              <em id="companySourceStatus" class="inline-status">未加载编码</em>
+            </summary>
+            <div id="companyFiltersWrap" class="field-block">
+              <div class="field-header">
+                <span>选择公司</span>
+                <div class="button-row">
+                  <button id="loadCompanies" type="button" class="tiny">加载清单</button>
+                  <span id="companySelectionActions" class="button-row hidden">
+                    <button id="selectAllCompanies" type="button" class="tiny">全选</button>
+                    <button id="clearAllCompanies" type="button" class="tiny">全不选</button>
+                    <button id="confirmCompanies" type="button" class="tiny">确认</button>
+                  </span>
+                </div>
+              </div>
+              <div id="companyList" class="choice-list">
+                <div class="empty-list">默认当前公司；点击“加载清单”读取公司列表</div>
+              </div>
+            </div>
+          </details>
+          <details id="subjectScopePanel" class="scope-panel">
+            <summary>
+              <span>显示科目</span>
+              <em id="subjectSelectionStatus" class="inline-status">默认当前科目</em>
+            </summary>
+            <div class="field-header">
+              <span>选择科目</span>
+              <div class="button-row">
+                <button id="loadSubjects" type="button" class="tiny">加载科目</button>
+                <span id="subjectSelectionActions" class="button-row hidden">
+                  <button id="selectAllSubjects" type="button" class="tiny">全选</button>
+                  <button id="clearAllSubjects" type="button" class="tiny">全不选</button>
+                  <button id="confirmSubjects" type="button" class="tiny">确认</button>
+                </span>
+              </div>
+            </div>
+            <div id="subjectList" class="choice-list">
+              <div class="empty-list">加载当前页面显示科目</div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section id="supportSection" class="section support-panel shared-panel hidden">
+        <details class="log-panel">
+          <summary>
+            <span>执行日志</span>
+            <em id="taskLogCount" class="inline-status">0 条</em>
+          </summary>
+          <ol id="taskLog" class="task-log"></ol>
+        </details>
+        <details class="evidence-section">
+          <summary>
+            <span>证据 JSON</span>
+            <button id="copyJson" type="button" class="secondary">复制</button>
+          </summary>
+          <pre id="json">暂无数据</pre>
+        </details>
+      </section>
+
+      <dialog id="mcpTokenDialog" class="modal">
+        <form method="dialog" class="modal-panel">
+          <h2>配置 MCP</h2>
+          <p>输入 MCP token。默认只用于当前会话；勾选“记住本机”后会保存到 Chrome 本地扩展存储。</p>
+          <label>
+            <span>MCP token</span>
+            <input id="mcpTokenInput" type="password" autocomplete="off" spellcheck="false" placeholder="zhmcp_...">
+          </label>
+          <label class="check-row modal-check">
+            <input id="rememberMcpToken" type="checkbox">
+            <span>记住本机</span>
+          </label>
+          <div class="modal-actions">
+            <button id="clearMcpToken" type="button" class="secondary">清除</button>
+            <button id="cancelMcpToken" type="button" class="secondary">取消</button>
+            <button id="confirmMcpToken" type="button">确认连接</button>
+          </div>
+        </form>
+      </dialog>
+    </main>
+    <script src="./sidepanel.js"></script>
+  </body>
+</html>

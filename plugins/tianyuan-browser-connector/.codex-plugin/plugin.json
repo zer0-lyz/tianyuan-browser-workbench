@@ -1,0 +1,39 @@
+{
+  "name": "tianyuan-browser-connector",
+  "version": "0.3.0",
+  "description": "Connect Codex to a bound Tianyuan browser session and run controlled audit attachment uploads.",
+  "author": {
+    "name": "Tianyuan Browser Connector"
+  },
+  "license": "UNLICENSED",
+  "keywords": [
+    "tianyuan",
+    "browser",
+    "mcp",
+    "local-bridge",
+    "valuation"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "天源浏览器连接器",
+    "shortDescription": "连接天源页面并执行受控附件上传。",
+    "longDescription": "通过本地 Connector Bridge 将 Codex 项目和对话安全路由到已绑定的天源浏览器标签页。支持连接状态、页面上下文、能力读取，以及经明确确认的评估核实附件上传与底稿保存。",
+    "developerName": "Tianyuan Browser Connector",
+    "category": "Productivity",
+    "capabilities": [
+      "MCP",
+      "Local",
+      "Browser",
+      "Read",
+      "Write"
+    ],
+    "brandColor": "#202124",
+    "defaultPrompt": [
+      "确认当前项目绑定的天源浏览器页面。",
+      "读取当前天源页面的项目、公司和科目上下文。",
+      "查看当前天源浏览器连接器能力。",
+      "预演或确认执行评估核实附件上传。"
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

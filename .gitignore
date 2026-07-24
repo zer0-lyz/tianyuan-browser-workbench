@@ -1,0 +1,17 @@
+.codegraph/
+.DS_Store
+.snapshots/
+*.log
+node_modules/
+.venv/
+venv/
+.cache/
+.runtime/
+dist/
+build/
+coverage/
+native-helper/native_host_launcher.sh
+*.pkg
+dist/*.zip
+dist/*.sha256
+release/.build/

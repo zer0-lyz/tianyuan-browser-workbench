@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "tianyuan-browser-connector": {
+      "command": "node",
+      "args": [
+        "./runtime/apps/mcp/server.mjs"
+      ],
+      "cwd": ".",
+      "env": {
+        "TIANYUAN_CONNECTOR_BRIDGE_URL": "http://127.0.0.1:40415"
+      }
+    }
+  }
+}
