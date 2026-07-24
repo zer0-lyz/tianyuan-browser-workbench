@@ -41,12 +41,13 @@ async function handleRequest(request) {
       id,
       result: {
         protocolVersion: "2024-11-05",
-        capabilities: { tools: {} },
-        serverInfo: { name: "tianyuan-browser-connector", version: "0.4.0" }
+        capabilities: { tools: { listChanged: true } },
+        serverInfo: { name: "tianyuan-browser-connector", version: "0.4.1" }
       }
     };
   }
   if (method === "notifications/initialized") return null;
+  if (method === "ping") return { jsonrpc: "2.0", id, result: {} };
   if (method === "tools/list") return { jsonrpc: "2.0", id, result: { tools } };
   if (method === "tools/call") {
     const name = params?.name;

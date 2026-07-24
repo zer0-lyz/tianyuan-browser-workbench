@@ -1,6 +1,6 @@
 {
   "name": "tianyuan-browser-connector",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Connect a registered local Agent to its own Tianyuan browser bindings and run controlled audit actions.",
   "author": {
     "name": "Tianyuan Browser Connector"

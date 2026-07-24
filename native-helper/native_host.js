@@ -5,13 +5,30 @@ const fs = require("node:fs");
 const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
+const { createRequire } = require("node:module");
 const readline = require("node:readline");
 const { randomUUID } = require("node:crypto");
-const connectorBridge = require("./connector_bridge.js");
+const connectorBridge = (() => {
+  try {
+    return require("./connector_bridge.js");
+  } catch (cause) {
+    try {
+      return createRequire(path.join(path.dirname(process.execPath), "native_host.js"))("./connector_bridge.js");
+    } catch {
+      throw cause;
+    }
+  }
+})();
+
+process.stdout.on("error", (error) => {
+  if (error?.code === "EPIPE") {
+    process.exit(0);
+  }
+});
 
 const DEFAULT_MCP_URL = "https://mcp.zhrdc.net/valuation-mcp";
 const DEFAULT_CONNECTOR_PORT = 40415;
-const CONNECTOR_PROTOCOL_VERSION = "connector-source-v1";
+const CONNECTOR_PROTOCOL_VERSION = "connector-agent-binding-v3";
 const CONNECTOR_PLATFORM_URL = process.env.TIANYUAN_CONNECTOR_PLATFORM_URL || "http://127.0.0.1:40315";
 const CODEX_GLOBAL_STATE_PATH = process.env.TIANYUAN_CODEX_GLOBAL_STATE_PATH
   || path.join(os.homedir(), ".codex", ".codex-global-state.json");
@@ -1288,6 +1305,61 @@ async function chooseWorkbookDirectory() {
   };
 }
 
+async function chooseBatchUploadDirectory() {
+  const result = await chooseDirectory("选择批量上传文件夹");
+  const selectedPath = result.paths?.[0] || "";
+  return {
+    ...result,
+    action: "batch_upload_directory_selected",
+    path: selectedPath ? selectedPath.replace(/[\\/]+$/, "") || path.parse(selectedPath).root : "",
+  };
+}
+
+function collectBatchUploadFiles(rootPath, results, relativeRoot = "") {
+  if (results.length >= 200) return;
+  const entries = fs.readdirSync(rootPath, { withFileTypes: true });
+  for (const entry of entries) {
+    if (results.length >= 200) return;
+    const fullPath = path.join(rootPath, entry.name);
+    const relativePath = path.join(relativeRoot, entry.name);
+    if (entry.isDirectory()) {
+      collectBatchUploadFiles(fullPath, results, relativePath);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    const extension = path.extname(entry.name).toLowerCase();
+    if (!CONNECTOR_ATTACHMENT_EXTENSIONS.has(extension)) continue;
+    const stat = fs.statSync(fullPath);
+    if (stat.size <= 0 || stat.size > CONNECTOR_MAX_ATTACHMENT_BYTES) continue;
+    results.push({
+      name: entry.name,
+      relativePath,
+      filePath: fs.realpathSync(fullPath),
+      size: stat.size,
+      extension,
+      type: connectorAttachmentMime(extension),
+    });
+  }
+}
+
+function listBatchUploadDirectory(input = {}) {
+  const rawPath = String(input.path || "").trim();
+  if (!rawPath || !path.isAbsolute(rawPath)) throw new Error("BATCH_UPLOAD_DIRECTORY_MUST_BE_ABSOLUTE");
+  const rootPath = fs.realpathSync(rawPath);
+  if (!fs.statSync(rootPath).isDirectory()) throw new Error("BATCH_UPLOAD_DIRECTORY_NOT_FOUND");
+  const files = [];
+  collectBatchUploadFiles(rootPath, files);
+  files.sort((left, right) => left.relativePath.localeCompare(right.relativePath, "zh-CN"));
+  return {
+    ok: true,
+    action: "batch_upload_directory_listed",
+    path: rootPath,
+    files,
+    truncated: files.length >= 200,
+    security: { credentialsReturned: false, fileContentsReturned: false },
+  };
+}
+
 async function choosePrintOutputDirectory() {
   const result = await chooseDirectory("选择打印版文件的存放位置");
   return {
@@ -2126,6 +2198,12 @@ async function handle(message) {
   }
   if (message?.action === "select_print_workbook_directory") {
     return await chooseWorkbookDirectory();
+  }
+  if (message?.action === "select_batch_upload_directory") {
+    return await chooseBatchUploadDirectory();
+  }
+  if (message?.action === "list_batch_upload_directory") {
+    return listBatchUploadDirectory(message);
   }
   if (message?.action === "select_print_output_directory") {
     return await choosePrintOutputDirectory();

@@ -538,6 +538,7 @@ details.status-card,
 
 .module-icon-save,
 .module-icon-exit,
+.module-icon-upload,
 .module-icon-detail,
 .module-icon-declare,
 .module-icon-print-detail,
@@ -901,6 +902,160 @@ dd {
 
 .feature-module {
   margin-top: 0;
+}
+
+.batch-upload-module {
+  gap: 12px;
+}
+
+.batch-upload-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.batch-upload-step {
+  min-width: 0;
+  padding: 7px 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  color: var(--muted);
+  background: var(--surface-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.batch-upload-step.active {
+  border-color: rgb(9 105 218 / 0.32);
+  color: var(--accent);
+  background: #f0f6ff;
+  font-weight: 650;
+}
+
+.batch-upload-step-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.inline-feedback {
+  min-height: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.inline-feedback[data-kind="ok"] {
+  color: var(--good);
+}
+
+.inline-feedback[data-kind="error"] {
+  color: var(--bad);
+}
+
+.batch-upload-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.batch-upload-table {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.batch-upload-table th,
+.batch-upload-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--line-soft);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.batch-upload-table th {
+  color: var(--muted);
+  background: var(--surface-muted);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.batch-upload-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.batch-upload-table td:first-child {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-upload-row-input {
+  width: 80px;
+  min-height: 30px;
+  padding: 5px 7px;
+}
+
+.batch-upload-position-select {
+  width: 128px;
+  min-height: 30px;
+  padding: 5px 7px;
+}
+
+.batch-upload-invalid {
+  color: var(--bad);
+}
+
+.batch-upload-review {
+  display: grid;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.batch-upload-review p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.batch-upload-review-list {
+  display: grid;
+  gap: 4px;
+  max-height: 180px;
+  margin: 0;
+  padding-left: 18px;
+  overflow: auto;
+}
+
+.batch-upload-result-list {
+  display: grid;
+  gap: 5px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.batch-upload-result {
+  padding: 7px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  color: var(--muted);
+  background: var(--surface-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.batch-upload-result.ok {
+  color: var(--good);
+}
+
+.batch-upload-result.error {
+  color: var(--bad);
 }
 
 .feature-title {

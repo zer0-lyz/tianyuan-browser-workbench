@@ -8,7 +8,7 @@ const bridgeUrl = (process.env.TIANYUAN_CONNECTOR_BRIDGE_URL || "http://127.0.0.
 export const tools = [
   {
     name: "tianyuan.connection_status",
-    description: "检查当前 Codex 项目或对话绑定的天源浏览器 session。必须先调用此工具再读取页面。",
+    description: "检查当前 Agent 工作区或对话绑定的天源浏览器 session。必须先调用此工具再读取页面。",
     inputSchema: {
       type: "object",
       properties: {
