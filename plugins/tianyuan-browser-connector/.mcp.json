@@ -7,7 +7,8 @@
       ],
       "cwd": ".",
       "env": {
-        "TIANYUAN_CONNECTOR_BRIDGE_URL": "http://127.0.0.1:40415"
+        "TIANYUAN_CONNECTOR_BRIDGE_URL": "http://127.0.0.1:40415",
+        "TIANYUAN_CONNECTOR_AGENT_CONFIG_PATH": "./runtime/agent-config.json"
       }
     }
   }

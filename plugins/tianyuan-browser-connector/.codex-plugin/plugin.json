@@ -1,7 +1,7 @@
 {
   "name": "tianyuan-browser-connector",
-  "version": "0.3.1",
-  "description": "Connect Codex to a bound Tianyuan browser session and run controlled audit attachment uploads.",
+  "version": "0.4.0",
+  "description": "Connect a registered local Agent to its own Tianyuan browser bindings and run controlled audit actions.",
   "author": {
     "name": "Tianyuan Browser Connector"
   },
@@ -16,8 +16,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "天源浏览器连接器",
-    "shortDescription": "连接天源页面并执行受控附件上传。",
-    "longDescription": "通过本地 Connector Bridge 将 Codex 项目和对话安全路由到已绑定的天源浏览器标签页。支持连接状态、页面上下文、能力读取，以及经明确确认的评估核实附件上传与底稿保存。",
+    "shortDescription": "连接已授权的天源页面并执行受控动作。",
+    "longDescription": "通过本地 Connector Bridge 将已注册的 Agent 工作区或对话安全路由到对应的天源浏览器标签页。读取和控制权限按页面绑定隔离，正式动作仍要求确认、编辑锁和回读。",
     "developerName": "Tianyuan Browser Connector",
     "category": "Productivity",
     "capabilities": [

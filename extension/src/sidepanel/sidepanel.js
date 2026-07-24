@@ -166,6 +166,18 @@ const elements = {
   bindConnectorCurrentThread: document.getElementById("bindConnectorCurrentThread"),
   clearConnectorBinding: document.getElementById("clearConnectorBinding"),
   connectorBindingFeedback: document.getElementById("connectorBindingFeedback"),
+  refreshAgentSources: document.getElementById("refreshAgentSources"),
+  agentSourceList: document.getElementById("agentSourceList"),
+  agentBindingList: document.getElementById("agentBindingList"),
+  manualAgentDisplayName: document.getElementById("manualAgentDisplayName"),
+  manualAgentWorkspaceId: document.getElementById("manualAgentWorkspaceId"),
+  manualAgentWorkspaceName: document.getElementById("manualAgentWorkspaceName"),
+  manualAgentConversationId: document.getElementById("manualAgentConversationId"),
+  manualAgentConversationTitle: document.getElementById("manualAgentConversationTitle"),
+  manualAgentScope: document.getElementById("manualAgentScope"),
+  manualAgentAccess: document.getElementById("manualAgentAccess"),
+  addManualAgent: document.getElementById("addManualAgent"),
+  manualAgentFeedback: document.getElementById("manualAgentFeedback"),
   connectorCapabilitySummary: document.getElementById("connectorCapabilitySummary"),
   connectorCapabilities: document.getElementById("connectorCapabilities"),
   helperStatus: document.getElementById("helperStatus"),
@@ -225,6 +237,7 @@ let connectorSessionId = "";
 let connectorProtocol = null;
 let connectorSession = null;
 let connectorCatalog = { projects: [], threads: [], updatedAt: null };
+let connectorAgentSources = [];
 let connectorBindingFormDirty = false;
 let connectorActionBusy = false;
 let confirmedSubjectCodes = null;
@@ -2436,6 +2449,143 @@ function connectorPageLabel(binding = {}, context = {}) {
   return "未识别";
 }
 
+function agentBindingLabel(binding = {}) {
+  const source = binding.displayName || binding.providerId || "未命名来源";
+  const target = binding.scope === "workspace"
+    ? (binding.workspaceName || binding.workspaceId || "工作区")
+    : (binding.conversationTitle || binding.conversationId || "对话");
+  return `${source} / ${target}`;
+}
+
+function codexControlBinding(session = connectorSession) {
+  return (session?.agentBindings || []).find((binding) => binding.providerId === "codex" && binding.accessMode === "control") || null;
+}
+
+function renderAgentSources() {
+  if (!elements.agentSourceList) return;
+  elements.agentSourceList.innerHTML = "";
+  if (!connectorAgentSources.length) {
+    elements.agentSourceList.innerHTML = '<div class="empty-list">未发现已注册来源</div>';
+    return;
+  }
+  for (const source of connectorAgentSources) {
+    const row = document.createElement("div");
+    row.className = "agent-row";
+    const name = document.createElement("strong");
+    name.textContent = source.displayName || source.providerId || "未命名来源";
+    const meta = document.createElement("span");
+    meta.textContent = `${source.providerId} · ${source.lastSeenAt ? "在线" : "未连接"}${source.manual ? " · 手动" : ""}`;
+    row.append(name, meta);
+    elements.agentSourceList.appendChild(row);
+  }
+}
+
+function renderAgentBindings(session) {
+  if (!elements.agentBindingList) return;
+  elements.agentBindingList.innerHTML = "";
+  const bindings = Array.isArray(session?.agentBindings) ? session.agentBindings : [];
+  if (!bindings.length) {
+    elements.agentBindingList.innerHTML = '<div class="empty-list">当前页面尚未绑定 Agent</div>';
+    return;
+  }
+  for (const binding of bindings) {
+    const row = document.createElement("div");
+    row.className = "agent-row";
+    const text = document.createElement("span");
+    text.textContent = `${agentBindingLabel(binding)} · ${binding.accessMode === "control" ? "控制" : "只读"} · ${binding.scope === "workspace" ? "工作区" : "对话"}`;
+    const actions = document.createElement("div");
+    actions.className = "button-row";
+    const mode = document.createElement("button");
+    mode.type = "button";
+    mode.className = "tiny secondary";
+    mode.textContent = binding.accessMode === "control" ? "改为只读" : "设为控制者";
+    mode.addEventListener("click", () => updateAgentBindingAccess(binding, binding.accessMode === "control" ? "read" : "control"));
+    actions.appendChild(mode);
+    row.append(text, actions);
+    elements.agentBindingList.appendChild(row);
+  }
+}
+
+async function loadAgentSources() {
+  try {
+    const result = await connectorFetch("/api/agent-sources");
+    connectorAgentSources = Array.isArray(result.sources) ? result.sources : [];
+    renderAgentSources();
+    return connectorAgentSources;
+  } catch (error) {
+    connectorAgentSources = [];
+    renderAgentSources();
+    setConnectorBindingFeedback(`Agent 来源读取失败：${error.message}`, "warn");
+    return [];
+  }
+}
+
+async function updateAgentBindingAccess(binding, accessMode) {
+  if (!connectorSessionId) return;
+  let confirmControlTransfer = "";
+  if (accessMode === "control" && !window.confirm(`确认将当前页面控制权切换给“${binding.displayName || binding.providerId}”？旧控制者尚未执行的任务会取消。`)) return;
+  if (accessMode === "control") confirmControlTransfer = "确认切换控制权";
+  try {
+    const result = await connectorFetch(
+      `/api/sessions/${encodeURIComponent(connectorSessionId)}/agent-bindings/${encodeURIComponent(binding.bindingId)}/access`,
+      { method: "POST", body: JSON.stringify({ accessMode, confirmControlTransfer }) },
+    );
+    renderConnectorSession(result.session);
+    setConnectorBindingFeedback(accessMode === "control" ? "控制权已切换，旧控制者队列已取消" : "已改为只读权限", "ok");
+  } catch (error) {
+    setConnectorBindingFeedback(`权限切换失败：${error.message}`, "error");
+  }
+}
+
+async function addManualAgent() {
+  const workspaceId = elements.manualAgentWorkspaceId.value.trim();
+  const scope = elements.manualAgentScope.value;
+  const conversationId = elements.manualAgentConversationId.value.trim();
+  if (!workspaceId && !conversationId) {
+    elements.manualAgentFeedback.textContent = "请填写工作区或对话标识。";
+    return;
+  }
+  if (scope === "conversation" && !conversationId) {
+    elements.manualAgentFeedback.textContent = "对话范围需要填写对话标识。";
+    return;
+  }
+  const accessMode = elements.manualAgentAccess.value;
+  let confirmControlTransfer = "";
+  if (accessMode === "control" && !window.confirm("确认将当前页面控制权交给手动 WorkBuddy 来源？旧控制者尚未执行的任务会取消。")) return;
+  if (accessMode === "control") confirmControlTransfer = "确认切换控制权";
+  setBusy(true);
+  try {
+    const session = await ensureCurrentPageConnectorSession();
+    const sourceResult = await connectorFetch("/api/agent-sources/manual", {
+      method: "POST",
+      body: JSON.stringify({ providerId: "workbuddy", displayName: elements.manualAgentDisplayName.value.trim() || "WorkBuddy" }),
+    });
+    const result = await connectorFetch(`/api/sessions/${encodeURIComponent(session.sessionId)}/agent-bindings`, {
+      method: "POST",
+      body: JSON.stringify({
+        providerId: sourceResult.source.providerId,
+        installationId: sourceResult.source.installationId,
+        workspaceId,
+        workspaceName: elements.manualAgentWorkspaceName.value.trim(),
+        conversationId,
+        conversationTitle: elements.manualAgentConversationTitle.value.trim(),
+        scope,
+        accessMode,
+        manualBinding: true,
+        confirmControlTransfer,
+      }),
+    });
+    renderConnectorSession(result.session);
+    await loadAgentSources();
+    const configPath = sourceResult.workbuddyConfig?.env?.TIANYUAN_CONNECTOR_AGENT_CONFIG_PATH || "";
+    elements.manualAgentFeedback.textContent = `已创建手动来源并绑定当前页面。WorkBuddy stdio 配置路径：${configPath}`;
+  } catch (error) {
+    elements.manualAgentFeedback.textContent = `添加失败：${error.message}`;
+  } finally {
+    setBusy(false);
+  }
+}
+
 function renderConnectorSession(session) {
   connectorSession = session || null;
   if (!session) {
@@ -2446,6 +2596,7 @@ function renderConnectorSession(session) {
     elements.connectorLastSeen.textContent = "-";
     elements.connectorCodexBindingStatus.textContent = "未绑定";
     elements.connectorBindingId.textContent = "-";
+    renderAgentBindings(null);
     if (!connectorBindingFormDirty) resetConnectorBindingForm();
     return;
   }
@@ -2468,6 +2619,7 @@ function renderConnectorSession(session) {
     : "未绑定";
   elements.connectorBindingId.textContent = codexBinding?.bindingId || "-";
   if (!connectorBindingFormDirty) renderConnectorBindingForm(codexBinding);
+  renderAgentBindings(session);
   renderConnectorCapabilities(session.capabilities || connectorProtocol?.capabilities || {});
 }
 
@@ -2808,7 +2960,7 @@ async function saveConnectorCodexBinding() {
   setConnectorBindingFeedback("正在检查页面连接并保存绑定...", "idle");
   try {
     await ensureCurrentPageConnectorSession();
-    const result = await connectorFetch(`/api/sessions/${encodeURIComponent(connectorSessionId)}/binding`, {
+    let result = await connectorFetch(`/api/sessions/${encodeURIComponent(connectorSessionId)}/binding`, {
       method: "POST",
       body: JSON.stringify(payload),
     });
@@ -2819,6 +2971,20 @@ async function saveConnectorCodexBinding() {
       : "已绑定当前 Codex 对话，其他对话不能使用", "ok");
     setStatus("Codex 绑定已保存", "ok");
   } catch (error) {
+    if (error.message === "CONTROL_TRANSFER_CONFIRMATION_REQUIRED" && window.confirm("当前页面已有其他 Agent 控制者。确认切换给 Codex？旧控制者尚未执行的任务会取消。")) {
+      try {
+        const result = await connectorFetch(`/api/sessions/${encodeURIComponent(connectorSessionId)}/binding`, {
+          method: "POST",
+          body: JSON.stringify({ ...payload, confirmControlTransfer: "确认切换控制权" }),
+        });
+        connectorBindingFormDirty = false;
+        renderConnectorSession(result.session);
+        setConnectorBindingFeedback("控制权已切换给 Codex，旧控制者队列已取消", "ok");
+        return;
+      } catch (retryError) {
+        error = retryError;
+      }
+    }
     setConnectorBindingFeedback(`绑定失败：${error.message}`, "error");
     setStatus(`Codex 绑定失败：${error.message}`, "error");
   } finally {
@@ -2846,6 +3012,20 @@ async function bindConnectorCurrentThread() {
     setConnectorBindingFeedback(`已绑定当前对话：${result.thread?.title || result.binding?.threadId || "Codex 对话"}`, "ok");
     setStatus("当前 Codex 对话绑定成功", "ok");
   } catch (error) {
+    if (error.message === "CONTROL_TRANSFER_CONFIRMATION_REQUIRED" && window.confirm("当前页面已有其他 Agent 控制者。确认切换给 Codex？旧控制者尚未执行的任务会取消。")) {
+      try {
+        const result = await connectorFetch(`/api/sessions/${encodeURIComponent(connectorSessionId)}/binding/current-thread`, {
+          method: "POST",
+          body: JSON.stringify({ ...payload, scope: "thread", confirmControlTransfer: "确认切换控制权" }),
+        });
+        connectorBindingFormDirty = false;
+        renderConnectorSession(result.session);
+        setConnectorBindingFeedback("控制权已切换给 Codex，旧控制者队列已取消", "ok");
+        return;
+      } catch (retryError) {
+        error = retryError;
+      }
+    }
     setConnectorBindingFeedback(`绑定当前对话失败：${error.message}`, "error");
     setStatus(`绑定当前对话失败：${error.message}`, "error");
   } finally {
@@ -2890,6 +3070,7 @@ async function checkConnectorConnection({ silent = false } = {}) {
     connectorProtocol = protocol;
     setConnection(elements.connectorStatus, health.sessionCount ? "已绑定" : "已启动", "ok");
     renderConnectorCapabilities(protocol.capabilities || {});
+    await loadAgentSources();
 
     await loadConnectorSessionId();
     if (connectorSessionId) {
@@ -3051,7 +3232,7 @@ async function navigateConnectorActionTarget(tab, target = {}) {
 }
 
 async function reportConnectorActionResult(actionId, result) {
-  const binding = connectorSession?.codexBinding || {};
+  const binding = codexControlBinding() || {};
   return await connectorFetch(
     `/api/sessions/${encodeURIComponent(connectorSessionId)}/actions/${encodeURIComponent(actionId)}/result`,
     {
@@ -3072,13 +3253,13 @@ async function processConnectorActionQueue() {
     || busy
     || document.visibilityState !== "visible"
     || !connectorSessionId
-    || !connectorSession?.codexBinding?.bindingId
+    || !codexControlBinding()?.bindingId
   ) return;
 
   connectorActionBusy = true;
   let claimedAction = null;
   try {
-    const binding = connectorSession.codexBinding;
+    const binding = codexControlBinding();
     const query = new URLSearchParams({
       bindingId: binding.bindingId,
       projectId: binding.projectId || "",
@@ -3991,6 +4172,8 @@ on(elements.checkConnections, "click", checkConnections);
 on(elements.startConnector, "click", startConnector);
 on(elements.bindCurrentPage, "click", bindCurrentPage);
 on(elements.refreshConnectorCatalog, "click", loadConnectorCatalog);
+on(elements.refreshAgentSources, "click", loadAgentSources);
+on(elements.addManualAgent, "click", addManualAgent);
 on(elements.connectorProjectPickerButton, "click", () => openConnectorPicker("project"));
 on(elements.connectorThreadPickerButton, "click", () => openConnectorPicker("thread"));
 on(elements.connectorProjectFilter, "input", renderConnectorProjectPicker);

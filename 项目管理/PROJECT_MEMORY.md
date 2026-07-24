@@ -224,3 +224,10 @@
 - Native Host 运行目录：`~/.tianyuan-workbench/native-helper/`。
 - Connector 运行目录：`~/plugins/tianyuan-browser-connector/` 和 `~/.codex/plugins/cache/personal/tianyuan-browser-connector/0.3.0/`。
 - OneDrive 后续只保留 `docs/`、`项目管理/`、交接说明、决策和测试证据；不作为扩展、Helper、Connector、脚本和依赖的运行来源。
+
+## 2026-07-24 多 Agent 绑定基线
+
+- Connector Bridge 协议为 `connector-agent-binding-v2`。来源身份由受控本机 `providerId + installationId + credentialRef` 声明，不扫描进程或猜测窗口。
+- 页面绑定内部统一为 `agentBinding`。同页多来源可读，唯一控制者可写；切换控制者必须在侧栏确认，并取消旧控制者未完成队列。
+- Codex 维持本机项目/对话目录自动读取；WorkBuddy 仅支持手动来源和通用 stdio MCP 配置，不宣称真实 WorkBuddy API 集成。
+- 安装脚本优先在 macOS Keychain 保存 Agent 本机凭证，只在 `~/.tianyuan-workbench/` 保存不含明文凭证的 `credentialRef` 配置；不保存 MCP token、Cookie、Authorization、密码或验证码。
