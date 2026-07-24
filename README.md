@@ -15,6 +15,7 @@ node scripts/install-local-runtime.mjs
 安装脚本会：
 
 - 复制 Chrome 扩展、本地助手和 Connector 到本机运行目录；
+- 同步打印格式脚本并验证本机 Python、`openpyxl` 和 `et_xmlfile`；
 - 注册 Chrome Native Messaging Host；
 - 输出 Chrome 需要加载的 `extensionPath`；
 - 不写入 MCP token、Cookie、Authorization、密码或验证码。

@@ -2144,6 +2144,12 @@ function getExportCompanyIds() {
   return [...new Set(ids)];
 }
 
+function exportFailureMessage(payload) {
+  const guidance = String(payload?.userMessage || "").trim();
+  if (guidance) return guidance;
+  return `导出失败：${payload?.reason || payload?.message || "未知原因"}`;
+}
+
 async function runCliExport(exportType) {
   if (busy) return;
   const ui = exportUi(exportType);
@@ -2202,9 +2208,10 @@ async function runCliExport(exportType) {
     latestPayload = payload;
     elements.json.textContent = JSON.stringify(payload, null, 2);
     await storageSet({ [STORAGE_LAST_EXPORT_RESULT_KEY]: payload });
-    appendTaskLog(`导出失败：${payload.reason || payload.message || "未知原因"}`);
-    setExportProgress(exportType, payload.percent || 0, `导出失败：${payload.reason || payload.message || "未知原因"}`);
-    setStatus(`导出失败：${payload.reason || payload.message || "未知原因"}`, "error");
+    const message = exportFailureMessage(payload);
+    appendTaskLog(message);
+    setExportProgress(exportType, payload.percent || 0, message);
+    setStatus(message, "error");
   } finally {
     setBusy(false);
   }

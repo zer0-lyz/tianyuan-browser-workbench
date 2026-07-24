@@ -10,7 +10,9 @@ Run from the repository root:
 node scripts/install-local-runtime.mjs
 ```
 
-The script copies runtime files locally, registers the Chrome Native Messaging host, and prints `extensionPath`.
+The script copies runtime files locally, registers the Chrome Native Messaging host, validates Python plus `openpyxl`/`et_xmlfile` for print-format tools, and prints `extensionPath`.
+
+If Python print dependencies are unavailable, installation stops with `PRINT_PYTHON_OPENPYXL_NOT_FOUND` before registering a partial runtime.
 
 ## Chrome Setup
 

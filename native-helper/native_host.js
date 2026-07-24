@@ -12,6 +12,8 @@ const DEFAULT_MCP_URL = "https://mcp.zhrdc.net/valuation-mcp";
 const DEFAULT_CONNECTOR_PORT = 40415;
 const CONNECTOR_PROTOCOL_VERSION = "connector-source-v1";
 const CONNECTOR_PLATFORM_URL = process.env.TIANYUAN_CONNECTOR_PLATFORM_URL || "http://127.0.0.1:40315";
+const CODEX_GLOBAL_STATE_PATH = process.env.TIANYUAN_CODEX_GLOBAL_STATE_PATH
+  || path.join(os.homedir(), ".codex", ".codex-global-state.json");
 const CONNECTOR_BINDINGS_PATH = process.env.TIANYUAN_CONNECTOR_BINDINGS_PATH
   || path.join(os.homedir(), ".tianyuan-workbench", "native-helper", "connector-bindings.json");
 const CONNECTOR_ACTION_TTL_MS = 5 * 60 * 1000;
@@ -308,14 +310,87 @@ function connectorPublicCodexBinding(binding) {
 }
 
 async function connectorFetchCodexCatalog() {
-  const response = await fetch(`${CONNECTOR_PLATFORM_URL}/api/catalog`);
-  if (!response.ok) throw new Error(`CODEX_CATALOG_HTTP_${response.status}`);
-  const payload = await response.json();
-  if (!payload?.ok) throw new Error(payload?.reason || "CODEX_CATALOG_UNAVAILABLE");
+  try {
+    const response = await fetch(`${CONNECTOR_PLATFORM_URL}/api/catalog`);
+    if (!response.ok) throw new Error(`CODEX_CATALOG_HTTP_${response.status}`);
+    const payload = await response.json();
+    if (!payload?.ok) throw new Error(payload?.reason || "CODEX_CATALOG_UNAVAILABLE");
+    return {
+      projects: Array.isArray(payload.projects) ? payload.projects : [],
+      threads: Array.isArray(payload.threads) ? payload.threads : [],
+      updatedAt: payload.updatedAt || null,
+      source: "connector-platform",
+    };
+  } catch {
+    return connectorReadLocalCodexCatalog();
+  }
+}
+
+function connectorReadLocalCodexCatalog() {
+  let state;
+  try {
+    state = JSON.parse(fs.readFileSync(CODEX_GLOBAL_STATE_PATH, "utf8"));
+  } catch (error) {
+    throw new Error(`CODEX_LOCAL_CATALOG_UNAVAILABLE: ${error?.message || error}`);
+  }
+
+  const projectsById = new Map();
+  const addProject = (input = {}) => {
+    const projectId = String(input.projectId || input.id || "").trim();
+    if (!projectId) return;
+    const projectPath = String(
+      input.projectPath || input.path || input.cwd || input.rootPaths?.[0] || "",
+    ).trim().replace(/[\\/]+$/, "");
+    const projectName = String(input.projectName || input.name || "").trim()
+      || path.basename(projectPath)
+      || projectId;
+    const previous = projectsById.get(projectId);
+    projectsById.set(projectId, {
+      projectId,
+      projectName,
+      projectPath,
+      path: projectPath,
+      updatedAt: Number(input.updatedAt || previous?.updatedAt || 0) || null,
+    });
+  };
+
+  for (const project of Object.values(state["local-projects"] || {})) addProject(project);
+
+  const assignments = state["thread-project-assignments"] || {};
+  for (const assignment of Object.values(assignments)) addProject({
+    projectId: assignment?.projectId,
+    projectPath: assignment?.cwd || assignment?.path,
+    projectName: assignment?.projectName,
+  });
+
+  const threads = Object.entries(assignments)
+    .map(([threadId, assignment]) => {
+      const projectId = String(assignment?.projectId || "").trim();
+      if (!threadId || !projectId) return null;
+      const project = projectsById.get(projectId);
+      const projectPath = String(
+        assignment?.cwd || assignment?.path || project?.projectPath || "",
+      ).trim().replace(/[\\/]+$/, "");
+      return {
+        threadId,
+        title: String(assignment?.title || assignment?.threadTitle || "").trim()
+          || `Codex 对话 ${threadId.slice(0, 8)}`,
+        projectId,
+        projectName: project?.projectName || path.basename(projectPath) || projectId,
+        projectPath,
+        cwd: projectPath,
+        recencyAt: project?.updatedAt || null,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => Number(b.recencyAt || 0) - Number(a.recencyAt || 0));
+
   return {
-    projects: Array.isArray(payload.projects) ? payload.projects : [],
-    threads: Array.isArray(payload.threads) ? payload.threads : [],
-    updatedAt: payload.updatedAt || null,
+    projects: [...projectsById.values()]
+      .sort((a, b) => String(a.projectName).localeCompare(String(b.projectName), "zh-CN")),
+    threads,
+    updatedAt: new Date().toISOString(),
+    source: "local-codex-state",
   };
 }
 
@@ -656,7 +731,7 @@ async function connectorHandle(req, res) {
       connectorJson(res, 200, {
         ok: true,
         ...catalog,
-        source: "connector-platform",
+        source: catalog.source || "connector-platform",
         security: { credentialsReturned: false },
       }, origin);
       return;
@@ -1550,6 +1625,32 @@ function exportProgressFromLine(line, state) {
   return state.percent;
 }
 
+function cliExportFailure(logLines) {
+  const text = logLines.map((item) => String(item?.text || "")).join("\n");
+  if (/本地登录凭证已过期|请先运行\s*tycpv login|(?:登录|授权).*(?:过期|失效)|缺少\s*MCP token/i.test(text)) {
+    return {
+      reason: "TYCPV_AUTH_REQUIRED",
+      userMessage: "CLI 授权已过期或缺失。请进入“连接配置”，点击“授权 CLI”，完成登录后点击“启动/检查”，再重新导出。",
+    };
+  }
+  if (/unauthorized|invalid token|MCP token|VALUATION_MCP_TOKEN/i.test(text)) {
+    return {
+      reason: "MCP_TOKEN_REQUIRED",
+      userMessage: "MCP token 未配置或已失效。请在“连接配置”中由使用者本人重新配置 MCP token，再重新导出。",
+    };
+  }
+  if (/forbidden|权限不足|无权访问/i.test(text)) {
+    return {
+      reason: "TYCPV_PERMISSION_DENIED",
+      userMessage: "当前 CLI 账号没有导出权限。请确认登录账号拥有该项目的导出权限后再试。",
+    };
+  }
+  return {
+    reason: "TYCPV_EXPORT_FAILED",
+    userMessage: "",
+  };
+}
+
 function runCliExport(message, emit) {
   let exportConfig;
   try {
@@ -1637,6 +1738,7 @@ function runCliExport(message, emit) {
     child.on("close", (code, signal) => {
       if (completed) return;
       const ok = code === 0;
+      const failure = ok ? null : cliExportFailure(logLines);
       complete({
         ok,
         event: "complete",
@@ -1651,7 +1753,8 @@ function runCliExport(message, emit) {
         outDir,
         outputFiles: [...outputFiles],
         logLines,
-        reason: ok ? null : "TYCPV_EXPORT_FAILED",
+        reason: failure?.reason || null,
+        userMessage: failure?.userMessage || "",
         security: { credentialsReturned: false },
       });
     });
