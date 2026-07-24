@@ -7,6 +7,7 @@ const os = require("node:os");
 const path = require("node:path");
 const readline = require("node:readline");
 const { randomUUID } = require("node:crypto");
+const connectorBridge = require("./connector_bridge.js");
 
 const DEFAULT_MCP_URL = "https://mcp.zhrdc.net/valuation-mcp";
 const DEFAULT_CONNECTOR_PORT = 40415;
@@ -1058,23 +1059,13 @@ async function connectorHandle(req, res) {
 }
 
 function startConnectorBridge() {
-  const connectorPort = Number(process.env.TIANYUAN_CONNECTOR_PORT || DEFAULT_CONNECTOR_PORT);
-  const server = http.createServer((req, res) => {
-    connectorHandle(req, res).catch((error) => connectorError(res, 500, error?.message || String(error)));
-  });
-  server.listen(connectorPort, "127.0.0.1", () => {
-    process.stdout.write(`Tianyuan connector bridge listening on http://127.0.0.1:${connectorPort}\n`);
+  return connectorBridge.start({
+    port: Number(process.env.TIANYUAN_CONNECTOR_PORT || DEFAULT_CONNECTOR_PORT),
   });
 }
 
 async function connectorBridgeHealth() {
-  const connectorPort = Number(process.env.TIANYUAN_CONNECTOR_PORT || DEFAULT_CONNECTOR_PORT);
-  try {
-    const response = await fetch(`http://127.0.0.1:${connectorPort}/health`);
-    return response.ok ? await response.json() : { ok: false, reason: `CONNECTOR_HTTP_${response.status}` };
-  } catch {
-    return { ok: false, reason: "CONNECTOR_NOT_RUNNING" };
-  }
+  return connectorBridge.health(Number(process.env.TIANYUAN_CONNECTOR_PORT || DEFAULT_CONNECTOR_PORT));
 }
 
 async function startConnectorBridgeAction() {

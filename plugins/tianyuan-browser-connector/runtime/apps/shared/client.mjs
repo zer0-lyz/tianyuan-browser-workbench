@@ -1,3 +1,8 @@
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 const bridgeUrl = (process.env.TIANYUAN_CONNECTOR_BRIDGE_URL || "http://127.0.0.1:40415").replace(/\/$/, "");
 
 export const tools = [
@@ -219,30 +224,123 @@ export const tools = [
   }
 ];
 
-async function request(path, options = {}) {
-  const response = await fetch(`${bridgeUrl}${path}`, {
+let agentIdentityPromise = null;
+let agentRegistrationPromise = null;
+
+function readAgentConfig() {
+  const runtimeRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+  const candidates = [
+    process.env.TIANYUAN_CONNECTOR_AGENT_CONFIG_PATH,
+    path.join(runtimeRoot, "agent-config.json"),
+    path.resolve(process.cwd(), "runtime", "agent-config.json"),
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      const value = JSON.parse(fs.readFileSync(candidate, "utf8"));
+      if (value?.providerId && value?.installationId && value?.credentialRef) return value;
+    } catch {
+      // Continue to the next local runtime configuration candidate.
+    }
+  }
+  return {
+    providerId: process.env.TIANYUAN_CONNECTOR_PROVIDER_ID || "",
+    installationId: process.env.TIANYUAN_CONNECTOR_INSTALLATION_ID || "",
+    credentialRef: process.env.TIANYUAN_CONNECTOR_CREDENTIAL_REF || "",
+  };
+}
+
+function resolveCredential(reference) {
+  const ref = String(reference || "");
+  if (ref.startsWith("keychain:")) {
+    const [, service, account] = ref.split(":");
+    if (!service || !account) return "";
+    try {
+      return execFileSync("security", ["find-generic-password", "-s", service, "-a", account, "-w"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+    } catch {
+      return "";
+    }
+  }
+  if (ref.startsWith("file:")) {
+    const [filePath, key] = ref.slice(5).split("#");
+    try {
+      const values = JSON.parse(fs.readFileSync(filePath, "utf8"));
+      return String(values?.secrets?.[key] || values?.[key] || "");
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
+async function getAgentIdentity() {
+  if (!agentIdentityPromise) {
+    agentIdentityPromise = Promise.resolve().then(() => {
+      const config = readAgentConfig();
+      if (!config.providerId || !config.installationId || !config.credentialRef) {
+        throw Object.assign(new Error("Agent runtime configuration is missing."), { code: "AGENT_CONFIG_NOT_FOUND" });
+      }
+      const credential = resolveCredential(config.credentialRef);
+      if (!credential) {
+        throw Object.assign(new Error("Agent credential is unavailable from its local credentialRef."), { code: "AGENT_CREDENTIAL_UNAVAILABLE" });
+      }
+      return {
+        providerId: String(config.providerId),
+        installationId: String(config.installationId),
+        credential,
+      };
+    });
+  }
+  return agentIdentityPromise;
+}
+
+async function request(pathname, options = {}) {
+  const identity = await getAgentIdentity();
+  const response = await fetch(`${bridgeUrl}${pathname}`, {
     cache: "no-store",
     ...options,
     headers: {
       "content-type": "application/json",
-      ...(options.headers || {})
-    }
+      "x-tianyuan-agent-provider": identity.providerId,
+      "x-tianyuan-agent-installation": identity.installationId,
+      "x-tianyuan-agent-credential": identity.credential,
+      ...(options.headers || {}),
+    },
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload?.ok) {
-    const error = new Error(payload?.reason || `TIANYUAN_CONNECTOR_HTTP_${response.status}`);
-    error.code = payload?.reason || "TIANYUAN_CONNECTOR_REQUEST_FAILED";
-    error.details = payload;
-    throw error;
+    const failure = new Error(payload?.reason || `TIANYUAN_CONNECTOR_HTTP_${response.status}`);
+    failure.code = payload?.reason || "TIANYUAN_CONNECTOR_REQUEST_FAILED";
+    failure.details = payload;
+    throw failure;
   }
   return payload;
 }
 
+async function ensureAgentRegistered() {
+  if (!agentRegistrationPromise) {
+    agentRegistrationPromise = request("/api/agent-sources/register", { method: "POST", body: "{}" })
+      .catch((cause) => {
+        agentRegistrationPromise = null;
+        throw cause;
+      });
+  }
+  return agentRegistrationPromise;
+}
+
+function bindingFor(session) {
+  const bindings = Array.isArray(session?.agentBindings) ? session.agentBindings : [];
+  return bindings[0] || session?.codexBinding || null;
+}
+
 function actionAuthQuery(input) {
   return new URLSearchParams({
-    bindingId: input.bindingId || "",
+    workspaceId: input.workspaceId || input.projectId || "",
+    conversationId: input.conversationId || input.threadId || "",
     projectId: input.projectId || "",
-    threadId: input.threadId || ""
+    threadId: input.threadId || "",
   }).toString();
 }
 
@@ -250,15 +348,11 @@ async function waitForAction(sessionId, actionId, input, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   const query = actionAuthQuery(input);
   while (Date.now() < deadline) {
-    const payload = await request(
-      `/api/sessions/${encodeURIComponent(sessionId)}/actions/${encodeURIComponent(actionId)}?${query}`
-    );
-    if (["completed", "failed"].includes(payload.action?.status)) return payload.action;
+    const payload = await request(`/api/sessions/${encodeURIComponent(sessionId)}/actions/${encodeURIComponent(actionId)}?${query}`);
+    if (["completed", "failed", "cancelled"].includes(payload.action?.status)) return payload.action;
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
-  throw Object.assign(new Error("等待天源浏览器页面执行超时。请确认工作台侧栏保持打开。"), {
-    code: "TIANYUAN_BROWSER_ACTION_TIMEOUT"
-  });
+  throw Object.assign(new Error("等待天源浏览器页面执行超时。请确认工作台侧栏保持打开。"), { code: "TIANYUAN_BROWSER_ACTION_TIMEOUT" });
 }
 
 async function runBrowserAction(name, input) {
@@ -272,35 +366,28 @@ async function runBrowserAction(name, input) {
     "tianyuan.inspect_audit_check_row": "inspect_audit_check_row",
     "tianyuan.set_audit_check_result": "set_audit_check_result",
     "tianyuan.scan_audit_index_check_rows": "scan_audit_index_check_rows",
-    "tianyuan.batch_set_audit_check_results": "batch_set_audit_check_results"
+    "tianyuan.batch_set_audit_check_results": "batch_set_audit_check_results",
   }[name];
-  const submitted = await request(
-    `/api/sessions/${encodeURIComponent(input.sessionId)}/actions`,
-    {
-      method: "POST",
-      body: JSON.stringify({ ...input, action })
-    }
-  );
+  const submitted = await request(`/api/sessions/${encodeURIComponent(input.sessionId)}/actions`, {
+    method: "POST",
+    body: JSON.stringify({ ...input, action }),
+  });
   const result = await waitForAction(
     input.sessionId,
     submitted.action.actionId,
     input,
-    ["upload_audit_attachment", "batch_upload_audit_attachments", "clear_audit_test_rows", "set_audit_check_result", "batch_set_audit_check_results"].includes(action) ? 150000 : 60000
+    ["upload_audit_attachment", "batch_upload_audit_attachments", "clear_audit_test_rows", "set_audit_check_result", "batch_set_audit_check_results"].includes(action) ? 150000 : 60000,
   );
   return {
     ok: result.status === "completed" && result.result?.ok === true,
     action: result,
-    security: {
-      browserScriptExecution: true,
-      arbitraryJavaScript: false,
-      credentialsReturned: false
-    }
+    security: { browserScriptExecution: true, arbitraryJavaScript: false, credentialsReturned: false },
   };
 }
 
 function sessionSummary(session, includeContext = false) {
   const page = session.binding || {};
-  const codex = session.codexBinding || null;
+  const binding = bindingFor(session);
   const summary = {
     sessionId: session.sessionId,
     status: session.status,
@@ -310,114 +397,94 @@ function sessionSummary(session, includeContext = false) {
       companyId: page.companyId || "",
       subjectCode: page.subjectCode || "",
       pageType: page.pageType || "",
-      tabId: page.tabId ?? null
+      tabId: page.tabId ?? null,
     },
-    binding: codex ? {
-      bindingId: codex.bindingId,
-      projectId: codex.projectId || "",
-      projectName: codex.projectName || "",
-      projectPath: codex.projectPath || "",
-      threadId: codex.threadId || "",
-      threadTitle: codex.threadTitle || "",
-      scope: codex.scope || "thread"
+    binding: binding ? {
+      bindingId: binding.bindingId,
+      agentId: binding.agentId || "",
+      providerId: binding.providerId || "codex",
+      displayName: binding.displayName || "Codex",
+      installationId: binding.installationId || "",
+      workspaceId: binding.workspaceId || binding.projectId || "",
+      workspaceName: binding.workspaceName || binding.projectName || "",
+      workspacePath: binding.workspacePath || binding.projectPath || "",
+      conversationId: binding.conversationId || binding.threadId || "",
+      conversationTitle: binding.conversationTitle || binding.threadTitle || "",
+      scope: binding.scope || "conversation",
+      accessMode: binding.accessMode || "read",
     } : null,
-    capabilities: session.capabilities || {}
+    capabilities: session.capabilities || {},
   };
+  if (session.codexBinding) summary.codexBinding = session.codexBinding;
   if (includeContext) summary.context = session.context || {};
   return summary;
 }
 
-function normalizePath(value) {
-  return String(value || "").replace(/[\\/]+$/, "");
-}
+function normalizePath(value) { return String(value || "").replace(/[\\/]+$/, ""); }
 
 function matchesBinding(session, input = {}) {
-  const binding = session.codexBinding;
+  const binding = bindingFor(session);
   if (!binding) return false;
   if (input.sessionId && session.sessionId !== input.sessionId) return false;
   if (input.bindingId && binding.bindingId !== input.bindingId) return false;
-  if (input.projectId && binding.projectId !== input.projectId) return false;
-  if (input.projectPath && normalizePath(binding.projectPath) !== normalizePath(input.projectPath)) return false;
-  if (input.threadId && binding.threadId !== input.threadId) return false;
+  if (input.workspaceId && (binding.workspaceId || binding.projectId) !== input.workspaceId) return false;
+  if (input.projectId && (binding.workspaceId || binding.projectId) !== input.projectId) return false;
+  if (input.workspacePath && normalizePath(binding.workspacePath || binding.projectPath) !== normalizePath(input.workspacePath)) return false;
+  if (input.projectPath && normalizePath(binding.workspacePath || binding.projectPath) !== normalizePath(input.projectPath)) return false;
+  if (binding.scope !== "workspace" && input.conversationId && (binding.conversationId || binding.threadId) !== input.conversationId) return false;
+  if (binding.scope !== "workspace" && input.threadId && (binding.conversationId || binding.threadId) !== input.threadId) return false;
   return true;
 }
 
 function requireBoundSession(sessions, input) {
   const session = sessions.find((item) => item.sessionId === input.sessionId);
   if (!session) throw Object.assign(new Error(`Session not found: ${input.sessionId}`), { code: "SESSION_NOT_FOUND" });
-  if (!session.codexBinding) throw Object.assign(new Error("The Tianyuan session is not bound to a Codex project or thread."), { code: "SESSION_NOT_BOUND" });
-  if (session.codexBinding.bindingId !== input.bindingId) {
-    throw Object.assign(new Error("bindingId does not match the selected Tianyuan session."), { code: "BINDING_MISMATCH" });
-  }
-  if (input.projectId && session.codexBinding.projectId !== input.projectId) {
-    throw Object.assign(new Error("projectId does not match the selected Tianyuan binding."), { code: "PROJECT_BINDING_MISMATCH" });
-  }
-  if (input.threadId && session.codexBinding.threadId !== input.threadId) {
-    throw Object.assign(new Error("threadId does not match the selected Tianyuan binding."), { code: "THREAD_BINDING_MISMATCH" });
-  }
+  const binding = bindingFor(session);
+  if (!binding) throw Object.assign(new Error("The Tianyuan session is not bound to this registered Agent."), { code: "AGENT_BINDING_MISMATCH" });
+  if (binding.bindingId !== input.bindingId) throw Object.assign(new Error("bindingId does not match the selected Agent binding."), { code: "AGENT_BINDING_MISMATCH" });
+  if (!matchesBinding(session, input)) throw Object.assign(new Error("workspace or conversation does not match the selected Agent binding."), { code: "AGENT_BINDING_MISMATCH" });
   return session;
 }
 
 async function connectionStatus(input = {}) {
+  await ensureAgentRegistered();
   const payload = await request("/api/sessions");
   const allSessions = Array.isArray(payload.sessions) ? payload.sessions : [];
   const onlineSessions = allSessions.filter((session) => session.status === "online");
-  const boundSessions = onlineSessions.filter((session) => session.codexBinding);
+  const boundSessions = onlineSessions.filter((session) => bindingFor(session));
   const matches = boundSessions.filter((session) => matchesBinding(session, input));
   const issues = [];
-  if (!onlineSessions.length) issues.push({ code: "NO_ONLINE_SESSIONS", message: "没有在线天源浏览器 session。" });
-  else if (!boundSessions.length) issues.push({ code: "NO_BOUND_SESSIONS", message: "在线天源页面尚未绑定 Codex 项目或对话。" });
-  else if (!matches.length) issues.push({ code: "NO_MATCHING_BINDING", message: "没有找到与当前项目或对话匹配的天源页面。" });
-  else if (matches.length > 1 && !input.sessionId && !input.bindingId) {
-    issues.push({ code: "MULTIPLE_MATCHING_SESSIONS", message: "匹配到多个天源页面，请明确 sessionId 或 bindingId。" });
-  }
+  if (!onlineSessions.length) issues.push({ code: "NO_ONLINE_SESSIONS", message: "没有当前 Agent 有权访问的在线天源浏览器 session。" });
+  else if (!boundSessions.length) issues.push({ code: "NO_AGENT_BINDINGS", message: "在线天源页面尚未绑定当前 Agent。" });
+  else if (!matches.length) issues.push({ code: "NO_MATCHING_BINDING", message: "没有找到与当前工作区或对话匹配的天源页面。" });
+  else if (matches.length > 1 && !input.sessionId && !input.bindingId) issues.push({ code: "MULTIPLE_MATCHING_SESSIONS", message: "匹配到多个天源页面，请明确 sessionId 或 bindingId。" });
   const recommendedSession = matches.length === 1 ? sessionSummary(matches[0], true) : null;
   return {
     ok: issues.length === 0,
     bridge: { url: bridgeUrl, online: true },
-    counts: {
-      online: onlineSessions.length,
-      bound: boundSessions.length,
-      matched: matches.length
-    },
+    counts: { online: onlineSessions.length, bound: boundSessions.length, matched: matches.length },
     issues,
     recommendedSession,
     sessions: input.includeSessions === false ? undefined : matches.map((session) => sessionSummary(session, false)),
-    routingRule: "后续调用必须复用 recommendedSession 的 sessionId 和 bindingId；不得改用其他最新 session。"
+    routingRule: "后续调用必须复用 recommendedSession 的 sessionId 和 bindingId；Bridge 只返回当前已注册 Agent 有权访问的页面。",
   };
 }
 
 export async function executeTool(name, input = {}) {
+  await ensureAgentRegistered();
   if (name === "tianyuan.connection_status") return connectionStatus(input);
   if (name === "tianyuan.list_sessions") {
     const payload = await request("/api/sessions");
-    return {
-      ok: true,
-      sessions: (payload.sessions || []).map((session) => sessionSummary(session, input.includeContext === true))
-    };
+    return { ok: true, sessions: (payload.sessions || []).map((session) => sessionSummary(session, input.includeContext === true)) };
   }
   if (name === "tianyuan.get_context") {
     const payload = await request("/api/sessions");
     const session = requireBoundSession(payload.sessions || [], input);
-    return {
-      ok: true,
-      session: sessionSummary(session, true),
-      security: {
-        readOnly: true,
-        writesPerformed: false,
-        credentialsReturned: false
-      }
-    };
+    return { ok: true, session: sessionSummary(session, true), security: { readOnly: true, writesPerformed: false, credentialsReturned: false } };
   }
   if (name === "tianyuan.list_capabilities") {
     const payload = await request("/api/protocol");
-    return {
-      ok: true,
-      protocolVersion: payload.protocolVersion,
-      adapter: payload.adapter,
-      capabilities: payload.capabilities,
-      safety: payload.safety
-    };
+    return { ok: true, protocolVersion: payload.protocolVersion, adapter: payload.adapter, capabilities: payload.capabilities, safety: payload.safety };
   }
   if ([
     "tianyuan.preview_audit_attachment_upload",
@@ -427,9 +494,7 @@ export async function executeTool(name, input = {}) {
     "tianyuan.inspect_audit_check_row",
     "tianyuan.set_audit_check_result",
     "tianyuan.scan_audit_index_check_rows",
-    "tianyuan.batch_set_audit_check_results"
-  ].includes(name)) {
-    return await runBrowserAction(name, input);
-  }
+    "tianyuan.batch_set_audit_check_results",
+  ].includes(name)) return runBrowserAction(name, input);
   throw Object.assign(new Error(`Unknown tool: ${name}`), { code: "UNKNOWN_TOOL" });
 }

@@ -17,6 +17,7 @@ node scripts/install-local-runtime.mjs
 - 复制 Chrome 扩展、本地助手和 Connector 到本机运行目录；
 - 同步打印格式脚本并验证本机 Python、`openpyxl` 和 `et_xmlfile`；
 - 注册 Chrome Native Messaging Host；
+- 在 macOS Keychain（不可用时为 `~/.tianyuan-workbench/` 的受限本机运行态）注册 Codex 本机实例身份；
 - 输出 Chrome 需要加载的 `extensionPath`；
 - 不写入 MCP token、Cookie、Authorization、密码或验证码。
 
@@ -40,6 +41,12 @@ node scripts/install-local-runtime.mjs
 
 ## 安全边界
 
+- 页面访问按已注册 Agent 来源和 `agentBinding` 隔离；仅 `127.0.0.1` 不是来源授权。
+- 同一浏览器页面可授予多个来源只读权限，但任一时刻只允许一个来源拥有控制权限；切换控制者必须在侧栏确认，并会取消旧控制者未执行的队列任务。
 - MCP token 只能由使用者本人在插件面板中输入，只在当前侧边栏会话中使用。
 - 正式保存、上传、退出编辑等动作必须经过明确确认。
 - 上传成功必须同时满足附件入库、分类批次、底稿保存和单元格回读一致。
+
+## 其他 Agent
+
+Codex 安装时自动注册本机来源并继续读取本机项目/对话目录。WorkBuddy 尚未集成其项目或对话 API；请在侧栏“Agent 控制者管理”添加手动来源，填写本机可见的工作区/对话标识，然后使用侧栏生成的 stdio MCP 配置。该配置只引用本机 `credentialRef`，不包含密钥或 MCP token。

@@ -424,3 +424,14 @@ Windows 测试包已完成 ZIP 解包、266 个文件逐项 SHA-256、PE x64 架
 下一步建议从 `baseline-page-tree-mirror-20260723` 继续开发新的功能模块。新增模块必须复用已经确认的公司范围和科目范围，不重新改写科目树基础逻辑。
 
 如不希望手动启动终端 helper，可改用 Native Messaging：重新加载扩展后直接点击“启动/检查”。若环境中没有 `VALUATION_MCP_TOKEN`，会显示 Helper 已启动、CLI 可用、MCP 未配置 token。
+
+## 2026-07-24 多 Agent 来源识别、授权与页面绑定
+
+- Connector Bridge 协议升级为 `connector-agent-binding-v2`，运行逻辑由 `native-helper/connector_bridge.js` 承担，Native Host 仅负责受控启动。
+- 旧 `codexBinding` 持久记录会幂等迁移为 `agentBinding`；迁移仅在成功写出 v2 文件后替换运行态，无法读取旧记录时不删除原文件。
+- `agentBinding` 保存 `agentId`、`providerId`、`displayName`、`installationId`、工作区/对话字段、范围、权限、页面键和时间戳；`codexBinding` 保留为 Codex 只读兼容字段。
+- Bridge 新增注册来源查询和手动来源注册。MCP 客户端从受控本机 `agent-config.json` 声明 `providerId`、`installationId` 和 `credentialRef`；macOS 优先使用 Keychain，不以本机回环地址代替来源鉴权。
+- 同一页面允许多来源 `read`，但只允许一个 `control`。侧栏确认转移控制权时，旧控制者尚未执行或已领取的队列动作会标记为 `AGENT_CONTROL_REVOKED`。
+- 连接配置页新增“Agent 控制者管理”：来源状态、页面权限、控制/只读切换和 WorkBuddy 手动绑定。WorkBuddy 未集成项目或对话 API，只接受用户填写的本机可见标识。
+- Connector 版本升至 `0.4.0`，扩展版本升至 `0.7.0`。
+- 本地模拟验证通过：`node tests/agent-binding-bridge.test.cjs`。证据见 `docs/test-evidence/2026-07-24-agent-binding-v2-local-validation.md`。未对天源线上页面执行写入。

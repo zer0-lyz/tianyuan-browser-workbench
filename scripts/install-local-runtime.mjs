@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
+import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -11,7 +12,7 @@ const EXTENSION_IDS = [
   "fdbllnmaaklkcmoacoapbibiggnndkfpa",
 ];
 const PROJECT_NAME = "天源评估系统";
-const CONNECTOR_VERSION = "0.3.1";
+const CONNECTOR_VERSION = "0.4.0";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const isWindows = process.platform === "win32";
@@ -45,6 +46,85 @@ function copyDir(src, dest) {
   fs.rmSync(dest, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.cpSync(src, dest, { recursive: true, force: true });
+}
+
+function readJson(targetPath, fallback) {
+  try {
+    return JSON.parse(fs.readFileSync(targetPath, "utf8"));
+  } catch (error) {
+    if (error?.code === "ENOENT") return fallback;
+    throw error;
+  }
+}
+
+function writePrivateJson(targetPath, value) {
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(targetPath, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  if (!isWindows) fs.chmodSync(targetPath, 0o600);
+}
+
+function ensureCodexAgentSource() {
+  const sourcesPath = path.join(nativeRuntimeRoot, "agent-sources.json");
+  const sourcesPayload = readJson(sourcesPath, { version: 1, sources: [] });
+  const sources = Array.isArray(sourcesPayload.sources) ? sourcesPayload.sources : [];
+  const existing = sources.find((source) => source?.providerId === "codex" && source?.installationId);
+  if (existing) return { source: existing, sourcesPath };
+
+  const installationId = `codex-${randomUUID()}`;
+  let credentialRef = "";
+  if (!isWindows) {
+    const service = `com.tianyuan.workbench.agent.codex.${installationId}`;
+    const account = "connector-bridge";
+    const secret = randomBytes(32).toString("base64url");
+    try {
+      execFileSync("security", [
+        "add-generic-password",
+        "-U",
+        "-s", service,
+        "-a", account,
+        "-w", secret,
+      ], { stdio: ["ignore", "ignore", "ignore"] });
+      credentialRef = `keychain:${service}:${account}`;
+    } catch {
+      // Use the restricted local runtime only if Keychain is unavailable.
+    }
+  }
+  if (!credentialRef) {
+    const credentialPath = path.join(nativeRuntimeRoot, "agent-credentials.json");
+    const credentialKey = `codex-${installationId}`;
+    const credentials = readJson(credentialPath, { secrets: {} });
+    credentials.secrets = credentials.secrets || {};
+    credentials.secrets[credentialKey] = randomBytes(32).toString("base64url");
+    writePrivateJson(credentialPath, credentials);
+    credentialRef = `file:${credentialPath}#${credentialKey}`;
+  }
+  const timestamp = new Date().toISOString();
+  const source = {
+    agentId: "codex",
+    providerId: "codex",
+    displayName: "Codex",
+    installationId,
+    credentialRef,
+    manual: false,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    lastSeenAt: null,
+  };
+  sources.push(source);
+  writePrivateJson(sourcesPath, {
+    version: 1,
+    updatedAt: timestamp,
+    sources,
+  });
+  return { source, sourcesPath };
+}
+
+function writeAgentConfig(pluginRoot, source) {
+  writePrivateJson(path.join(pluginRoot, "runtime", "agent-config.json"), {
+    providerId: source.providerId,
+    installationId: source.installationId,
+    credentialRef: source.credentialRef,
+  });
 }
 
 function executableCandidates(names) {
@@ -197,8 +277,13 @@ function main() {
   }
 
   fs.cpSync(path.join(repoRoot, "native-helper", "native_host.js"), path.join(nativeRuntimeRoot, "native_host.js"), { force: true });
+  fs.cpSync(path.join(repoRoot, "native-helper", "connector_bridge.js"), path.join(nativeRuntimeRoot, "connector_bridge.js"), { force: true });
   if (fs.existsSync(path.join(repoRoot, "native-helper", "server.js"))) {
     fs.cpSync(path.join(repoRoot, "native-helper", "server.js"), path.join(nativeRuntimeRoot, "server.js"), { force: true });
+  }
+  const { source: codexAgentSource, sourcesPath } = ensureCodexAgentSource();
+  for (const pluginRoot of [userPluginRoot, codexPluginRoot]) {
+    writeAgentConfig(pluginRoot, codexAgentSource);
   }
 
   const nodeBin = process.env.TIANYUAN_NODE_BIN || findExecutable(isWindows ? ["node.exe", "node"] : ["node"]);
@@ -221,7 +306,14 @@ function main() {
     },
     connectorPath: userPluginRoot,
     codexConnectorCachePath: codexPluginRoot,
-    credentialsWritten: false,
+    agentSourceRegistryPath: sourcesPath,
+    codexAgentSource: {
+      providerId: codexAgentSource.providerId,
+      installationId: codexAgentSource.installationId,
+      credentialStorage: codexAgentSource.credentialRef.startsWith("keychain:") ? "macOS Keychain" : "restricted local runtime",
+    },
+    mcpCredentialsWritten: false,
+    agentCredentialProvisioned: true,
     next: [
       "Open Chrome extensions page.",
       "Enable Developer mode.",
