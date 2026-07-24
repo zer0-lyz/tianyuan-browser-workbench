@@ -1154,6 +1154,25 @@ function recordBatchUploadResult(mapping, result) {
   batchUploadState.results.push(item);
 }
 
+function batchUploadFailureDetail(item) {
+  const confirmation = item?.uploadConfirmation || {};
+  const format = (label, evidence) => {
+    if (!evidence) return `${label}未捕获到响应`;
+    const code = evidence.businessCode === null || evidence.businessCode === undefined
+      ? ""
+      : `，业务 code ${evidence.businessCode}`;
+    const message = evidence.businessMessage ? `，${evidence.businessMessage}` : "";
+    return `${label} HTTP ${evidence.status || 0}${code}${message}`;
+  };
+  if (item?.reason !== "UPLOAD_OR_CLASSIFY_NOT_CONFIRMED") return item?.reason || "未知原因";
+  const failed = [];
+  if (!confirmation.attach?.businessSuccess) failed.push(format("附件上传", confirmation.attach));
+  if (!confirmation.classify?.businessSuccess) failed.push(format("分类批次", confirmation.classify));
+  return failed.length
+    ? `${item.reason}；${failed.join("；")}`
+    : item.reason;
+}
+
 async function saveBatchUploadMappings(tab, controlBinding, mappings) {
   if (!mappings.length) return { ok: true, skipped: true };
   elements.batchUploadProgressText.textContent = `已完成 ${mappings.length} 个文件上传，正在统一保存并回读...`;
@@ -1324,7 +1343,7 @@ function renderBatchUploadResultList(results = batchUploadState.results || []) {
     const row = document.createElement("div");
     row.className = `batch-upload-result ${item.ok ? "ok" : "error"}`;
     const position = item.targetPosition ? ` → ${item.targetPosition}` : "";
-    row.textContent = `${item.ok ? "完成" : "失败"}：${item.fileName} → 第 ${item.rowNumber} 行${position}${item.ok ? "" : `，${item.reason || "未知原因"}`}`;
+    row.textContent = `${item.ok ? "完成" : "失败"}：${item.fileName} → 第 ${item.rowNumber} 行${position}${item.ok ? "" : `，${batchUploadFailureDetail(item)}`}`;
     elements.batchUploadResultList.appendChild(row);
   }
 }
