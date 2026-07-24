@@ -16,6 +16,10 @@ const EXTENSION_ORIGINS = new Set([
   "chrome-extension://lkflndcnklpeaejohaacoaolnmhgigoc",
   "chrome-extension://fdbllnmaaklkcmoacoapbibiggnndkfpa",
 ]);
+const EXTENSION_IDS = new Set([
+  "lkflndcnklpeaejohaacoaolnmhgigoc",
+  "fdbllnmaaklkcmoacoapbibiggnndkfpa",
+]);
 
 function now() { return new Date().toISOString(); }
 function id(prefix) { return `${prefix}_${randomUUID()}`; }
@@ -63,7 +67,10 @@ function equal(a, b) { const left = Buffer.from(String(a || "")); const right = 
 
 function readJson(filePath, fallback) { try { return JSON.parse(fs.readFileSync(filePath, "utf8")); } catch (cause) { if (cause?.code === "ENOENT") return fallback; throw cause; } }
 function writeJson(filePath, payload) { fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 }); const temporary = `${filePath}.tmp`; fs.writeFileSync(temporary, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 }); fs.renameSync(temporary, filePath); }
-function isBrowser(req) { return EXTENSION_ORIGINS.has(String(req.headers.origin || "")); }
+function isBrowser(req) {
+  return EXTENSION_ORIGINS.has(String(req.headers.origin || ""))
+    || EXTENSION_IDS.has(String(req.headers["x-tianyuan-extension-id"] || ""));
+}
 function allowedOrigin(req) { const origin = String(req.headers.origin || ""); return isBrowser(req) ? origin : ""; }
 function json(res, status, payload, origin = "") { const body = JSON.stringify({ ...payload, security: { credentialsReturned: false, ...(payload.security || {}) } }); res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "access-control-allow-methods": "GET,POST,DELETE,OPTIONS", "access-control-allow-headers": "content-type,x-tianyuan-agent-provider,x-tianyuan-agent-installation,x-tianyuan-agent-credential", ...(origin ? { "access-control-allow-origin": origin } : {}) }); res.end(body); }
 function fail(res, cause, origin = "") { json(res, cause?.status || 500, { ok: false, reason: cause?.code || cause?.message || String(cause) }, origin); }
