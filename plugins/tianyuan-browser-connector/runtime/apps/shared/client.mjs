@@ -321,13 +321,17 @@ async function request(pathname, options = {}) {
 
 async function ensureAgentRegistered() {
   if (!agentRegistrationPromise) {
-    agentRegistrationPromise = request("/api/agent-sources/register", { method: "POST", body: "{}" })
+    agentRegistrationPromise = registerAgentSource()
       .catch((cause) => {
         agentRegistrationPromise = null;
         throw cause;
       });
   }
   return agentRegistrationPromise;
+}
+
+export async function registerAgentSource() {
+  return await request("/api/agent-sources/register", { method: "POST", body: "{}" });
 }
 
 function bindingFor(session) {

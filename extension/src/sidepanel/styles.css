@@ -1207,6 +1207,11 @@ pre {
   font-size: 12px;
 }
 
+.agent-row > small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .hidden {
   display: none !important;
 }

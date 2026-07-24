@@ -1,5 +1,5 @@
 import { stdin, stdout } from "node:process";
-import { executeTool, tools } from "../shared/client.mjs";
+import { executeTool, registerAgentSource, tools } from "../shared/client.mjs";
 
 function writeMessage(message) {
   stdout.write(`${JSON.stringify(message)}\n`);
@@ -14,9 +14,28 @@ function textResult(payload) {
   };
 }
 
+let sourceHeartbeatStarted = false;
+
+function startSourceHeartbeat() {
+  if (sourceHeartbeatStarted) return;
+  sourceHeartbeatStarted = true;
+  const heartbeat = setInterval(() => {
+    registerAgentSource().catch(() => {
+      // The side panel shows the source as disconnected until Bridge becomes available again.
+    });
+  }, 30000);
+  heartbeat.unref?.();
+}
+
 async function handleRequest(request) {
   const { id, method, params } = request;
   if (method === "initialize") {
+    try {
+      await registerAgentSource();
+    } catch {
+      // Bridge may be started later from the browser side panel.
+    }
+    startSourceHeartbeat();
     return {
       jsonrpc: "2.0",
       id,
