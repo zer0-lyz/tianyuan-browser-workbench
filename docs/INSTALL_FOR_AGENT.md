@@ -27,7 +27,7 @@ If Python print dependencies are unavailable, installation stops with `PRINT_PYT
 
 ## Credentials
 
-The installer does not write MCP token, Cookie, Authorization, passwords, or verification codes. MCP token must be entered by the user in the extension panel when needed and is not persisted by the extension.
+The installer does not write MCP token, Cookie, Authorization, passwords, or verification codes. MCP token must be entered by the user in the extension panel. By default it is session-only; the user may explicitly select “记住本机”, which stores it only in Chrome extension local storage and can be cleared from the same dialog.
 
 Agent source credentials are not MCP credentials. On macOS, the installer stores the random local Agent credential in Keychain and writes only a `credentialRef` into `~/.tianyuan-workbench/`; if Keychain is unavailable, the restricted local runtime is used. Do not copy that runtime configuration to cloud storage.
 
