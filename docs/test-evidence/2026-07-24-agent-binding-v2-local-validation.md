@@ -32,3 +32,4 @@ node tests/agent-binding-bridge.test.cjs
 - 执行 `node scripts/install-local-runtime.mjs` 成功，Connector 同步到 `~/plugins/tianyuan-browser-connector` 与 `~/.codex/plugins/cache/personal/tianyuan-browser-connector/0.4.0`。
 - 通过 Chrome Native Messaging 帧调用 `start_connector_bridge`，Bridge 返回 `connector-agent-binding-v2`。
 - 已验证 `tianyuan.list_capabilities`；未建立在线页面时，`tianyuan.connection_status` 返回安全的 `NO_ONLINE_SESSIONS`，未读取任何天源页面上下文。
+- 回归测试覆盖无 `Origin` 的扩展 ID/版本请求和过期扩展版本拒绝，防止 Chrome 请求头差异再次导致项目目录读取失败。

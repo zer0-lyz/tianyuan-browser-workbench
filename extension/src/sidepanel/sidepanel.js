@@ -2,6 +2,7 @@ const REQUEST_TYPE = "TIANYUAN_WORKBENCH_GET_CONTEXT_V2";
 const ACTION_REQUEST_TYPE = "TIANYUAN_WORKBENCH_RUN_ACTION_V2";
 const HELPER_BASE_URL = "http://127.0.0.1:8765";
 const CONNECTOR_BASE_URL = "http://127.0.0.1:40415";
+const EXPECTED_CONNECTOR_PROTOCOL_VERSION = "connector-agent-binding-v3";
 const NATIVE_HOST_NAME = "com.tianyuan.workbench.helper";
 const STORAGE_CONNECTOR_SESSION_KEY = "tianyuanWorkbenchConnectorSessionId";
 const STORAGE_LAST_BATCH_RESULT_KEY = "tianyuanWorkbenchLastBatchResult";
@@ -270,6 +271,8 @@ const ROUTE_LABELS = {
   "format-declaration": "申报表打印格式",
 };
 
+const extensionManifest = chrome.runtime.getManifest();
+const extensionRuntimeVersion = extensionManifest.version;
 elements.extensionId.textContent = chrome.runtime.id;
 
 function on(element, eventName, handler) {
@@ -2636,6 +2639,7 @@ async function connectorFetch(path, options = {}) {
     headers: {
       "content-type": "application/json",
       "x-tianyuan-extension-id": chrome.runtime.id,
+      "x-tianyuan-extension-version": extensionRuntimeVersion,
       ...(options.headers || {}),
     },
   });
@@ -3074,6 +3078,15 @@ async function checkConnectorConnection({ silent = false } = {}) {
       connectorFetch("/health"),
       connectorFetch("/api/protocol"),
     ]);
+    if (protocol.protocolVersion !== EXPECTED_CONNECTOR_PROTOCOL_VERSION) {
+      throw new Error("CONNECTOR_RUNTIME_VERSION_MISMATCH");
+    }
+    if (
+      protocol.runtimeCompatibility?.extensionVersion
+      && protocol.runtimeCompatibility.extensionVersion !== extensionRuntimeVersion
+    ) {
+      throw new Error("EXTENSION_RUNTIME_VERSION_MISMATCH");
+    }
     connectorProtocol = protocol;
     setConnection(elements.connectorStatus, health.sessionCount ? "已绑定" : "已启动", "ok");
     renderConnectorCapabilities(protocol.capabilities || {});
@@ -3097,10 +3110,11 @@ async function checkConnectorConnection({ silent = false } = {}) {
     }
     return { ok: true, health, protocol, session: connectorSession };
   } catch (error) {
-    setConnection(elements.connectorStatus, "未启动", "warn");
+    const mismatch = ["CONNECTOR_RUNTIME_VERSION_MISMATCH", "EXTENSION_RUNTIME_VERSION_MISMATCH"].includes(error?.message);
+    setConnection(elements.connectorStatus, mismatch ? "需更新" : "未启动", "warn");
     renderConnectorSession(null);
     if (!connectorProtocol) renderConnectorCapabilities({});
-    return { ok: false, reason: error?.message || String(error) };
+    return { ok: false, reason: mismatch ? "Connector 运行副本与扩展不一致，请重新加载扩展后点击启动 Connector。" : (error?.message || String(error)) };
   }
 }
 

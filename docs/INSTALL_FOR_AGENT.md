@@ -12,6 +12,8 @@ node scripts/install-local-runtime.mjs
 
 The script copies runtime files locally, registers the Chrome Native Messaging host, validates Python plus `openpyxl`/`et_xmlfile` for print-format tools, registers the local Codex Agent source, and prints `extensionPath`.
 
+It also writes `runtime-compat.json` next to the Native Helper and verifies that the installed extension version and browser identity contract match the Bridge runtime.
+
 If Python print dependencies are unavailable, installation stops with `PRINT_PYTHON_OPENPYXL_NOT_FOUND` before registering a partial runtime.
 
 ## Browser Setup
