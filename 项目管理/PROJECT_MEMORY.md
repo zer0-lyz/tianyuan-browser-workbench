@@ -236,3 +236,8 @@
 
 - 侧栏调用 Bridge 必须发送 `x-tianyuan-extension-id` 和 `x-tianyuan-extension-version`；Bridge 以安装时生成的 `runtime-compat.json` 校验版本。
 - 不要将 `Origin` 是否存在作为 Chrome 扩展身份的唯一规则。版本或运行副本不一致时必须返回明确的重新加载提示，而不是模糊的“Connector 未启动”。
+
+## 2026-07-24 MCP token 记住规则
+
+- `tianyuanWorkbenchMcpToken` 是用户显式选择“记住本机”后在 Chrome 扩展本机存储中使用的键。启动时恢复；不得再调用初始化清理逻辑。
+- 禁止把 MCP token 复制到 Native Helper、Bridge、仓库、日志、截图或任何云盘路径。清除操作必须同时清空内存与扩展本机存储。

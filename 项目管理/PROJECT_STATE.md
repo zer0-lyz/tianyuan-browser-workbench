@@ -443,3 +443,10 @@ Windows 测试包已完成 ZIP 解包、266 个文件逐项 SHA-256、PE x64 架
 - Bridge 协议升级为 `connector-agent-binding-v3`；旧扩展缺少身份头返回 `EXTENSION_RELOAD_REQUIRED`，版本不一致返回 `EXTENSION_RUNTIME_VERSION_MISMATCH`。
 - 侧栏启动检查会显示“需更新”，而非将运行版本不一致误报为 Connector 未启动。
 - 回归测试新增无 Origin 扩展请求与版本不一致拒绝，覆盖 Chrome 扩展实际请求差异。
+
+## 2026-07-24 MCP token 本机记住恢复
+
+- 恢复“配置 MCP”中的“记住本机”开关；默认仍是当前侧边栏会话。
+- 仅在用户主动勾选后写入 Chrome 扩展 `chrome.storage.local`；不会写入仓库、Native Helper、Bridge、日志或截图。
+- 初始化不再删除本机 token；清除按钮会删除扩展本机存储并清空当前会话。
+- 弹窗不回显已保存 token，只显示勾选状态。

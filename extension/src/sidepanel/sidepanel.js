@@ -5,6 +5,7 @@ const CONNECTOR_BASE_URL = "http://127.0.0.1:40415";
 const EXPECTED_CONNECTOR_PROTOCOL_VERSION = "connector-agent-binding-v3";
 const NATIVE_HOST_NAME = "com.tianyuan.workbench.helper";
 const STORAGE_CONNECTOR_SESSION_KEY = "tianyuanWorkbenchConnectorSessionId";
+const STORAGE_MCP_TOKEN_KEY = "tianyuanWorkbenchMcpToken";
 const STORAGE_LAST_BATCH_RESULT_KEY = "tianyuanWorkbenchLastBatchResult";
 const STORAGE_LAST_EXPORT_RESULT_KEY = "tianyuanWorkbenchLastExportResult";
 const COMPANY_HIERARCHY_CODE_KEYS = [
@@ -135,6 +136,7 @@ const elements = {
   authorizeCli: document.getElementById("authorizeCli"),
   mcpTokenDialog: document.getElementById("mcpTokenDialog"),
   mcpTokenInput: document.getElementById("mcpTokenInput"),
+  rememberMcpToken: document.getElementById("rememberMcpToken"),
   clearMcpToken: document.getElementById("clearMcpToken"),
   cancelMcpToken: document.getElementById("cancelMcpToken"),
   confirmMcpToken: document.getElementById("confirmMcpToken"),
@@ -234,6 +236,7 @@ let busy = false;
 let availableSubjects = [];
 let availableCompanies = [];
 let runtimeMcpToken = "";
+let mcpTokenPersisted = false;
 let connectorSessionId = "";
 let connectorProtocol = null;
 let connectorSession = null;
@@ -293,8 +296,10 @@ function storageRemove(key) {
   return new Promise((resolve) => chrome.storage.local.remove([key], resolve));
 }
 
-async function clearLegacyMcpToken() {
-  await storageRemove("tianyuanWorkbenchMcpToken");
+async function restoreRememberedMcpToken() {
+  runtimeMcpToken = String(await storageGet(STORAGE_MCP_TOKEN_KEY) || "").trim();
+  mcpTokenPersisted = Boolean(runtimeMcpToken);
+  if (elements.rememberMcpToken) elements.rememberMcpToken.checked = mcpTokenPersisted;
 }
 
 function valueOrDash(value) {
@@ -3409,29 +3414,38 @@ async function checkConnections() {
 }
 
 function openMcpTokenDialog() {
-  elements.mcpTokenInput.value = runtimeMcpToken;
+  elements.mcpTokenInput.value = "";
+  elements.rememberMcpToken.checked = mcpTokenPersisted;
   elements.mcpTokenDialog.showModal();
   elements.mcpTokenInput.focus();
 }
 
 async function confirmMcpToken() {
-  const token = elements.mcpTokenInput.value.trim();
+  const token = elements.mcpTokenInput.value.trim() || runtimeMcpToken;
   if (!token) {
     setStatus("请输入 MCP token", "warn");
     return;
   }
 
   runtimeMcpToken = token;
+  if (elements.rememberMcpToken.checked) {
+    await storageSet({ [STORAGE_MCP_TOKEN_KEY]: token });
+  } else {
+    await storageRemove(STORAGE_MCP_TOKEN_KEY);
+  }
+  mcpTokenPersisted = elements.rememberMcpToken.checked;
   elements.mcpTokenInput.value = "";
   elements.mcpTokenDialog.close();
-  setStatus("正在用本次 token 连接 MCP...", "idle");
+  setStatus(elements.rememberMcpToken.checked ? "已记住本机 token，正在连接 MCP..." : "正在用本次 token 连接 MCP...", "idle");
   await checkConnections();
 }
 
 async function clearMcpToken() {
   runtimeMcpToken = "";
-  await clearLegacyMcpToken();
+  mcpTokenPersisted = false;
+  await storageRemove(STORAGE_MCP_TOKEN_KEY);
   elements.mcpTokenInput.value = "";
+  elements.rememberMcpToken.checked = false;
   elements.mcpTokenDialog.close();
   setConnection(elements.mcpStatus, "未配置 token", "warn");
   setStatus("已清除 MCP token", "warn");
@@ -4288,4 +4302,4 @@ on(elements.exitMode, "change", () => {
 });
 
 renderRoute(window.location.hash.slice(1) || "home");
-clearLegacyMcpToken().finally(refreshAll);
+restoreRememberedMcpToken().finally(refreshAll);
