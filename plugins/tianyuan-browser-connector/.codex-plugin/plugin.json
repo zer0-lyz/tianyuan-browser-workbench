@@ -1,6 +1,6 @@
 {
   "name": "tianyuan-browser-connector",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Connect Codex to a bound Tianyuan browser session and run controlled audit attachment uploads.",
   "author": {
     "name": "Tianyuan Browser Connector"

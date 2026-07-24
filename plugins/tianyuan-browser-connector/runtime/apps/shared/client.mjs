@@ -121,6 +121,26 @@ export const tools = [
     }
   },
   {
+    name: "tianyuan.clear_audit_test_rows",
+    description: "仅清理指定行已确认的测试资料索引、查证类核实程序和查证核对情况，保存并逐行回读。必须提供当前资料索引值以防误清理。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string" },
+        bindingId: { type: "string" },
+        projectId: { type: "string" },
+        threadId: { type: "string" },
+        subjectCode: { type: "string", description: "目标科目代码；传 current 表示当前打开科目。" },
+        rowNumbers: { type: "array", items: { type: "integer", minimum: 2 }, minItems: 1, maxItems: 100 },
+        expectedIndexValues: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 100 },
+        fieldTitle: { type: "string", const: "查证资料索引", default: "查证资料索引" },
+        confirmText: { type: "string", const: "确认清理测试数据并保存" }
+      },
+      required: ["sessionId", "bindingId", "projectId", "threadId", "subjectCode", "rowNumbers", "expectedIndexValues", "confirmText"],
+      additionalProperties: false
+    }
+  },
+  {
     name: "tianyuan.inspect_audit_check_row",
     description: "读取当前或指定科目某一行的查证核对情况、单元格类型、下拉选项和相邻表头，不修改底稿。",
     inputSchema: {
@@ -247,6 +267,7 @@ async function runBrowserAction(name, input) {
   const action = {
     "tianyuan.upload_audit_attachment": "upload_audit_attachment",
     "tianyuan.batch_upload_audit_attachments": "batch_upload_audit_attachments",
+    "tianyuan.clear_audit_test_rows": "clear_audit_test_rows",
     "tianyuan.preview_audit_attachment_upload": "preview_audit_attachment_upload",
     "tianyuan.inspect_audit_check_row": "inspect_audit_check_row",
     "tianyuan.set_audit_check_result": "set_audit_check_result",
@@ -264,7 +285,7 @@ async function runBrowserAction(name, input) {
     input.sessionId,
     submitted.action.actionId,
     input,
-    ["upload_audit_attachment", "batch_upload_audit_attachments", "set_audit_check_result", "batch_set_audit_check_results"].includes(action) ? 150000 : 60000
+    ["upload_audit_attachment", "batch_upload_audit_attachments", "clear_audit_test_rows", "set_audit_check_result", "batch_set_audit_check_results"].includes(action) ? 150000 : 60000
   );
   return {
     ok: result.status === "completed" && result.result?.ok === true,
@@ -402,6 +423,7 @@ export async function executeTool(name, input = {}) {
     "tianyuan.preview_audit_attachment_upload",
     "tianyuan.upload_audit_attachment",
     "tianyuan.batch_upload_audit_attachments",
+    "tianyuan.clear_audit_test_rows",
     "tianyuan.inspect_audit_check_row",
     "tianyuan.set_audit_check_result",
     "tianyuan.scan_audit_index_check_rows",
