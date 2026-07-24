@@ -11,7 +11,7 @@ const EXTENSION_IDS = [
   "fdbllnmaaklkcmoacoapbibiggnndkfpa",
 ];
 const PROJECT_NAME = "天源评估系统";
-const CONNECTOR_VERSION = "0.3.0";
+const CONNECTOR_VERSION = "0.3.1";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const isWindows = process.platform === "win32";

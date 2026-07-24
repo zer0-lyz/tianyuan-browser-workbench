@@ -24,6 +24,7 @@ description: Connect Codex to the exact Tianyuan browser session bound to the cu
 - 能力矩阵。
 - 评估核实附件上传预演。
 - 经明确确认的单文件上传、分类、底稿保存和回读。
+- 经明确确认的测试资料索引清理、底稿保存和回读。
 
 当前版本不提供：
 
@@ -33,6 +34,8 @@ description: Connect Codex to the exact Tianyuan browser session bound to the cu
 - 任意字段写入或任意附件接口调用。
 
 附件正式上传必须使用 `tianyuan.upload_audit_attachment`，确认文本必须为 `确认上传并保存`。执行前必须先预演，且必须复用连接状态返回的 `sessionId` 和 `bindingId`。只有附件上传、分类批次、`/assignment_draft/save` 和目标单元格回读全部通过，才可报告成功。
+
+测试清理必须使用 `tianyuan.clear_audit_test_rows`，传入精确行号及当前资料索引值，确认文本必须为 `确认清理测试数据并保存`。只有保存成功且“查证类核实程序”“查证资料索引”“查证核对情况”均回读为空，才可报告清理成功；附件库中的物理文件不会被删除。
 
 ## Gateway 回退
 
