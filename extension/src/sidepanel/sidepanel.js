@@ -2635,6 +2635,7 @@ async function connectorFetch(path, options = {}) {
     ...options,
     headers: {
       "content-type": "application/json",
+      "x-tianyuan-extension-id": chrome.runtime.id,
       ...(options.headers || {}),
     },
   });
