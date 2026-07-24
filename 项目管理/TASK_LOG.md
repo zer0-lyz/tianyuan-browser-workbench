@@ -1,5 +1,97 @@
 # 天源浏览器工作台任务日志
 
+## 2026-07-24 批量上传 Sheet 状态污染修复
+
+### 问题
+
+页面已切换到 `其他应收款-其他应收款`，批量上传面板仍保留上一科目的 `银行存款` Sheet，并将该旧名称传给页面适配器，导致 `SHEET_NOT_FOUND`。
+
+### 修复
+
+- “重新识别”和首次进入模块时不再传递旧 Sheet 名称，默认读取当前 SpreadJS 活动 Sheet。
+- 用户主动修改 Sheet 下拉框时，才按所选 Sheet 重新识别。
+- 目标科目或 Sheet 发生变化时，清空旧文件、行号映射、结果和进度，防止跨科目误执行。
+- 渲染时优先采用页面适配器实际返回的 Sheet，不再优先使用旧状态。
+- 当前仅本地修改，未提交、未推送 GitHub。
+
+## 2026-07-24 Content Script 重复注入修复
+
+### 错误证据
+
+- Chrome 扩展错误：`Uncaught SyntaxError: Identifier 'ADAPTER_VERSION' has already been declared`。
+- 位置：`src/content/content.js:1`。
+- 侧栏 `sendToTab` 在消息失败时会通过 `chrome.scripting.executeScript` 再次注入 content script；Manifest 也会自动注入，因此重复注入属于正常恢复路径。
+
+### 修复
+
+- 将整个 `content.js` 包入 IIFE 独立作用域。
+- 使用全局状态键保证同版本监听器只注册一次。
+- 新版本注入时尝试移除旧的可管理监听器。
+- 页面请求、响应和动作消息类型加入适配器版本号。
+- 页面适配器升为 v28，使旧 v27 监听器无法响应新动作，避免一次请求被执行多次。
+- 增加重复注入与版本通道静态测试。
+- 扩展版本暂时保持 `0.8.3`，当前仅本地验证，不提交、不推送 GitHub。
+
+## 2026-07-24 页面上下文版本不一致修复
+
+### 问题
+
+批量上传目标识别显示 `TIANYUAN_WORKBENCH_GET_CONTEXT_TIMEOUT`。Connector、Helper 和 MCP 均正常，失败发生在内容脚本与页面适配器之间。
+
+### 原因
+
+- `page_adapter.js` 已升级为 `2026-07-24-page-tree-mirror-v27-batch-upload-confirmation`。
+- `content.js` 仍要求 `2026-07-24-page-tree-mirror-v26-upload-dialog-root`。
+- 页面返回的 v27 上下文被 content script 主动忽略，最终触发超时。
+
+### 修复
+
+- 将 `content.js` 适配器版本同步为 v27。
+- 测试增加 content script 与 page adapter 版本必须一致的断言，避免再次漏改。
+- 当前仅本地修改，未提交、未推送 GitHub。
+
+## 2026-07-24 空白上传弹窗残留误判修复
+
+### 问题
+
+真实页面上传槽位均为空，但批量上传第一项返回 `UPLOAD_DIALOG_HAS_RESIDUAL_FILES`。底层隐藏文件输入仍保留旧 FileList，原逻辑只读取 `input.files`，没有以弹窗实际显示状态复核，产生误判。
+
+### 修复
+
+- 上传弹窗打开后主动清空全部文件输入并触发 `input/change`。
+- 清理后重新读取底层 FileList。
+- 只有弹窗实际文本仍显示残留文件名时才触发残留门禁。
+- 隐藏 FileList 不再单独阻止上传。
+- 保留实际可见残留文件的安全中止规则。
+- 当前仅本地修改，未提交、未推送 GitHub。
+
+## 2026-07-24 Connector 版本不一致自动更新修复
+
+### 任务目标
+
+修复扩展升级到 `0.8.3` 后，旧 Connector Bridge 仍在运行，侧栏只提示“需更新”但无法自动替换旧进程的问题。
+
+### 执行动作
+
+- Connector `/health` 增加当前进程 PID。
+- Native Helper 增加本机 Connector 监听进程识别和受控停止逻辑。
+- `start_connector_bridge` 支持 `forceRestart`。
+- 侧栏检测到协议或扩展版本不一致时，点击“启动 Connector”自动重启旧 Bridge。
+- 当前页面执行动作发现版本不一致时也会自动更新 Connector。
+- 同步本机运行目录，但未提交、未推送 GitHub。
+
+### 验证结果
+
+- JavaScript 语法检查和 Connector 测试通过。
+- 真实 Native Messaging 请求返回 `started: true`、`restarted: true`。
+- 旧 Connector PID `4403` 已替换为新 PID `7862`。
+- 新 Bridge 健康信息确认扩展版本为 `0.8.3`，协议为 `connector-agent-binding-v3`。
+
+### 发布状态
+
+- 本地待真实天源页面确认。
+- 用户明确要求确认稳定前不推送 GitHub。
+
 ## 2026-07-24 01:25 CST
 
 ### 任务目标
@@ -3085,3 +3177,223 @@ v20 已生效，空 `tag:{isClear:true}` 不再干扰当前最终扫描结果。
 - `tests/agent-binding-bridge.test.cjs` 通过。
 - `git diff --check` 通过。
 - 未自动重跑正式上传；应重新加载扩展后使用“继续未完成项”仅处理第 5 个文件。
+
+## 2026-07-24 23:20 CST 全面稳定性审计
+
+### 任务目标
+
+全面检查天源浏览器工作台反复出现版本不一致、重复注入、连接状态漂移和批量上传假成功风险的原因，并先在本机完成系统性修复，不提交、不推送 GitHub。
+
+### 根因
+
+- 扩展和 Connector 只比较 manifest 版本，同一 `0.8.3` 下可能运行不同源码。
+- 本机安装后，已启动 Connector 进程不会自动加载磁盘新代码。
+- content script 曾因重复注入在同一页面重复声明顶层常量，触发 `Identifier 'ADAPTER_VERSION' has already been declared`。
+- page adapter 使用“同版本直接返回”，同版本源码变化后旧监听会一直保留到刷新页面。
+- 安装器先删除正式目录再复制，存在 Chrome 读到缺失或半复制目录的窗口。
+- 批量上传统一保存只验证单元格非空，不能证明每个已分类文件都在最终保存后保留。
+
+### 执行动作
+
+- 页面通信升级到 `2026-07-24-page-tree-mirror-v29-replaceable-listeners`。
+- content script 和 page adapter 均保存并替换自己的监听器引用。
+- 上下文请求超时后释放注入状态，允许下一次重新注入恢复。
+- 安装器计算源码 SHA-256 代码指纹，并写入扩展和 Native runtime 的 `runtime-compat.json`。
+- 侧栏请求增加 `x-tianyuan-runtime-build-id`，Bridge 对受保护请求校验代码指纹。
+- 侧栏发现协议、扩展版本、代码指纹或运行契约缺失时，标记运行副本不一致并触发受控 Connector 重启。
+- 安装器改为 staging 复制、关键文件校验、目录整体替换和失败回滚。
+- Native Helper 文件改为临时文件校验后原子替换。
+- 分类接口响应增加分类批次值提取；批量统一保存增加逐行预期批次值回读。
+- 新增静态扩展契约测试。
+
+### 验证结果
+
+- 所有 JavaScript 语法检查通过。
+- `tests/static-extension-contract.test.cjs` 通过。
+- `tests/agent-binding-bridge.test.cjs` 通过。
+- `git diff --check` 通过。
+- 本机运行目录安装成功，源码与运行文件逐文件一致。
+- 扩展和 Native runtime 代码指纹一致：
+  - `993d6c63e076797ffb55604f09fa3e1f02e9063a72dc3d198570255b2fbd1c42`
+- Connector 旧 PID `7862` 已替换为 PID `14423`。
+- 正确代码指纹访问受保护接口返回 HTTP 200；错误指纹返回 HTTP 426 `EXTENSION_RUNTIME_BUILD_MISMATCH`。
+- Native Host 自检通过：
+  - Python 可用；
+  - 两类打印格式脚本可用；
+  - CLI `0.1.0` 可用。
+
+### 未完成边界
+
+- Chrome 现有标签页尚未重新加载新扩展，因此新的 Connector session 尚未重新注册。
+- 当前 Codex 进程仍加载旧版天源 Connector 插件工具进程，调用返回 `AGENT_IDENTITY_REQUIRED`；重启 Codex 后会加载已安装的 `0.4.1` 插件运行副本。
+- 尚未自动执行正式线上上传，避免在未确认测试行和附件前写入真实底稿。
+- 同一行多文件的最终单元格结构仍需真实页面验证；当前代码会失败关闭，不会把未全部回读的结果报告为成功。
+
+### 输出
+
+- `docs/test-evidence/2026-07-24-plugin-stability-audit.md`
+- `tests/static-extension-contract.test.cjs`
+- 本机运行目录 `~/.tianyuan-workbench/projects/天源评估系统/`
+- 本机 Native runtime `~/.tianyuan-workbench/native-helper/`
+
+## 2026-07-24 23:15 CST 扩展加载路径诊断
+
+### 现象
+
+- 用户重新加载后，侧栏仍显示“Connector 需更新”。
+- 磁盘上的扩展运行契约和 Connector 运行契约完全一致，但在线 session 数为 0。
+
+### 原因
+
+- Chrome 当前仍加载 OneDrive 项目源码目录下的 `extension/`。
+- 源码目录不包含安装器生成的 `runtime-compat.json`；本机运行目录包含该文件。
+- 侧栏因此返回 `EXTENSION_RUNTIME_CONTRACT_MISSING`，但原提示误导为“启动 Connector 可自动更新”。
+
+### 修复
+
+- 将缺少运行契约的状态单独显示为“路径不正确”。
+- 明确提示从安装器生成的本机运行目录重新加载扩展。
+- 点击“启动 Connector”遇到该状态时不再无效重启 Bridge。
+- 重新安装本机运行副本并受控重启 Connector。
+
+### 验证
+
+- 静态契约测试通过。
+- Connector/Agent Bridge 回归测试通过。
+- 新 Connector PID：`16256`。
+- 当前 `runtimeBuildId`：
+  `067b4bfc11e061a2670686c18f57fea5f40bb0480643c25fc6c60df7dea6972d`
+- 正确扩展加载路径：
+  `~/.tianyuan-workbench/projects/天源评估系统/extension`
+
+## 2026-07-24 23:27 CST 批量上传执行粒度修复
+
+### 用户确认的系统规则
+
+- 同一行可以上传多个附件。
+- 多个附件必须一次放入同一个上传弹窗的不同分类，再点击一次保存。
+- 已经有附件或资料索引的行不能继续追加附件。
+
+### 失败原因
+
+- 原批量逻辑以单文件为执行单位。
+- 同一行映射“凭证、合同”等多个文件时，插件会重复打开同一行弹窗并逐文件保存。
+- 第一项成功后，该行已生成资料索引；第二项继续追加时，`/cell_file/classify_upload` 返回业务 code 500 `系统异常`。
+- 页面后续回读证明系统本身支持多附件，问题在插件执行粒度。
+
+### 修复
+
+- 面板将文件映射按行分组。
+- 每行创建一个 `batch_upload_audit_attachments` 任务，携带该行全部文件和分类。
+- 页面适配器只打开一次该行上传弹窗。
+- 按分类将全部文件一次注入，验证所有文件名均已显示。
+- 每行只点击一次上传弹窗“保存”。
+- 分类成功后回读该行唯一资料索引批次号，再进入统一底稿保存。
+- 执行前调用只读扫描，所有待上传行必须没有资料索引。
+- 同一分类不支持多文件且原生 input 未声明 `multiple` 时失败关闭。
+
+### 验证
+
+- 当前页面只读扫描成功：
+  - `Q2=fda54185-6b17-41d5-b0b4-908c12f057ab`；
+  - `Q3=ed76f919-4e84-4ca0-b460-f73b11027ede`。
+- 静态扩展契约测试通过。
+- Connector/Agent Bridge 回归测试通过。
+- JavaScript 语法检查通过。
+- 本机运行副本安装成功。
+- Connector 已受控重启，PID `18629`。
+- 当前 `runtimeBuildId`：
+  `d75cba0b35c7ec5c6864bf24936d3933c711fb35bb8031c9bf3153dcd48f5edd`
+
+### 待验证
+
+- 重新加载扩展后，在没有资料索引的空白行测试“一行两个文件、两个分类、一次保存”。
+- 当前 `Q2/Q3` 已有资料索引，新版插件会主动阻断，不应继续用于追加测试。
+
+### 用户验收
+
+- 2026-07-24 23:30 CST，用户反馈“可以了”。
+- 只读连接回读确认：
+  - Connector Bridge 在线；
+  - 在线 session 1 个；
+  - 当前对话绑定 1 个；
+  - 当前科目 `C3-1-2`；
+  - 当前 Sheet `其他应收款-其他应收款`；
+  - SpreadJS 已识别；
+  - 保存按钮可用；
+  - 未检测到编辑锁或权限提示。
+- 本轮按行分组、一次注入、一次保存和已有资料索引行阻断逻辑完成初步真实验收。
+
+## 2026-07-24 23:44 CST 新增批量清理附件
+
+### 任务目标
+
+在首页新增临时“批量清理附件”功能，识别当前 Sheet 的资料索引非空行，用户确认范围后直接清空“查证资料索引”列。
+
+### 实现
+
+- 首页模块数量由 7 个更新为 8 个。
+- 新增独立页面和流程：
+  - 识别对象；
+  - 选择资料索引行；
+  - 确认并执行清理。
+- 新增受控动作 `clear_audit_attachments`。
+- 清理范围限定为“查证资料索引”单元格及附件关联 tag。
+- 保留“查证类核实程序”和“查证核对情况”。
+- 不删除附件库中的物理文件。
+- 每行使用扫描时的资料索引值做执行前一致性校验。
+- 保存后逐行回读资料索引为空，并验证相邻两个字段未变化。
+
+### 验证
+
+- JavaScript 语法检查通过。
+- 静态扩展契约测试通过。
+- Connector/Agent Bridge 回归测试通过。
+- 能力矩阵由 23 项增加为 24 项。
+- 本机运行副本安装成功。
+- Connector 已重启，PID `21929`。
+- 当前 `runtimeBuildId`：
+  `b35c755df6614332019cda22f6fa4e51cb8ac6e77b53df3f870eb6597a9b7204`
+
+### 待验证
+
+- 重新加载扩展后确认首页显示第 8 个模块。
+- 在当前 Sheet 选择一行资料索引执行清理，验证资料索引为空且核实程序、核对情况保持不变。
+
+### 首次界面修复
+
+- 现象：进入批量清理附件后停在“正在扫描已有附件关联”，按钮无后续反馈。
+- 原因：识别函数已设置全局 `busy=true`，Connector 动作队列在 busy 状态下暂停；清理扫描尚未标记为允许执行的模块任务。
+- 修复：识别开始时设置 `batchCleanupState.running=true`，使动作队列在扫描期间继续处理；结束后恢复状态。
+- 自动测试通过并重新安装本机运行副本。
+- Connector PID：`22644`。
+- 当前 `runtimeBuildId`：
+  `e9039552c3b8dbd9f5ce2adec0788282dad0f84cb9960eab2705cb838580ee0b`
+
+### 核实程序残留修复与真实验收
+
+- 现象：第一次清理后，“查证资料索引”已经为空，但“查证类核实程序”仍保留“凭证/合同/期后回款”等文本。
+- 原因：
+  - 初版临时功能按旧口径只清空资料索引；
+  - 重新识别时只列出资料索引非空行，导致资料索引已空但核实程序残留的行无法再次进入清理范围。
+- 修复：
+  - 扫描结果新增 `rowsWithCleanupData`，纳入资料索引或核实程序任一有内容的行；
+  - 面板改用该清理专用列表；
+  - 执行参数改为逐行携带资料索引值和核实程序值；
+  - 页面执行前同时校验两列原值；
+  - 正式清空“查证类核实程序”和“查证资料索引”及索引 tag；
+  - 保留“查证核对情况”；
+  - 保存后回读两列均为空且核对情况与清理前一致，才报告成功。
+- 自动验证：
+  - JavaScript 语法检查通过；
+  - 静态扩展契约测试通过；
+  - Connector/Agent Bridge 回归测试通过；
+  - `git diff --check` 通过；
+  - 本机运行副本已同步，`runtimeBuildId` 为 `7e2e3f8ba68207d5f5936f814dfb2a1f546a9de338000b4a36374ed4254771d9`。
+- 真实验收：
+  - 用户重新加载扩展后复测；
+  - 残留核实程序能够重新进入清理范围；
+  - 用户于 2026-07-24 确认“可以了”。
+- 固定版本：
+  - 计划提交并标记 `baseline-workbench-0.8.3-stable-20260724`；
+  - 本轮固定前不再修改已验收执行代码。

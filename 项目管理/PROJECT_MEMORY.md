@@ -17,7 +17,7 @@
 - Codex 只读插件位于 `plugins/tianyuan-browser-connector/`，当前暴露连接状态、session、上下文和能力矩阵四个 MCP 工具。
 - 个人插件已安装为 `tianyuan-browser-connector@personal`，本机源码位于 `~/plugins/tianyuan-browser-connector/`。
 - Codex 工具调用不得使用“最新在线 session”猜测目标；必须复用连接状态返回的 `sessionId` 和 `bindingId`。
-- 本地 Connector Bridge 监听 `127.0.0.1:40415`，协议版本为 `connector-source-v1`。
+- 本地 Connector Bridge 监听 `127.0.0.1:40415`，当前协议版本为 `connector-agent-binding-v3`。
 - 连接流程为：侧栏启动 Bridge -> 读取当前天源页面轻量上下文 -> 注册 session -> 每 20 秒 heartbeat。
 - session 只保存项目、公司、科目、页面类型、标签页编号和门禁摘要，不保存完整页面对象或任何凭据。
 - 能力矩阵区分“可读取、可预演、确认后执行、本机执行、不支持、暂缓”。
@@ -227,7 +227,7 @@
 
 ## 2026-07-24 多 Agent 绑定基线
 
-- Connector Bridge 协议为 `connector-agent-binding-v2`。来源身份由受控本机 `providerId + installationId + credentialRef` 声明，不扫描进程或猜测窗口。
+- Connector Bridge 协议为 `connector-agent-binding-v3`。来源身份由受控本机 `providerId + installationId + credentialRef` 声明，不扫描进程或猜测窗口。
 - 页面绑定内部统一为 `agentBinding`。同页多来源可读，唯一控制者可写；切换控制者必须在侧栏确认，并取消旧控制者未完成队列。
 - Codex 维持本机项目/对话目录自动读取；WorkBuddy 仅支持手动来源和通用 stdio MCP 配置，不宣称真实 WorkBuddy API 集成。
 - 安装脚本优先在 macOS Keychain 保存 Agent 本机凭证，只在 `~/.tianyuan-workbench/` 保存不含明文凭证的 `credentialRef` 配置；不保存 MCP token、Cookie、Authorization、密码或验证码。
@@ -236,6 +236,18 @@
 
 - 侧栏调用 Bridge 必须发送 `x-tianyuan-extension-id` 和 `x-tianyuan-extension-version`；Bridge 以安装时生成的 `runtime-compat.json` 校验版本。
 - 不要将 `Origin` 是否存在作为 Chrome 扩展身份的唯一规则。版本或运行副本不一致时必须返回明确的重新加载提示，而不是模糊的“Connector 未启动”。
+- 扩展版本号不能单独作为运行一致性依据。安装器必须为扩展和 Native/Connector 运行副本写入同一个 `runtimeBuildId`；侧栏与 Bridge 同时校验扩展版本、协议版本和 `runtimeBuildId`。
+- 本机安装必须先复制到 staging 目录并校验关键文件，再整体替换正式目录；禁止先删除正式扩展目录后逐文件复制。
+- 页面 content script 和 MAIN-world adapter 必须使用版本化消息通道，并保存可移除的监听引用；重复注入时替换旧监听，不能依赖刷新页面清理旧脚本。
+- 当前页面适配器稳定性版本为 `2026-07-24-page-tree-mirror-v29-replaceable-listeners`。
+- 批量上传统一保存必须回读每个分类批次值。只验证目标单元格非空不能证明所有文件都已保存；缺少分类批次值或任一批次未在对应行回读时必须失败关闭。
+- 天源评估核实附件的正确上传粒度是“按行一次保存”：同一空白行需要的多个文件必须在一次打开的上传弹窗中分别放入对应分类，然后只点击一次弹窗“保存”，最终该行形成一个资料索引分类批次号。
+- 已经存在“查证资料索引”的行不能追加附件。批量执行前必须扫描所有目标行；任一待上传行已有资料索引时，停止上传并提示改用空白行。
+- 面板文件清单按行分组执行，不得再按单文件循环打开弹窗和逐文件保存。
+- 临时“批量清理附件”功能同时清空所选行的“查证类核实程序”和“查证资料索引”及其附件关联 tag；必须保留“查证核对情况”，也不删除附件库中的物理文件。
+- 清理扫描必须包含“资料索引非空”或“核实程序仍有残留”的行，不能因资料索引已为空而漏掉待清理行。
+- 清理前必须携带 `行号 + 当前资料索引值 + 当前核实程序值` 二次校验；确认后任一值发生变化时必须停止，不能按旧清单清理。
+- 正式成功必须同时满足 `/assignment_draft/save` 业务成功、核实程序和资料索引回读为空、核对情况回读与清理前一致。
 
 ## 2026-07-24 MCP token 记住规则
 

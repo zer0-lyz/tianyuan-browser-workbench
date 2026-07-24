@@ -1058,6 +1058,24 @@ dd {
   color: var(--bad);
 }
 
+.danger-button {
+  border-color: rgb(207 34 46 / 0.28);
+  color: #fff;
+  background: var(--bad);
+}
+
+.danger-button:hover {
+  border-color: #a40e26;
+  background: #a40e26;
+}
+
+.batch-cleanup-table td:nth-child(4) {
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .feature-title {
   min-height: 28px;
 }

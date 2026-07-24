@@ -5,6 +5,7 @@ const { execFile } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const vm = require("node:vm");
 const { createBridge } = require("../native-helper/connector_bridge.js");
 const { promisify } = require("node:util");
 const execFileAsync = promisify(execFile);
@@ -45,10 +46,11 @@ fs.writeFileSync(bindingsPath, JSON.stringify({
   }],
 }));
 fs.writeFileSync(compatibilityPath, JSON.stringify({
-  version: 1,
+  version: 2,
   extensionVersion: "0.7.3",
   bridgeProtocol: "connector-agent-binding-v3",
   buildId: "test-build",
+  runtimeBuildId: "runtime-build-test",
 }));
 
 function headers(agent) {
@@ -58,6 +60,7 @@ function headers(agent) {
       "content-type": "application/json",
       "x-tianyuan-extension-id": "lkflndcnklpeaejohaacoaolnmhgigoc",
       "x-tianyuan-extension-version": "0.7.3",
+      "x-tianyuan-runtime-build-id": "runtime-build-test",
     };
   }
   return {
@@ -81,6 +84,45 @@ async function request(method, pathname, value, agent) {
 async function main() {
   const sidepanelSource = fs.readFileSync(path.join(__dirname, "..", "extension", "src", "sidepanel", "sidepanel.js"), "utf8");
   const pageAdapterSource = fs.readFileSync(path.join(__dirname, "..", "extension", "src", "injected", "page_adapter.js"), "utf8");
+  const contentSource = fs.readFileSync(path.join(__dirname, "..", "extension", "src", "content", "content.js"), "utf8");
+  const pageAdapterVersion = pageAdapterSource.match(/const ADAPTER_VERSION = "([^"]+)"/)?.[1];
+  const contentAdapterVersion = contentSource.match(/const ADAPTER_VERSION = "([^"]+)"/)?.[1];
+  assert.equal(contentAdapterVersion, pageAdapterVersion);
+  assert.equal(contentSource.trimStart().startsWith("(() => {"), true);
+  assert.equal(contentSource.includes("CONTENT_STATE_KEY"), true);
+  assert.equal(contentSource.includes("chrome.runtime.onMessage.removeListener"), true);
+  assert.equal(contentSource.includes("existingContentState?.adapterVersion === ADAPTER_VERSION"), false);
+  assert.equal(contentSource.includes("GET_CONTEXT:${ADAPTER_VERSION}"), true);
+  assert.equal(pageAdapterSource.includes("GET_CONTEXT:${ADAPTER_VERSION}"), true);
+  assert.equal(pageAdapterSource.includes("ADAPTER_STATE_KEY"), true);
+  assert.equal(pageAdapterSource.includes('window.removeEventListener("message", previousAdapterState.contextListener)'), true);
+  assert.equal(pageAdapterSource.includes('window.removeEventListener("message", previousAdapterState.actionListener)'), true);
+  let contentListener = null;
+  let contentListenerAddCount = 0;
+  const contentContext = {
+    chrome: {
+      runtime: {
+        getURL(value) { return `chrome-extension://test/${value}`; },
+        onMessage: {
+          addListener(listener) {
+            contentListener = listener;
+            contentListenerAddCount += 1;
+          },
+          removeListener(listener) {
+            if (contentListener === listener) contentListener = null;
+          },
+        },
+      },
+    },
+    document: {},
+    location: { href: "https://excel.zhrdc.net/ty/test" },
+    window: {},
+  };
+  contentContext.globalThis = contentContext;
+  vm.runInNewContext(contentSource, contentContext);
+  vm.runInNewContext(contentSource, contentContext);
+  assert.equal(contentListenerAddCount, 2);
+  assert.equal(typeof contentListener, "function");
   assert.equal(sidepanelSource.includes('on(elements.resumeBatchUpload, "click", runBatchUploadModule);'), true);
   assert.equal(sidepanelSource.includes("stoppedOnFailure"), true);
   assert.equal(sidepanelSource.includes('mapping.status = "已保存"'), true);
@@ -94,7 +136,23 @@ async function main() {
   assert.equal(pageAdapterSource.includes("timeoutMs = 15000"), true);
   assert.equal(pageAdapterSource.includes("uploadConfirmationSummary"), true);
   assert.equal(pageAdapterSource.includes("waitForUploadDialogSettled"), true);
+  assert.equal(pageAdapterSource.includes("clearDialogFileInputs"), true);
+  assert.equal(pageAdapterSource.includes("renderedResidualFiles"), true);
+  assert.equal(pageAdapterSource.includes("findClassificationValue"), true);
+  assert.equal(pageAdapterSource.includes("BATCH_UPLOAD_EXPECTED_READBACK_REQUIRED"), true);
+  assert.equal(pageAdapterSource.includes("BATCH_UPLOAD_READBACK_MISMATCH"), true);
+  assert.equal(pageAdapterSource.includes("BATCH_UPLOAD_ROW_ALREADY_HAS_INDEX"), true);
+  assert.equal(pageAdapterSource.includes("click_upload_dialog_save_once"), true);
+  assert.equal(sidepanelSource.includes("groupBatchUploadMappingsByRow"), true);
+  assert.equal(sidepanelSource.includes("preflightBatchUploadRows"), true);
+  assert.equal(sidepanelSource.includes('action: "batch_upload_audit_attachments"'), true);
+  assert.equal(sidepanelSource.includes("BATCH_UPLOAD_CLASSIFICATION_VALUE_MISSING"), true);
   assert.equal(sidepanelSource.includes("batchUploadFailureDetail"), true);
+  assert.equal(sidepanelSource.includes("forceRestart: Boolean(current.mismatch)"), true);
+  assert.equal(sidepanelSource.includes("Connector 已更新并启动，可以继续执行"), true);
+  assert.equal(sidepanelSource.includes("resetBatchUploadStateForTargetChange"), true);
+  assert.equal(sidepanelSource.includes("preserveSheet ? (batchUploadState.sheetName || undefined) : undefined"), true);
+  assert.equal(sidepanelSource.includes("inspectBatchUploadTarget({ preserveSheet: true })"), true);
 
   await execFileAsync("sqlite3", [workbuddyDbPath, [
     "CREATE TABLE workspaces (path TEXT PRIMARY KEY, last_opened_at INTEGER NOT NULL);",
@@ -111,6 +169,7 @@ async function main() {
       headers: {
         "x-tianyuan-extension-id": "lkflndcnklpeaejohaacoaolnmhgigoc",
         "x-tianyuan-extension-version": "0.7.3",
+        "x-tianyuan-runtime-build-id": "runtime-build-test",
       },
     });
     assert.equal(headerOnly.status, 200);
@@ -123,13 +182,24 @@ async function main() {
     const stalePayload = await staleExtension.json();
     assert.equal(staleExtension.status, 426);
     assert.equal(stalePayload.reason, "EXTENSION_RUNTIME_VERSION_MISMATCH");
+    const staleBuild = await fetch(`http://127.0.0.1:${port}/api/catalog`, {
+      headers: {
+        "x-tianyuan-extension-id": "lkflndcnklpeaejohaacoaolnmhgigoc",
+        "x-tianyuan-extension-version": "0.7.3",
+        "x-tianyuan-runtime-build-id": "stale-runtime-build",
+      },
+    });
+    const staleBuildPayload = await staleBuild.json();
+    assert.equal(staleBuild.status, 426);
+    assert.equal(staleBuildPayload.reason, "EXTENSION_RUNTIME_BUILD_MISMATCH");
 
     const protocol = await request("GET", "/api/protocol");
     const capabilityEntries = Object.entries(protocol.payload.capabilities);
     assert.equal(protocol.status, 200);
-    assert.equal(capabilityEntries.length, 23);
-    assert.equal(capabilityEntries.filter(([, item]) => item.supported).length, 21);
+    assert.equal(capabilityEntries.length, 24);
+    assert.equal(capabilityEntries.filter(([, item]) => item.supported).length, 22);
     assert.equal(protocol.payload.capabilities.batchAuditAttachmentUpload.label, "确认后批量上传评估核实附件并保存");
+    assert.equal(protocol.payload.capabilities.clearAuditAttachments.label, "确认后批量清理资料索引附件关联");
     assert.equal(protocol.payload.capabilities.clearAuditTestRows.label, "确认后清理测试数据并保存");
     assert.equal(protocol.payload.capabilities.genericBrowserAutomation.supported, false);
     assert.equal(protocol.payload.capabilities.arbitraryJavaScript.supported, false);
@@ -258,6 +328,23 @@ async function main() {
     });
     assert.equal(localAction.status, 200);
     assert.equal(localAction.payload.action.status, "queued");
+    const localSecondFile = path.join(root, "local-script-second.pdf");
+    fs.writeFileSync(localSecondFile, "local script second");
+    const localBatchUploadAction = await request("POST", "/api/sessions/session-local-script/ui-actions", {
+      action: "batch_upload_audit_attachments",
+      projectId: "project-local",
+      subjectCode: "C1",
+      rowNumber: 3,
+      fieldTitle: "查证资料索引",
+      files: [
+        { filePath: localFile, moduleName: "凭证", moduleIndex: 0 },
+        { filePath: localSecondFile, moduleName: "合同", moduleIndex: 1 },
+      ],
+      confirmText: "确认批量上传并保存",
+    });
+    assert.equal(localBatchUploadAction.status, 200);
+    assert.equal(localBatchUploadAction.payload.action.files.length, 2);
+    assert.equal(localBatchUploadAction.payload.action.files[1].moduleName, "合同");
     const localSaveAction = await request("POST", "/api/sessions/session-local-script/ui-actions", {
       action: "save_batch_upload_draft",
       projectId: "project-local",
@@ -268,6 +355,21 @@ async function main() {
     });
     assert.equal(localSaveAction.status, 200);
     assert.equal(localSaveAction.payload.action.type, "save_batch_upload_draft");
+    const localCleanupAction = await request("POST", "/api/sessions/session-local-script/ui-actions", {
+      action: "clear_audit_attachments",
+      projectId: "project-local",
+      subjectCode: "C1",
+      rowNumbers: [2, 3],
+      expectedCleanupValues: [
+        { rowNumber: 2, indexValue: "batch-value-2", procedureValue: "凭证" },
+        { rowNumber: 3, indexValue: "batch-value-3", procedureValue: "合同" },
+      ],
+      fieldTitle: "查证资料索引",
+      confirmText: "确认批量清理附件并保存",
+    });
+    assert.equal(localCleanupAction.status, 200);
+    assert.equal(localCleanupAction.payload.action.type, "clear_audit_attachments");
+    assert.equal(localCleanupAction.payload.action.target.expectedCleanupValues.length, 2);
 
     const isolated = await request("GET", "/api/sessions", undefined, workbuddy);
     assert.equal(isolated.payload.sessions.length, 1);
@@ -283,7 +385,7 @@ async function main() {
     assert.equal(clientResult.ok, true);
     assert.equal(clientResult.counts.matched, 1);
 
-    console.log(JSON.stringify({ ok: true, checks: ["batch_upload_resume_handler", "batch_upload_failure_stop", "batch_upload_saved_checkpoint", "batch_upload_skip_saved", "upload_dialog_close_is_not_business_failure", "upload_dialog_auto_close", "page_save_excludes_dialog_button", "installed_extension_header_contract", "extension_version_mismatch", "capability_matrix_23_entries", "legacy_codex_migration", "workbuddy_catalog_metadata_only", "manual_workbuddy_read_binding", "local_script_source_registration", "local_script_binding_without_agent_credentials", "local_script_ui_action", "local_script_batch_save_action", "agent_context_isolation", "read_cannot_write", "control_conflict_confirmation", "control_transfer_cancels_queue", "agent_error_codes", "codex_client_identity"], tempRoot: root }, null, 2));
+    console.log(JSON.stringify({ ok: true, checks: ["batch_upload_resume_handler", "batch_upload_failure_stop", "batch_upload_saved_checkpoint", "batch_upload_skip_saved", "batch_upload_row_grouping", "batch_upload_empty_row_preflight", "batch_upload_multi_file_action", "batch_cleanup_ui_action", "upload_dialog_close_is_not_business_failure", "upload_dialog_auto_close", "page_save_excludes_dialog_button", "installed_extension_header_contract", "extension_version_mismatch", "capability_matrix_24_entries", "legacy_codex_migration", "workbuddy_catalog_metadata_only", "manual_workbuddy_read_binding", "local_script_source_registration", "local_script_binding_without_agent_credentials", "local_script_ui_action", "local_script_batch_save_action", "agent_context_isolation", "read_cannot_write", "control_conflict_confirmation", "control_transfer_cancels_queue", "agent_error_codes", "codex_client_identity"], tempRoot: root }, null, 2));
   } finally {
     await new Promise((resolve) => server.close(resolve));
     fs.rmSync(root, { recursive: true, force: true });

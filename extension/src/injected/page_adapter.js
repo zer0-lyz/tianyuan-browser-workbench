@@ -1,9 +1,10 @@
 (() => {
-  const ADAPTER_VERSION = "2026-07-24-page-tree-mirror-v27-batch-upload-confirmation";
-  const REQUEST_TYPE = "TIANYUAN_WORKBENCH_GET_CONTEXT";
-  const RESPONSE_TYPE = "TIANYUAN_WORKBENCH_CONTEXT_RESULT";
-  const ACTION_REQUEST_TYPE = "TIANYUAN_WORKBENCH_RUN_ACTION";
-  const ACTION_RESPONSE_TYPE = "TIANYUAN_WORKBENCH_ACTION_RESULT";
+  const ADAPTER_VERSION = "2026-07-24-page-tree-mirror-v29-replaceable-listeners";
+  const ADAPTER_STATE_KEY = "__tianyuanWorkbenchPageAdapterState";
+  const REQUEST_TYPE = `TIANYUAN_WORKBENCH_GET_CONTEXT:${ADAPTER_VERSION}`;
+  const RESPONSE_TYPE = `TIANYUAN_WORKBENCH_CONTEXT_RESULT:${ADAPTER_VERSION}`;
+  const ACTION_REQUEST_TYPE = `TIANYUAN_WORKBENCH_RUN_ACTION:${ADAPTER_VERSION}`;
+  const ACTION_RESPONSE_TYPE = `TIANYUAN_WORKBENCH_ACTION_RESULT:${ADAPTER_VERSION}`;
   const FIELD_TITLE = "查证资料索引";
   const MAX_HEADER_COLUMNS = 120;
 
@@ -1384,6 +1385,9 @@
       .map((item) => {
         const parsed = parseNetworkResponse(item.response);
         const responseBody = parsed.parsed && typeof parsed.parsed === "object" ? parsed.parsed : {};
+        const classificationValue = /cell_file\/classify_upload/.test(item.url || "")
+          ? findClassificationValue(responseBody)
+          : "";
         return {
           method: item.method,
           url: item.url,
@@ -1391,10 +1395,38 @@
           businessSuccess: parsed.success,
           businessCode: responseBody.code ?? responseBody.status ?? null,
           businessMessage: String(responseBody.msg || responseBody.message || responseBody.error || "").slice(0, 300),
+          classificationValue,
           response: item.response,
           at: item.at,
         };
       });
+  }
+
+  function findClassificationValue(value, depth = 0) {
+    if (depth > 6 || value === null || value === undefined) return "";
+    if (typeof value === "string") {
+      return value.match(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/i)?.[0] || "";
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const found = findClassificationValue(item, depth + 1);
+        if (found) return found;
+      }
+      return "";
+    }
+    if (typeof value === "object") {
+      const preferredKeys = ["batchId", "batchNo", "batchValue", "classifyId", "classificationId", "data", "result"];
+      for (const key of preferredKeys) {
+        if (!Object.hasOwn(value, key)) continue;
+        const found = findClassificationValue(value[key], depth + 1);
+        if (found) return found;
+      }
+      for (const nested of Object.values(value)) {
+        const found = findClassificationValue(nested, depth + 1);
+        if (found) return found;
+      }
+    }
+    return "";
   }
 
   async function saveDraftWithNetworkEvidence(networkStart, waitMs = 7000) {
@@ -1539,6 +1571,26 @@
         type: file.type || "",
       }))
     );
+  }
+
+  async function clearDialogFileInputs(dialog) {
+    const before = selectedDialogFiles(dialog);
+    for (const input of findDialogFileInputs(dialog)) {
+      try {
+        input.value = "";
+        const emptyTransfer = new DataTransfer();
+        input.files = emptyTransfer.files;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      } catch {
+        // File input clearing is best effort; rendered filenames remain the final residual gate.
+      }
+    }
+    await sleep(250);
+    return {
+      before,
+      after: selectedDialogFiles(dialog),
+    };
   }
 
   function chooseDialogFileInput(dialog, payload) {
@@ -1886,18 +1938,27 @@
     });
     const dialog = await waitForVisibleDialog();
     if (!dialog) return { ...result, ok: false, reason: "DIALOG_NOT_OPENED" };
-    const residualFiles = selectedDialogFiles(dialog);
+    const residualCleanup = await clearDialogFileInputs(dialog);
+    const residualFiles = residualCleanup.after;
     const dialogTextBeforeInject = textOf(dialog).slice(0, 1600);
-    if (residualFiles.length || (payload.file?.name && dialogTextBeforeInject.includes(payload.file.name))) {
+    const renderedResidualFiles = residualCleanup.before.filter((file) =>
+      file.name && dialogTextBeforeInject.includes(file.name)
+    );
+    if (renderedResidualFiles.length || (payload.file?.name && dialogTextBeforeInject.includes(payload.file.name))) {
       await closeDialogWithoutConfirm(dialog);
       return {
         ...result,
         ok: false,
         reason: "UPLOAD_DIALOG_HAS_RESIDUAL_FILES",
-        residualFiles,
+        residualFiles: renderedResidualFiles,
+        residualCleanup,
         dialogText: dialogTextBeforeInject,
       };
     }
+    result.residualCleanup = {
+      clearedCount: residualCleanup.before.length - residualFiles.length,
+      hiddenResidualCount: residualFiles.length,
+    };
     const selected = chooseDialogFileInput(dialog, payload);
     if (!selected) {
       return {
@@ -1968,6 +2029,7 @@
         uploadConfirmation: result.uploadConfirmation,
       };
     }
+    result.classificationValue = classify.classificationValue || "";
     result.steps.push({ ok: true, step: "upload_and_classify", attachmentUploaded: true, classificationGenerated: true });
     try {
       selected.input.value = "";
@@ -2033,13 +2095,33 @@
       .map(Number)
       .filter((row) => Number.isInteger(row) && row >= 2))];
     if (!rowNumbers.length) return { ...result, ok: false, reason: "BATCH_UPLOAD_ROWS_REQUIRED" };
+    const expectedByRow = new Map();
+    for (const item of Array.isArray(payload.expectedIndexValues) ? payload.expectedIndexValues : []) {
+      const rowNumber = Number(item && typeof item === "object" ? item.rowNumber : 0);
+      const value = String(item && typeof item === "object" ? item.value : item || "").trim();
+      if (!Number.isInteger(rowNumber) || rowNumber < 2 || !value) continue;
+      if (!expectedByRow.has(rowNumber)) expectedByRow.set(rowNumber, new Set());
+      expectedByRow.get(rowNumber).add(value);
+    }
+    if (!expectedByRow.size || rowNumbers.some((rowNumber) => !expectedByRow.has(rowNumber))) {
+      return { ...result, ok: false, reason: "BATCH_UPLOAD_EXPECTED_READBACK_REQUIRED" };
+    }
     installUploadNetworkMonitor();
     const networkStart = window.__tianyuanWorkbenchUploadNetworkLog.length;
     const save = await saveDraftWithNetworkEvidence(networkStart, 8000);
     const readbacks = rowNumbers.map((rowNumber) => {
       const target = locateAuditUploadCell({ ...payload, rowNumber });
       const after = target.ok ? { text: target.text, value: target.value, tag: target.tag } : null;
-      return { rowNumber, ok: Boolean(target.ok && (after?.text || after?.value || after?.tag)), after };
+      const serialized = JSON.stringify(after || {});
+      const expectedValues = [...(expectedByRow.get(rowNumber) || [])];
+      const matchedValues = expectedValues.filter((value) => serialized.includes(value));
+      return {
+        rowNumber,
+        ok: Boolean(target.ok && expectedValues.length && matchedValues.length === expectedValues.length),
+        expectedValues,
+        matchedValues,
+        after,
+      };
     });
     const readbackConsistent = readbacks.every((item) => item.ok);
     result.saveNetwork = save.saveNetwork || [];
@@ -2047,7 +2129,7 @@
     result.readbackConsistent = Boolean(save.ok && readbackConsistent);
     result.security.writesPerformed = Boolean(save.ok);
     result.ok = result.readbackConsistent;
-    result.reason = result.ok ? null : (save.ok ? "DRAFT_CELL_READBACK_EMPTY" : save.reason || "DRAFT_SAVE_NOT_CONFIRMED");
+    result.reason = result.ok ? null : (save.ok ? "BATCH_UPLOAD_READBACK_MISMATCH" : save.reason || "DRAFT_SAVE_NOT_CONFIRMED");
     return result;
   }
 
@@ -2060,7 +2142,6 @@
       collectedAt: new Date().toISOString(),
       url: location.href,
       gate,
-      rows: [],
       security: {
         credentialsCaptured: false,
         uploadPerformed: false,
@@ -2071,52 +2152,193 @@
     if (payload?.confirmText !== "确认批量上传并保存") {
       return { ...result, ok: false, reason: "BATCH_UPLOAD_CONFIRM_TEXT_REQUIRED" };
     }
-    const rowNumbers = Array.isArray(payload?.rowNumbers)
-      ? payload.rowNumbers.map((row) => Number(row)).filter((row) => Number.isInteger(row) && row >= 2)
-      : [];
-    const uniqueRows = [...new Set(rowNumbers)].slice(0, 50);
-    if (!uniqueRows.length) return { ...result, ok: false, reason: "BATCH_UPLOAD_ROWS_REQUIRED" };
-    if (!payload.file?.base64 || !payload.file?.name) {
-      return { ...result, ok: false, reason: "ATTACHMENT_FILE_PAYLOAD_MISSING" };
+    const rowNumber = Number(payload?.rowNumber);
+    if (!Number.isInteger(rowNumber) || rowNumber < 2 || rowNumber > 100000) {
+      return { ...result, ok: false, reason: "ROW_NUMBER_INVALID", rowNumber };
+    }
+    const files = (Array.isArray(payload?.files) ? payload.files : [])
+      .filter((item) => item?.base64 && item?.name)
+      .slice(0, 20);
+    if (!files.length) return { ...result, ok: false, reason: "BATCH_UPLOAD_FILES_REQUIRED" };
+
+    const target = locateAuditUploadCell(payload);
+    if (!target.ok) return { ...result, ok: false, reason: target.reason, target: target.location };
+    result.target = {
+      sheetName: target.sheetName,
+      row: target.row,
+      rowNumber,
+      col: target.col,
+      address: target.address,
+      fieldTitle: target.fieldTitle,
+      before: { text: target.text, value: target.value, tag: target.tag },
+    };
+    if (cellHasContent(result.target.before)) {
+      return { ...result, ok: false, reason: "BATCH_UPLOAD_ROW_ALREADY_HAS_INDEX", target: result.target };
+    }
+    if (target.cellType?.isReadOnly || context.page?.saveButton?.disabled || context.page?.lockText || context.page?.permissionText) {
+      return {
+        ...result,
+        ok: false,
+        reason: "READONLY_OR_LOCKED",
+        lockText: context.page?.lockText || null,
+        permissionText: context.page?.permissionText || null,
+      };
     }
 
-    for (const rowNumber of uniqueRows) {
-      const rowPayload = {
-        ...payload,
-        rowNumber,
-        confirmText: "确认上传并保存",
-      };
-      const rowResult = await uploadAuditAttachment(rowPayload);
-      result.rows.push({
-        rowNumber,
-        ok: Boolean(rowResult?.ok),
-        reason: rowResult?.reason || null,
-        target: rowResult?.target || null,
-        after: rowResult?.after || null,
-        procedureSave: rowResult?.procedureSave || null,
-        residualFiles: rowResult?.residualFiles || [],
-        dialogText: rowResult?.dialogText || "",
-        dialogMessages: rowResult?.dialogMessages || [],
-        uploadNetwork: rowResult?.uploadNetwork || [],
-        saveNetwork: rowResult?.saveNetwork || [],
-        readbackConsistent: Boolean(rowResult?.readbackConsistent),
-        saveDeferred: Boolean(rowResult?.saveDeferred),
-      });
-      if (rowResult?.security?.uploadPerformed) result.security.uploadPerformed = true;
-      if (rowResult?.security?.writesPerformed) result.security.writesPerformed = true;
-      await closeDialogWithoutConfirm();
-      await sleep(800);
+    const procedureNames = [...new Set(files.map((item) => String(item.moduleName || "").trim()).filter(Boolean))];
+    const procedureText = String(payload?.procedureText || procedureNames.join("/")).trim();
+    const procedure = await ensureAuditProcedureForRow(target.spread, target.sheet, target.row, procedureText);
+    result.target.procedure = procedure;
+    if (!procedure.ok) return { ...result, ok: false, reason: procedure.reason, target: result.target };
+
+    installUploadNetworkMonitor();
+    const networkStart = window.__tianyuanWorkbenchUploadNetworkLog.length;
+    if (procedureText && !procedure.skipped) {
+      const procedureSave = await saveDraftWithNetworkEvidence(networkStart, 3500);
+      result.procedureSave = procedureSave;
+      if (!procedureSave.ok) return { ...result, ok: false, reason: procedureSave.reason || "AUDIT_PROCEDURE_SAVE_FAILED" };
     }
-    const successRows = result.rows.filter((row) => row.ok);
-    const failedRows = result.rows.filter((row) => !row.ok);
+
+    target.sheet.setActiveCell(target.row, target.col);
+    target.sheet.setSelection(target.row, target.col, 1, 1);
+    target.spread.focus?.();
+    await target.rawCellType.activateEditor(true, null, null, {
+      sheet: target.sheet,
+      row: target.row,
+      col: target.col,
+    });
+    const dialog = await waitForVisibleDialog();
+    if (!dialog) return { ...result, ok: false, reason: "DIALOG_NOT_OPENED" };
+    const existingDialogFiles = selectedDialogFiles(dialog);
+    const existingDialogText = textOf(dialog).slice(0, 2000);
+    if (existingDialogFiles.length || files.some((item) => existingDialogText.includes(item.name))) {
+      await closeDialogWithoutConfirm(dialog);
+      return {
+        ...result,
+        ok: false,
+        reason: "BATCH_UPLOAD_ROW_ALREADY_HAS_ATTACHMENTS",
+        residualFiles: existingDialogFiles,
+        dialogText: existingDialogText,
+      };
+    }
+    await clearDialogFileInputs(dialog);
+    const inputGroups = new Map();
+    for (const filePayload of files) {
+      const selected = chooseDialogFileInput(dialog, filePayload);
+      if (!selected) {
+        await closeDialogWithoutConfirm(dialog);
+        return {
+          ...result,
+          ok: false,
+          reason: "UPLOAD_MODULE_NOT_FOUND",
+          fileName: filePayload.name,
+          moduleName: filePayload.moduleName || "",
+          modules: describeDialogFileInputs(dialog),
+        };
+      }
+      if (!inputGroups.has(selected.input)) inputGroups.set(selected.input, []);
+      inputGroups.get(selected.input).push(filePayload);
+    }
+    for (const [input, groupFiles] of inputGroups) {
+      if (groupFiles.length > 1 && !input.multiple) {
+        await closeDialogWithoutConfirm(dialog);
+        return {
+          ...result,
+          ok: false,
+          reason: "UPLOAD_MODULE_MULTIPLE_FILES_NOT_SUPPORTED",
+          moduleName: groupFiles[0]?.moduleName || "",
+          fileNames: groupFiles.map((item) => item.name),
+        };
+      }
+      const transfer = new DataTransfer();
+      for (const filePayload of groupFiles) transfer.items.add(fileFromBase64(filePayload));
+      input.files = transfer.files;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    await sleep(1200);
+    const dialogTextAfterInject = textOf(dialog).slice(0, 4000);
+    const missingRenderedFiles = files
+      .filter((item) => !dialogTextAfterInject.includes(item.name))
+      .map((item) => item.name);
+    if (missingRenderedFiles.length) {
+      await closeDialogWithoutConfirm(dialog);
+      return {
+        ...result,
+        ok: false,
+        reason: "BATCH_UPLOAD_FILES_NOT_RENDERED",
+        missingRenderedFiles,
+        dialogText: dialogTextAfterInject,
+      };
+    }
+    result.steps = [{
+      ok: true,
+      step: "inject_row_files",
+      rowNumber,
+      fileCount: files.length,
+      modules: procedureNames,
+    }];
+
+    const saveDialogButton = [...dialog.querySelectorAll("button,.el-button")]
+      .filter(isVisible)
+      .find((button) => textOf(button) === "保存");
+    if (!saveDialogButton || saveDialogButton.disabled) {
+      return { ...result, ok: false, reason: "UPLOAD_DIALOG_SAVE_NOT_AVAILABLE", dialogText: textOf(dialog).slice(0, 2000) };
+    }
+    clickElement(saveDialogButton);
+    result.security.uploadPerformed = true;
+    result.steps.push({ ok: true, step: "click_upload_dialog_save_once" });
+
+    const afterUploadNetwork = await waitForUploadClassification(networkStart, 30000);
+    const successfulUploads = afterUploadNetwork.filter((item) =>
+      /attach\/upload/.test(item.url || "")
+      && item.status >= 200
+      && item.status < 300
+      && item.businessSuccess
+    );
+    const successfulClassifications = afterUploadNetwork.filter((item) =>
+      /cell_file\/classify_upload/.test(item.url || "")
+      && item.status >= 200
+      && item.status < 300
+      && item.businessSuccess
+    );
+    const failedUploads = afterUploadNetwork.filter((item) =>
+      /attach\/upload/.test(item.url || "")
+      && !(item.status >= 200 && item.status < 300 && item.businessSuccess)
+    );
+    result.uploadNetwork = afterUploadNetwork;
+    result.uploadConfirmation = uploadConfirmationSummary(afterUploadNetwork);
+    if (!successfulUploads.length || failedUploads.length || !successfulClassifications.length) {
+      return {
+        ...result,
+        ok: false,
+        reason: "UPLOAD_OR_CLASSIFY_NOT_CONFIRMED",
+        expectedUploadCount: files.length,
+        successfulUploadCount: successfulUploads.length,
+        failedUploadCount: failedUploads.length,
+        dialogText: textOf(dialog).slice(0, 2000),
+        dialogMessages: getPageMessages(),
+        uploadConfirmation: result.uploadConfirmation,
+      };
+    }
+    const classify = successfulClassifications.at(-1);
+    result.classificationValue = classify.classificationValue || "";
+    result.dialogClose = await closeDialogWithoutConfirm(dialog);
+    result.dialogSettled = await waitForUploadDialogSettled();
+    const after = locateAuditUploadCell(payload);
+    result.after = after.ok ? { text: after.text, value: after.value, tag: after.tag } : null;
+    result.readbackConsistent = Boolean(result.classificationValue
+      && JSON.stringify(result.after || {}).includes(result.classificationValue));
+    result.saveDeferred = Boolean(payload?.deferSave);
+    result.security.writesPerformed = false;
+    result.ok = Boolean(result.classificationValue && result.readbackConsistent);
+    result.reason = result.ok ? null : "BATCH_UPLOAD_CLASSIFICATION_READBACK_MISMATCH";
     result.summary = {
-      requestedRows: uniqueRows.length,
-      successRows: successRows.length,
-      failedRows: failedRows.length,
+      rowNumber,
+      fileCount: files.length,
+      uploadSuccessCount: successfulUploads.length,
+      classificationCount: successfulClassifications.length,
     };
-    result.ok = successRows.length > 0 && failedRows.length === 0;
-    result.partialSuccess = successRows.length > 0 && failedRows.length > 0;
-    result.reason = result.ok ? null : (result.partialSuccess ? "BATCH_UPLOAD_PARTIAL_SUCCESS" : "BATCH_UPLOAD_ALL_FAILED");
     result.adapterVersion = ADAPTER_VERSION;
     return result;
   }
@@ -2352,6 +2574,19 @@
         hasCheck: row.hasCheck,
         hasProcedure: row.hasProcedure,
       })),
+      rowsWithCleanupData: scan.rows
+        .filter((row) => row.hasIndex || row.hasProcedure)
+        .map((row) => ({
+          rowNumber: row.rowNumber,
+          indexAddress: row.indexAddress,
+          checkAddress: row.checkAddress,
+          index: row.index,
+          check: row.check,
+          procedure: row.procedure,
+          hasIndex: row.hasIndex,
+          hasCheck: row.hasCheck,
+          hasProcedure: row.hasProcedure,
+        })),
       rowsNeedingCheck: scan.rowsNeedingCheck.map((row) => ({
         rowNumber: row.rowNumber,
         indexAddress: row.indexAddress,
@@ -2609,6 +2844,119 @@
     };
     result.ok = result.readbackConsistent;
     result.reason = result.ok ? null : (saveResult.ok ? "CLEAR_TEST_READBACK_NOT_EMPTY" : saveResult.reason || "DRAFT_SAVE_NOT_CONFIRMED");
+    result.adapterVersion = ADAPTER_VERSION;
+    return result;
+  }
+
+  async function clearAuditAttachments(payload) {
+    const context = collectContext();
+    const gate = assertDraftPage(context);
+    const result = {
+      ok: gate.ok,
+      action: "clear_audit_attachments",
+      collectedAt: new Date().toISOString(),
+      url: location.href,
+      gate,
+      rows: [],
+      security: {
+        credentialsCaptured: false,
+        writesPerformed: false,
+      },
+    };
+    if (!gate.ok) return result;
+    if (payload?.confirmText !== "确认批量清理附件并保存") {
+      return { ...result, ok: false, reason: "CLEAR_ATTACHMENTS_CONFIRM_TEXT_REQUIRED" };
+    }
+    if (context.page?.saveButton?.disabled || context.page?.lockText || context.page?.permissionText) {
+      return { ...result, ok: false, reason: "READONLY_OR_LOCKED" };
+    }
+    const scan = collectAuditIndexRows(payload);
+    if (!scan.ok) return { ...result, ok: false, reason: scan.reason, headers: scan.headers || [] };
+    const rowNumbers = [...new Set((Array.isArray(payload?.rowNumbers) ? payload.rowNumbers : [])
+      .map(Number)
+      .filter((row) => Number.isInteger(row) && row >= 2))];
+    if (!rowNumbers.length || rowNumbers.length > 100) {
+      return { ...result, ok: false, reason: "CLEAR_ATTACHMENTS_ROWS_INVALID" };
+    }
+    const expectedByRow = new Map((Array.isArray(payload?.expectedCleanupValues) ? payload.expectedCleanupValues : [])
+      .map((item) => [
+        Number(item?.rowNumber),
+        {
+          indexValue: String(item?.indexValue || "").trim(),
+          procedureValue: String(item?.procedureValue || "").trim(),
+        },
+      ])
+      .filter(([rowNumber]) => Number.isInteger(rowNumber) && rowNumber >= 2));
+    if (rowNumbers.some((rowNumber) => !expectedByRow.has(rowNumber))) {
+      return { ...result, ok: false, reason: "CLEAR_ATTACHMENTS_EXPECTED_VALUES_REQUIRED" };
+    }
+    const requested = new Set(rowNumbers);
+    const candidates = scan.rows.filter((row) =>
+      requested.has(row.rowNumber) && (row.hasIndex || row.hasProcedure)
+    );
+    if (candidates.length !== rowNumbers.length) {
+      return { ...result, ok: false, reason: "CLEAR_ATTACHMENTS_ROWS_CHANGED" };
+    }
+    const mismatches = candidates.filter((row) => {
+      const expected = expectedByRow.get(row.rowNumber);
+      const currentIndex = String(row.index.text || row.index.value || "").trim();
+      const currentProcedure = String(row.procedure.text || row.procedure.value || "").trim();
+      return currentIndex !== expected.indexValue || currentProcedure !== expected.procedureValue;
+    });
+    if (mismatches.length) {
+      return {
+        ...result,
+        ok: false,
+        reason: "CLEAR_ATTACHMENTS_INDEX_VALUE_MISMATCH",
+        mismatches: mismatches.map((row) => ({ rowNumber: row.rowNumber, index: row.index })),
+      };
+    }
+
+    installUploadNetworkMonitor();
+    const networkStart = window.__tianyuanWorkbenchUploadNetworkLog.length;
+    for (const row of candidates) {
+      scan.sheet.setValue(row.row, scan.columns.auditProcedure.col, "");
+      scan.sheet.setValue(row.row, scan.columns.auditIndex.col, null);
+      scan.sheet.setTag?.(row.row, scan.columns.auditIndex.col, { fileId: null, isClear: true });
+      result.rows.push({
+        rowNumber: row.rowNumber,
+        address: row.indexAddress,
+        before: row.index,
+        beforeProcedure: row.procedure,
+        preservedCheck: row.check,
+      });
+    }
+    scan.sheet.setActiveCell(candidates[0].row, scan.columns.auditIndex.col);
+    scan.sheet.setSelection(candidates[0].row, scan.columns.auditIndex.col, 1, 1);
+    scan.spread.focus?.();
+    await sleep(400);
+    const saveResult = await saveDraftWithNetworkEvidence(networkStart, 8000);
+    const readback = candidates.map((row) => {
+      const index = getSheetCellSnapshot(scan.sheet, row.row, scan.columns.auditIndex.col);
+      const procedure = getSheetCellSnapshot(scan.sheet, row.row, scan.columns.auditProcedure.col);
+      const check = getSheetCellSnapshot(scan.sheet, row.row, scan.columns.auditCheck.col);
+      return {
+        rowNumber: row.rowNumber,
+        address: row.indexAddress,
+        index,
+        procedure,
+        cleared: !cellHasContent(index) && !cellHasContent(procedure),
+        preserved: {
+          check: JSON.stringify(check) === JSON.stringify(row.check),
+        },
+      };
+    });
+    result.sheetName = scan.sheetName;
+    result.columns = scan.columns;
+    result.saveNetwork = saveResult.saveNetwork || [];
+    result.saveSuccess = Boolean(saveResult.ok);
+    result.readback = readback;
+    result.readbackConsistent = Boolean(saveResult.ok && readback.every((row) =>
+      row.cleared && row.preserved.check
+    ));
+    result.security.writesPerformed = Boolean(saveResult.ok);
+    result.ok = result.readbackConsistent;
+    result.reason = result.ok ? null : (saveResult.ok ? "CLEAR_ATTACHMENTS_READBACK_MISMATCH" : "DRAFT_SAVE_NOT_CONFIRMED");
     result.adapterVersion = ADAPTER_VERSION;
     return result;
   }
@@ -3114,6 +3462,9 @@
     if (payload?.action === "clear_audit_test_rows") {
       return await clearAuditTestRows(payload);
     }
+    if (payload?.action === "clear_audit_attachments") {
+      return await clearAuditAttachments(payload);
+    }
 
     return {
       ok: false,
@@ -3124,11 +3475,17 @@
     };
   }
 
-  if (window.__tianyuanWorkbenchPageAdapterVersion === ADAPTER_VERSION) return;
+  const previousAdapterState = window[ADAPTER_STATE_KEY];
+  if (previousAdapterState?.contextListener) {
+    window.removeEventListener("message", previousAdapterState.contextListener);
+  }
+  if (previousAdapterState?.actionListener) {
+    window.removeEventListener("message", previousAdapterState.actionListener);
+  }
   window.__tianyuanWorkbenchPageAdapterInstalled = true;
   window.__tianyuanWorkbenchPageAdapterVersion = ADAPTER_VERSION;
 
-  window.addEventListener("message", (event) => {
+  const contextListener = (event) => {
     if (event.source !== window) return;
     const data = event.data;
     if (!data || data.type !== REQUEST_TYPE) return;
@@ -3148,9 +3505,9 @@
 
     payload = { ...payload, adapterVersion: ADAPTER_VERSION };
     window.postMessage({ type: RESPONSE_TYPE, requestId: data.requestId, payload }, "*");
-  });
+  };
 
-  window.addEventListener("message", async (event) => {
+  const actionListener = async (event) => {
     if (event.source !== window) return;
     const data = event.data;
     if (!data || data.type !== ACTION_REQUEST_TYPE) return;
@@ -3170,5 +3527,13 @@
 
     payload = { ...payload, adapterVersion: ADAPTER_VERSION };
     window.postMessage({ type: ACTION_RESPONSE_TYPE, requestId: data.requestId, payload }, "*");
-  });
+  };
+
+  window.addEventListener("message", contextListener);
+  window.addEventListener("message", actionListener);
+  window[ADAPTER_STATE_KEY] = {
+    adapterVersion: ADAPTER_VERSION,
+    contextListener,
+    actionListener,
+  };
 })();
