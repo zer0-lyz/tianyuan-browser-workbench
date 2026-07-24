@@ -43,7 +43,7 @@
             <h2>功能模块</h2>
             <p>选择一个功能开始处理</p>
           </div>
-          <span class="badge">7 个模块</span>
+          <span class="badge">8 个模块</span>
         </div>
         <div class="module-grid">
           <button id="openBatchSave" type="button" class="module-card">
@@ -76,6 +76,16 @@
             </span>
             <strong>批量上传文件</strong>
             <small>选择目标列、文件夹和对应行号后批量上传</small>
+          </button>
+          <button id="openBatchCleanup" type="button" class="module-card">
+            <span class="module-icon module-icon-cleanup" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path class="ph-duotone" d="M6.75 7.5h10.5l-.75 12H7.5z"></path>
+                <path d="M9.75 4.5a2.25 2.25 0 0 1 4.5 0h4.5a.75.75 0 0 1 0 1.5H18l-.79 13.09A2.25 2.25 0 0 1 14.96 21H9.04a2.25 2.25 0 0 1-2.25-1.91L6 6h-.75a.75.75 0 0 1 0-1.5Zm1.5 0h1.5a.75.75 0 0 0-1.5 0M7.5 6l.78 12.99c.03.29.36.51.76.51h5.92c.4 0 .73-.22.76-.51L16.5 6Zm3 3.75a.75.75 0 0 1 .75.75v5.25a.75.75 0 0 1-1.5 0V10.5a.75.75 0 0 1 .75-.75m3 0a.75.75 0 0 1 .75.75v5.25a.75.75 0 0 1-1.5 0V10.5a.75.75 0 0 1 .75-.75"></path>
+              </svg>
+            </span>
+            <strong>批量清理附件</strong>
+            <small>识别已有附件的明细行，确认后批量解除关联</small>
           </button>
           <button id="openExportDetail" type="button" class="module-card">
             <span class="module-icon module-icon-detail" aria-hidden="true">
@@ -457,6 +467,104 @@
               <button id="backToBatchUploadMapping" type="button" class="secondary">返回修改映射</button>
               <button id="resumeBatchUpload" type="button" class="secondary hidden">继续未完成项</button>
               <button id="runBatchUpload" type="button">开始执行</button>
+            </div>
+          </section>
+        </section>
+      </section>
+
+      <section id="page-batch-cleanup" class="route-page hidden" data-route="batch-cleanup">
+        <div class="page-heading">
+          <div>
+            <h2>批量清理附件</h2>
+            <p>识别当前底稿中有核实程序或资料索引的明细行，确认后直接清空</p>
+          </div>
+          <button id="backFromBatchCleanup" type="button" class="secondary">功能中心</button>
+        </div>
+        <section class="section feature-module batch-upload-module">
+          <div class="batch-upload-steps" aria-label="批量清理步骤">
+            <span id="batchCleanupStepOne" class="batch-upload-step active">1 识别对象</span>
+            <span id="batchCleanupStepTwo" class="batch-upload-step">2 选择附件</span>
+            <span id="batchCleanupStepThree" class="batch-upload-step">3 执行确认</span>
+          </div>
+
+          <section id="batchCleanupTargetStep" class="batch-upload-step-panel">
+            <div class="section-title-row feature-title">
+              <div>
+                <h2>识别清理对象</h2>
+                <p class="section-description">读取当前科目、活动 Sheet 和“查证资料索引”列，不修改底稿。</p>
+              </div>
+              <button id="refreshBatchCleanupTarget" type="button" class="tiny secondary">重新识别</button>
+            </div>
+            <div class="form-grid">
+              <label>
+                <span>当前科目</span>
+                <input id="batchCleanupSubject" type="text" readonly placeholder="等待识别">
+              </label>
+              <label>
+                <span>当前 Sheet</span>
+                <input id="batchCleanupSheet" type="text" readonly placeholder="等待识别">
+              </label>
+              <label>
+                <span>资料索引列</span>
+                <input id="batchCleanupColumn" type="text" readonly placeholder="等待识别">
+              </label>
+            </div>
+            <div id="batchCleanupTargetFeedback" class="inline-feedback">尚未识别</div>
+            <div class="button-row">
+              <button id="confirmBatchCleanupTarget" type="button">确认并加载附件</button>
+            </div>
+          </section>
+
+          <section id="batchCleanupRowsStep" class="batch-upload-step-panel hidden">
+            <div class="section-title-row feature-title">
+              <div>
+                <h2>选择需要清理的行</h2>
+                <p class="section-description">清空“查证类核实程序”和“查证资料索引”，保留“查证核对情况”。</p>
+              </div>
+              <span class="button-row">
+                <button id="selectAllBatchCleanupRows" type="button" class="tiny">全选</button>
+                <button id="clearAllBatchCleanupRows" type="button" class="tiny secondary">全不选</button>
+              </span>
+            </div>
+            <div class="batch-upload-table-wrap">
+              <table class="batch-upload-table batch-cleanup-table">
+                <thead>
+                  <tr><th>选择</th><th>行号</th><th>查证类核实程序</th><th>资料索引</th><th>核对情况</th></tr>
+                </thead>
+                <tbody id="batchCleanupRows">
+                  <tr><td colspan="5" class="empty-list">确认对象后加载附件</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="batchCleanupSelectionFeedback" class="inline-feedback">等待选择</div>
+            <div class="button-row">
+              <button id="backToBatchCleanupTarget" type="button" class="secondary">返回重新识别</button>
+              <button id="confirmBatchCleanupRows" type="button">确认清理范围</button>
+            </div>
+          </section>
+
+          <section id="batchCleanupExecuteStep" class="batch-upload-step-panel hidden">
+            <div class="section-title-row feature-title">
+              <div>
+                <h2>执行批量清理</h2>
+                <p class="section-description">统一保存，并逐行回读确认核实程序和资料索引均为空。</p>
+              </div>
+              <span id="batchCleanupExecutionSummary" class="badge">尚未确认</span>
+            </div>
+            <div id="batchCleanupReview" class="batch-upload-review"></div>
+            <label class="check-row">
+              <input id="batchCleanupExecuteConfirm" type="checkbox">
+              <span>确认清空所选行的核实程序和资料索引并保存底稿。附件库中的物理文件不会删除。</span>
+            </label>
+            <div class="progress-heading">
+              <span id="batchCleanupProgressText">等待执行</span>
+              <strong id="batchCleanupProgressPercent">0%</strong>
+            </div>
+            <progress id="batchCleanupProgressBar" max="100" value="0"></progress>
+            <div id="batchCleanupResultList" class="batch-upload-result-list"></div>
+            <div class="button-row">
+              <button id="backToBatchCleanupRows" type="button" class="secondary">返回修改范围</button>
+              <button id="runBatchCleanup" type="button" class="danger-button">开始清理</button>
             </div>
           </section>
         </section>

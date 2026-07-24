@@ -1,11 +1,22 @@
-const ADAPTER_VERSION = "2026-07-24-page-tree-mirror-v26-upload-dialog-root";
+(() => {
+const ADAPTER_VERSION = "2026-07-24-page-tree-mirror-v29-replaceable-listeners";
+const CONTENT_STATE_KEY = "__tianyuanWorkbenchContentScriptState";
 const INJECTED_SCRIPT_ID = `tianyuan-workbench-page-adapter-${ADAPTER_VERSION}`;
 const EXT_REQUEST_TYPE = "TIANYUAN_WORKBENCH_GET_CONTEXT_V2";
 const EXT_ACTION_REQUEST_TYPE = "TIANYUAN_WORKBENCH_RUN_ACTION_V2";
-const PAGE_REQUEST_TYPE = "TIANYUAN_WORKBENCH_GET_CONTEXT";
-const PAGE_RESPONSE_TYPE = "TIANYUAN_WORKBENCH_CONTEXT_RESULT";
-const PAGE_ACTION_REQUEST_TYPE = "TIANYUAN_WORKBENCH_RUN_ACTION";
-const PAGE_ACTION_RESPONSE_TYPE = "TIANYUAN_WORKBENCH_ACTION_RESULT";
+const PAGE_REQUEST_TYPE = `TIANYUAN_WORKBENCH_GET_CONTEXT:${ADAPTER_VERSION}`;
+const PAGE_RESPONSE_TYPE = `TIANYUAN_WORKBENCH_CONTEXT_RESULT:${ADAPTER_VERSION}`;
+const PAGE_ACTION_REQUEST_TYPE = `TIANYUAN_WORKBENCH_RUN_ACTION:${ADAPTER_VERSION}`;
+const PAGE_ACTION_RESPONSE_TYPE = `TIANYUAN_WORKBENCH_ACTION_RESULT:${ADAPTER_VERSION}`;
+
+const existingContentState = globalThis[CONTENT_STATE_KEY];
+if (existingContentState?.listener) {
+  try {
+    chrome.runtime.onMessage.removeListener(existingContentState.listener);
+  } catch {
+    // A listener from an invalidated extension context can be left for Chrome to discard.
+  }
+}
 
 let adapterInjectionPromise = null;
 
@@ -41,6 +52,7 @@ async function requestPageAdapter(type, responseType, payload = {}, timeoutMs = 
 
   return new Promise((resolve) => {
     const timeout = window.setTimeout(() => {
+      adapterInjectionPromise = null;
       window.removeEventListener("message", onMessage);
       resolve({
         ok: false,
@@ -57,6 +69,7 @@ async function requestPageAdapter(type, responseType, payload = {}, timeoutMs = 
       if (data.payload?.adapterVersion !== ADAPTER_VERSION) return;
 
       window.clearTimeout(timeout);
+      adapterInjectionPromise = Promise.resolve();
       window.removeEventListener("message", onMessage);
       resolve(data.payload);
     }
@@ -66,7 +79,7 @@ async function requestPageAdapter(type, responseType, payload = {}, timeoutMs = 
   });
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+const contentMessageListener = (message, _sender, sendResponse) => {
   if (message?.type !== EXT_REQUEST_TYPE && message?.type !== EXT_ACTION_REQUEST_TYPE) return false;
 
   const actionTimeout = ["upload_audit_attachment", "batch_upload_audit_attachments", "set_audit_check_result", "batch_set_audit_check_results"].includes(message.payload?.action)
@@ -89,4 +102,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     });
 
   return true;
-});
+};
+
+chrome.runtime.onMessage.addListener(contentMessageListener);
+globalThis[CONTENT_STATE_KEY] = {
+  adapterVersion: ADAPTER_VERSION,
+  listener: contentMessageListener,
+};
+})();

@@ -60,6 +60,7 @@ const elements = {
   openBatchSave: document.getElementById("openBatchSave"),
   openBatchExit: document.getElementById("openBatchExit"),
   openBatchUpload: document.getElementById("openBatchUpload"),
+  openBatchCleanup: document.getElementById("openBatchCleanup"),
   openExportDetail: document.getElementById("openExportDetail"),
   openExportDeclare: document.getElementById("openExportDeclare"),
   openFormatDetail: document.getElementById("openFormatDetail"),
@@ -68,6 +69,7 @@ const elements = {
   backFromSave: document.getElementById("backFromSave"),
   backFromExit: document.getElementById("backFromExit"),
   backFromBatchUpload: document.getElementById("backFromBatchUpload"),
+  backFromBatchCleanup: document.getElementById("backFromBatchCleanup"),
   backFromExportDetail: document.getElementById("backFromExportDetail"),
   backFromExportDeclare: document.getElementById("backFromExportDeclare"),
   backFromFormatDetail: document.getElementById("backFromFormatDetail"),
@@ -77,6 +79,7 @@ const elements = {
   pageBatchSave: document.getElementById("page-batch-save"),
   pageBatchExit: document.getElementById("page-batch-exit"),
   pageBatchUpload: document.getElementById("page-batch-upload"),
+  pageBatchCleanup: document.getElementById("page-batch-cleanup"),
   pageExportDetail: document.getElementById("page-export-detail"),
   pageExportDeclare: document.getElementById("page-export-declare"),
   pageFormatDetail: document.getElementById("page-format-detail"),
@@ -249,6 +252,33 @@ const elements = {
   backToBatchUploadMapping: document.getElementById("backToBatchUploadMapping"),
   runBatchUpload: document.getElementById("runBatchUpload"),
   resumeBatchUpload: document.getElementById("resumeBatchUpload"),
+  batchCleanupTargetStep: document.getElementById("batchCleanupTargetStep"),
+  batchCleanupRowsStep: document.getElementById("batchCleanupRowsStep"),
+  batchCleanupExecuteStep: document.getElementById("batchCleanupExecuteStep"),
+  batchCleanupStepOne: document.getElementById("batchCleanupStepOne"),
+  batchCleanupStepTwo: document.getElementById("batchCleanupStepTwo"),
+  batchCleanupStepThree: document.getElementById("batchCleanupStepThree"),
+  refreshBatchCleanupTarget: document.getElementById("refreshBatchCleanupTarget"),
+  batchCleanupSubject: document.getElementById("batchCleanupSubject"),
+  batchCleanupSheet: document.getElementById("batchCleanupSheet"),
+  batchCleanupColumn: document.getElementById("batchCleanupColumn"),
+  batchCleanupTargetFeedback: document.getElementById("batchCleanupTargetFeedback"),
+  confirmBatchCleanupTarget: document.getElementById("confirmBatchCleanupTarget"),
+  batchCleanupRows: document.getElementById("batchCleanupRows"),
+  selectAllBatchCleanupRows: document.getElementById("selectAllBatchCleanupRows"),
+  clearAllBatchCleanupRows: document.getElementById("clearAllBatchCleanupRows"),
+  batchCleanupSelectionFeedback: document.getElementById("batchCleanupSelectionFeedback"),
+  backToBatchCleanupTarget: document.getElementById("backToBatchCleanupTarget"),
+  confirmBatchCleanupRows: document.getElementById("confirmBatchCleanupRows"),
+  batchCleanupExecutionSummary: document.getElementById("batchCleanupExecutionSummary"),
+  batchCleanupReview: document.getElementById("batchCleanupReview"),
+  batchCleanupExecuteConfirm: document.getElementById("batchCleanupExecuteConfirm"),
+  batchCleanupProgressText: document.getElementById("batchCleanupProgressText"),
+  batchCleanupProgressPercent: document.getElementById("batchCleanupProgressPercent"),
+  batchCleanupProgressBar: document.getElementById("batchCleanupProgressBar"),
+  batchCleanupResultList: document.getElementById("batchCleanupResultList"),
+  backToBatchCleanupRows: document.getElementById("backToBatchCleanupRows"),
+  runBatchCleanup: document.getElementById("runBatchCleanup"),
   taskLog: document.getElementById("taskLog"),
   taskLogCount: document.getElementById("taskLogCount"),
   projectId: document.getElementById("projectId"),
@@ -304,10 +334,22 @@ let batchUploadState = {
   results: [],
   running: false,
 };
+let batchCleanupState = {
+  step: 1,
+  subjectCode: "",
+  sheetName: "",
+  fieldColumn: null,
+  fieldAddress: "",
+  rows: [],
+  selectedRows: [],
+  running: false,
+  result: null,
+};
 const moduleScopeStates = {
   "batch-save": null,
   "batch-exit": null,
   "batch-upload": null,
+  "batch-cleanup": null,
   "export-detail": null,
   "export-declare": null,
   "format-detail": null,
@@ -324,6 +366,7 @@ const ROUTE_LABELS = {
   "batch-save": "批量保存底稿",
   "batch-exit": "批量退出编辑",
   "batch-upload": "批量上传文件",
+  "batch-cleanup": "批量清理附件",
   "export-detail": "导出明细表",
   "export-declare": "导出申报表",
   "format-detail": "明细表打印格式",
@@ -332,6 +375,11 @@ const ROUTE_LABELS = {
 
 const extensionManifest = chrome.runtime.getManifest();
 const extensionRuntimeVersion = extensionManifest.version;
+const extensionRuntimeContractPromise = fetch(chrome.runtime.getURL("runtime-compat.json"), {
+  cache: "no-store",
+})
+  .then((response) => response.ok ? response.json() : null)
+  .catch(() => null);
 elements.extensionId.textContent = chrome.runtime.id;
 
 function on(element, eventName, handler) {
@@ -408,6 +456,7 @@ function setBusy(nextBusy) {
     elements.openBatchSave,
     elements.openBatchExit,
     elements.openBatchUpload,
+    elements.openBatchCleanup,
     elements.openExportDetail,
     elements.openExportDeclare,
     elements.openFormatDetail,
@@ -416,6 +465,7 @@ function setBusy(nextBusy) {
     elements.backFromSave,
     elements.backFromExit,
     elements.backFromBatchUpload,
+    elements.backFromBatchCleanup,
     elements.backFromExportDetail,
     elements.backFromExportDeclare,
     elements.backFromFormatDetail,
@@ -432,6 +482,14 @@ function setBusy(nextBusy) {
     elements.backToBatchUploadMapping,
     elements.runBatchUpload,
     elements.resumeBatchUpload,
+    elements.refreshBatchCleanupTarget,
+    elements.confirmBatchCleanupTarget,
+    elements.selectAllBatchCleanupRows,
+    elements.clearAllBatchCleanupRows,
+    elements.backToBatchCleanupTarget,
+    elements.confirmBatchCleanupRows,
+    elements.backToBatchCleanupRows,
+    elements.runBatchCleanup,
     elements.runExportDetail,
     elements.runExportDeclare,
     elements.chooseDetailOutputPath,
@@ -507,6 +565,7 @@ function isModuleRoute(route = currentRoute) {
     "batch-save",
     "batch-exit",
     "batch-upload",
+    "batch-cleanup",
     "export-detail",
     "export-declare",
     "format-detail",
@@ -519,7 +578,7 @@ function routeNeedsSubjects(route = currentRoute) {
 }
 
 function routeNeedsScope(route = currentRoute) {
-  return !["format-detail", "format-declaration", "batch-upload"].includes(route);
+  return !["format-detail", "format-declaration", "batch-upload", "batch-cleanup"].includes(route);
 }
 
 function syncSelectedItems() {
@@ -677,6 +736,7 @@ function renderRoute(route) {
     elements.pageBatchSave,
     elements.pageBatchExit,
     elements.pageBatchUpload,
+    elements.pageBatchCleanup,
     elements.pageExportDetail,
     elements.pageExportDeclare,
     elements.pageFormatDetail,
@@ -689,8 +749,9 @@ function renderRoute(route) {
   elements.scopeSection?.classList.add("hidden");
   elements.supportSection?.classList.add("hidden");
   if (isModuleRoute(safeRoute)) {
-    if (safeRoute === "batch-upload") {
-      renderBatchUploadStep();
+    if (safeRoute === "batch-upload" || safeRoute === "batch-cleanup") {
+      if (safeRoute === "batch-upload") renderBatchUploadStep();
+      else renderBatchCleanupStep();
       elements.subtitle.textContent = ROUTE_LABELS[safeRoute];
       updateHomePageState();
       return;
@@ -699,6 +760,7 @@ function renderRoute(route) {
       "batch-save": elements.saveScopeMount,
       "batch-exit": elements.exitScopeMount,
       "batch-upload": null,
+      "batch-cleanup": null,
       "export-detail": elements.detailScopeMount,
       "export-declare": elements.declareScopeMount,
       "format-detail": null,
@@ -708,6 +770,7 @@ function renderRoute(route) {
       "batch-save": elements.saveSupportMount,
       "batch-exit": elements.exitSupportMount,
       "batch-upload": null,
+      "batch-cleanup": null,
       "export-detail": elements.detailSupportMount,
       "export-declare": elements.declareSupportMount,
       "format-detail": elements.detailPrintSupportMount,
@@ -813,11 +876,31 @@ function renderBatchUploadColumnFeedback() {
   if (elements.confirmBatchUploadTarget) elements.confirmBatchUploadTarget.disabled = !valid;
 }
 
+function resetBatchUploadStateForTargetChange() {
+  batchUploadState.step = 1;
+  batchUploadState.files = [];
+  batchUploadState.mappings = [];
+  batchUploadState.results = [];
+  batchUploadState.targetPositions = [];
+  batchUploadState.folderPath = "";
+  batchUploadState.folderName = "";
+  batchUploadState.fieldColumn = null;
+  batchUploadState.fieldTitle = "";
+  elements.resumeBatchUpload?.classList.add("hidden");
+  if (elements.batchUploadResultList) elements.batchUploadResultList.innerHTML = "";
+  if (elements.batchUploadProgressBar) elements.batchUploadProgressBar.value = 0;
+  if (elements.batchUploadProgressPercent) elements.batchUploadProgressPercent.textContent = "0%";
+  if (elements.batchUploadProgressText) elements.batchUploadProgressText.textContent = "尚未开始";
+  if (elements.batchUploadExecutionSummary) elements.batchUploadExecutionSummary.textContent = "0 个文件待执行";
+  if (elements.batchUploadFolderSummary) elements.batchUploadFolderSummary.textContent = "尚未选择文件夹";
+  renderBatchUploadStep();
+}
+
 function renderBatchUploadTarget(payload) {
-  batchUploadState.targetPayload = payload;
-  batchUploadState.targetPositions = Array.isArray(payload.positions) ? payload.positions : [];
-  batchUploadState.subjectCode = String(payload.route?.subjectCode || latestContext?.route?.subjectCode || "").trim();
-  elements.batchUploadSubject.value = batchUploadState.subjectCode || "未识别";
+  const previousTargetKey = batchUploadState.targetPayload
+    ? `${batchUploadState.subjectCode || ""}|${batchUploadState.sheetName || ""}`
+    : "";
+  const nextSubjectCode = String(payload.route?.subjectCode || latestContext?.route?.subjectCode || "").trim();
   const sheets = Array.isArray(payload.sheets) ? payload.sheets : [];
   elements.batchUploadSheetSelect.innerHTML = "";
   for (const sheet of sheets) {
@@ -826,9 +909,17 @@ function renderBatchUploadTarget(payload) {
     option.textContent = `${sheet.name || "未命名"}${sheet.visible === false ? "（隐藏）" : ""}`;
     elements.batchUploadSheetSelect.appendChild(option);
   }
-  const selectedSheet = sheets.find((item) => item.name === batchUploadState.sheetName)
-    || sheets.find((item) => item.name === payload.sheetName)
+  const selectedSheet = sheets.find((item) => item.name === payload.sheetName)
+    || sheets.find((item) => item.name === batchUploadState.sheetName)
     || sheets[0];
+  const nextTargetKey = `${nextSubjectCode}|${selectedSheet?.name || ""}`;
+  if (previousTargetKey && previousTargetKey !== nextTargetKey) {
+    resetBatchUploadStateForTargetChange();
+  }
+  batchUploadState.targetPayload = payload;
+  batchUploadState.targetPositions = Array.isArray(payload.positions) ? payload.positions : [];
+  batchUploadState.subjectCode = nextSubjectCode;
+  elements.batchUploadSubject.value = batchUploadState.subjectCode || "未识别";
   batchUploadState.sheetName = selectedSheet?.name || "";
   batchUploadState.sheetIndex = Number.isInteger(selectedSheet?.index) ? selectedSheet.index : null;
   elements.batchUploadSheetSelect.value = batchUploadState.sheetName;
@@ -852,7 +943,7 @@ function renderBatchUploadTarget(payload) {
   renderBatchUploadColumnFeedback();
 }
 
-async function inspectBatchUploadTarget() {
+async function inspectBatchUploadTarget({ preserveSheet = false } = {}) {
   if (busy) return;
   setBusy(true);
   setStatus("正在识别当前科目、Sheet 和可上传列...", "idle");
@@ -864,8 +955,8 @@ async function inspectBatchUploadTarget() {
     const result = await sendToTab(tab, {
       type: ACTION_REQUEST_TYPE,
       payload: {
-    action: "inspect_batch_upload_target",
-        sheetName: batchUploadState.sheetName || undefined,
+        action: "inspect_batch_upload_target",
+        sheetName: preserveSheet ? (batchUploadState.sheetName || undefined) : undefined,
       },
     });
     if (!result?.ok) throw new Error(result?.reason || "当前页面无法识别可上传列。");
@@ -1141,6 +1232,16 @@ function batchUploadResultKey(item) {
   return item.filePath || item.fileName || "";
 }
 
+function groupBatchUploadMappingsByRow(mappings) {
+  const groups = new Map();
+  for (const mapping of mappings) {
+    const rowNumber = Number(mapping.rowNumber);
+    if (!groups.has(rowNumber)) groups.set(rowNumber, []);
+    groups.get(rowNumber).push(mapping);
+  }
+  return [...groups.entries()].map(([rowNumber, items]) => ({ rowNumber, items }));
+}
+
 function recordBatchUploadResult(mapping, result) {
   const item = {
     filePath: mapping.file.filePath,
@@ -1175,6 +1276,14 @@ function batchUploadFailureDetail(item) {
 
 async function saveBatchUploadMappings(tab, controlBinding, mappings) {
   if (!mappings.length) return { ok: true, skipped: true };
+  const missingClassification = mappings.filter((mapping) => !mapping.classificationValue);
+  if (missingClassification.length) {
+    return {
+      ok: false,
+      reason: "BATCH_UPLOAD_CLASSIFICATION_VALUE_MISSING",
+      files: missingClassification.map((mapping) => mapping.file.name),
+    };
+  }
   elements.batchUploadProgressText.textContent = `已完成 ${mappings.length} 个文件上传，正在统一保存并回读...`;
   const submitted = await connectorFetch(
     `/api/sessions/${encodeURIComponent(connectorSessionId)}/ui-actions`,
@@ -1190,12 +1299,44 @@ async function saveBatchUploadMappings(tab, controlBinding, mappings) {
         fieldColumn: batchUploadState.fieldColumn,
         fieldTitle: batchUploadState.fieldTitle,
         rowNumbers: mappings.map((mapping) => Number(mapping.rowNumber)),
+        expectedIndexValues: mappings.map((mapping) => ({
+          rowNumber: Number(mapping.rowNumber),
+          value: mapping.classificationValue,
+        })),
         confirmText: "确认批量上传并保存",
       }),
     },
   );
   const action = await waitForBatchUploadAction(submitted.action.actionId);
   return action.result || { ok: action.status === "completed" };
+}
+
+async function preflightBatchUploadRows(controlBinding, rowNumbers) {
+  const uniqueRows = [...new Set(rowNumbers.map(Number).filter((row) => Number.isInteger(row) && row >= 2))];
+  if (!uniqueRows.length) return { ok: true, occupiedRows: [] };
+  const submitted = await connectorFetch(
+    `/api/sessions/${encodeURIComponent(connectorSessionId)}/ui-actions`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        action: "scan_audit_index_check_rows",
+        bindingId: controlBinding.bindingId,
+        projectId: controlBinding.workspaceId || "",
+        threadId: controlBinding.conversationId || "",
+        subjectCode: batchUploadState.subjectCode,
+        fieldTitle: batchUploadState.fieldTitle,
+        maxRows: Math.max(...uniqueRows) + 1,
+      }),
+    },
+  );
+  const action = await waitForBatchUploadAction(submitted.action.actionId);
+  const result = action.result || {};
+  if (!result.ok) return { ok: false, reason: result.reason || "BATCH_UPLOAD_PREFLIGHT_FAILED" };
+  const requested = new Set(uniqueRows);
+  const occupiedRows = (result.rowsWithIndex || [])
+    .filter((item) => requested.has(Number(item.rowNumber)))
+    .map((item) => ({ rowNumber: Number(item.rowNumber), index: item.index || null }));
+  return { ok: occupiedRows.length === 0, occupiedRows };
 }
 
 async function runBatchUploadModule() {
@@ -1240,17 +1381,32 @@ async function runBatchUploadModule() {
       return;
     }
     const successfulMappings = [...saveOnlyMappings];
+    const uploadGroups = groupBatchUploadMappingsByRow(uploadMappings);
+    const preflight = await preflightBatchUploadRows(
+      controlBinding,
+      uploadGroups.map((group) => group.rowNumber),
+    );
+    if (!preflight.ok) {
+      const occupied = (preflight.occupiedRows || []).map((item) => `第 ${item.rowNumber} 行`).join("、");
+      throw new Error(occupied
+        ? `${occupied}已有查证资料索引，天源不允许追加附件。请改用空白行。`
+        : (preflight.reason || "上传行预检失败。"));
+    }
     let stoppedOnFailure = null;
-    for (let index = 0; index < uploadMappings.length; index += 1) {
-      const mapping = uploadMappings[index];
-      elements.batchUploadProgressText.textContent = `正在处理未完成项 ${index + 1}/${uploadMappings.length}：${mapping.file.name}`;
-      mapping.status = "上传中";
+    for (let index = 0; index < uploadGroups.length; index += 1) {
+      const group = uploadGroups[index];
+      const fileNames = group.items.map((mapping) => mapping.file.name).join("、");
+      elements.batchUploadProgressText.textContent = `正在处理第 ${group.rowNumber} 行 ${index + 1}/${uploadGroups.length}：${group.items.length} 个文件`;
+      for (const mapping of group.items) {
+        mapping.status = "上传中";
+        mapping.reason = "";
+      }
       const submitted = await connectorFetch(
         `/api/sessions/${encodeURIComponent(connectorSessionId)}/ui-actions`,
         {
           method: "POST",
           body: JSON.stringify({
-            action: "upload_audit_attachment",
+            action: "batch_upload_audit_attachments",
             bindingId: controlBinding.bindingId,
             projectId: controlBinding.workspaceId || "",
             threadId: controlBinding.conversationId || "",
@@ -1258,29 +1414,41 @@ async function runBatchUploadModule() {
             sheetName: batchUploadState.sheetName,
             fieldColumn: batchUploadState.fieldColumn,
             fieldTitle: batchUploadState.fieldTitle,
-            rowNumber: Number(mapping.rowNumber),
-            moduleIndex: Number(mapping.targetPositionIndex),
-            moduleName: mapping.targetPosition,
-            filePath: mapping.file.filePath,
+            rowNumber: group.rowNumber,
+            procedureText: [...new Set(group.items.map((mapping) => mapping.targetPosition).filter(Boolean))].join("/"),
+            files: group.items.map((mapping) => ({
+              filePath: mapping.file.filePath,
+              moduleIndex: Number(mapping.targetPositionIndex),
+              moduleName: mapping.targetPosition,
+            })),
             deferSave: true,
-            confirmText: "确认上传并保存",
+            confirmText: "确认批量上传并保存",
           }),
         },
       );
-      elements.batchUploadProgressText.textContent = `正在等待上传和分类确认：${mapping.file.name}`;
+      elements.batchUploadProgressText.textContent = `正在等待第 ${group.rowNumber} 行一次性上传和分类确认`;
       const action = await waitForBatchUploadAction(submitted.action.actionId);
       const result = action.result || { ok: action.status === "completed" };
-      recordBatchUploadResult(mapping, result);
+      for (const mapping of group.items) recordBatchUploadResult(mapping, result);
       if (!result.ok) {
-        mapping.status = "失败";
-        mapping.reason = result.reason || "未知失败";
-        stoppedOnFailure = mapping;
+        for (const mapping of group.items) {
+          mapping.status = "失败";
+          mapping.reason = result.reason || "未知失败";
+        }
+        stoppedOnFailure = {
+          ...group.items[0],
+          file: { ...group.items[0].file, name: fileNames },
+          rowNumber: group.rowNumber,
+        };
         renderBatchUploadResultList();
         break;
       }
-      mapping.status = "待保存";
-      mapping.reason = "";
-      successfulMappings.push(mapping);
+      for (const mapping of group.items) {
+        mapping.status = "待保存";
+        mapping.reason = "";
+        mapping.classificationValue = result.classificationValue || "";
+        successfulMappings.push(mapping);
+      }
       const completedCount = batchUploadState.mappings.filter((item) => item.status === "已保存").length + successfulMappings.length;
       const percent = Math.round((completedCount / batchUploadState.mappings.length) * 100);
       elements.batchUploadProgressBar.value = Math.min(99, percent);
@@ -1345,6 +1513,230 @@ function renderBatchUploadResultList(results = batchUploadState.results || []) {
     const position = item.targetPosition ? ` → ${item.targetPosition}` : "";
     row.textContent = `${item.ok ? "完成" : "失败"}：${item.fileName} → 第 ${item.rowNumber} 行${position}${item.ok ? "" : `，${batchUploadFailureDetail(item)}`}`;
     elements.batchUploadResultList.appendChild(row);
+  }
+}
+
+function renderBatchCleanupStep() {
+  const step = Math.max(1, Math.min(Number(batchCleanupState.step || 1), 3));
+  elements.batchCleanupTargetStep?.classList.toggle("hidden", step !== 1);
+  elements.batchCleanupRowsStep?.classList.toggle("hidden", step !== 2);
+  elements.batchCleanupExecuteStep?.classList.toggle("hidden", step !== 3);
+  [elements.batchCleanupStepOne, elements.batchCleanupStepTwo, elements.batchCleanupStepThree]
+    .forEach((element, index) => element?.classList.toggle("active", index + 1 === step));
+}
+
+function batchCleanupIndexValue(row) {
+  return String(row?.index?.text || row?.index?.value || "").trim();
+}
+
+function renderBatchCleanupRows() {
+  elements.batchCleanupRows.innerHTML = "";
+  if (!batchCleanupState.rows.length) {
+    const row = document.createElement("tr");
+    row.innerHTML = '<td colspan="5" class="empty-list">当前 Sheet 没有可清理的资料索引</td>';
+    elements.batchCleanupRows.appendChild(row);
+    batchUploadFeedback(elements.batchCleanupSelectionFeedback, "没有可清理的附件关联", "");
+    return;
+  }
+  const selected = new Set(batchCleanupState.selectedRows);
+  for (const item of batchCleanupState.rows) {
+    const row = document.createElement("tr");
+    const selectCell = document.createElement("td");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.className = "batch-cleanup-row-check";
+    checkbox.value = String(item.rowNumber);
+    checkbox.checked = selected.has(Number(item.rowNumber));
+    selectCell.appendChild(checkbox);
+    const values = [
+      selectCell,
+      String(item.rowNumber),
+      String(item.procedure?.text || item.procedure?.value || "-"),
+      batchCleanupIndexValue(item) || "-",
+      String(item.check?.text || item.check?.value || "-"),
+    ];
+    for (const value of values) {
+      if (value instanceof HTMLElement) {
+        row.appendChild(value);
+        continue;
+      }
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      cell.title = value;
+      row.appendChild(cell);
+    }
+    elements.batchCleanupRows.appendChild(row);
+  }
+  batchUploadFeedback(
+    elements.batchCleanupSelectionFeedback,
+    `已识别 ${batchCleanupState.rows.length} 行，当前选择 ${selected.size} 行`,
+    selected.size ? "ok" : "",
+  );
+}
+
+function selectedBatchCleanupRows() {
+  return [...elements.batchCleanupRows.querySelectorAll(".batch-cleanup-row-check:checked")]
+    .map((checkbox) => Number(checkbox.value))
+    .filter((rowNumber) => Number.isInteger(rowNumber) && rowNumber >= 2);
+}
+
+async function inspectBatchCleanupTarget({ advance = false } = {}) {
+  if (busy || batchCleanupState.running) return;
+  batchCleanupState.running = true;
+  setBusy(true);
+  setStatus("正在识别当前资料索引列...", "idle");
+  batchUploadFeedback(elements.batchCleanupTargetFeedback, "正在扫描已有附件关联...", "");
+  try {
+    const tab = await getActiveTab();
+    const context = await sendToTab(tab, { type: REQUEST_TYPE });
+    if (!context?.ok || !context.route?.isAssetDraftRoute) throw new Error("当前页面不是资产基础法底稿页。");
+    const session = await ensureCurrentPageConnectorSession();
+    const controlBinding = await ensureLocalScriptControlBinding(session);
+    if (!connectorSessionId || !controlBinding?.bindingId) throw new Error("未取得当前页面控制绑定。");
+    const submitted = await connectorFetch(
+      `/api/sessions/${encodeURIComponent(connectorSessionId)}/ui-actions`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          action: "scan_audit_index_check_rows",
+          bindingId: controlBinding.bindingId,
+          projectId: controlBinding.workspaceId || "",
+          threadId: controlBinding.conversationId || "",
+          subjectCode: context.route.subjectCode || "",
+          fieldTitle: "查证资料索引",
+          maxRows: 500,
+        }),
+      },
+    );
+    const action = await waitForBatchUploadAction(submitted.action.actionId);
+    const result = action.result || {};
+    if (!result.ok) throw new Error(result.reason || "资料索引扫描失败。");
+    batchCleanupState.subjectCode = context.route.subjectCode || "";
+    batchCleanupState.sheetName = result.sheetName || context.spread?.sheetName || "";
+    batchCleanupState.fieldColumn = result.columns?.auditIndex?.col ?? null;
+    batchCleanupState.fieldAddress = result.columns?.auditIndex?.address || "";
+    batchCleanupState.rows = Array.isArray(result.rowsWithCleanupData)
+      ? result.rowsWithCleanupData
+      : (Array.isArray(result.rowsWithIndex) ? result.rowsWithIndex : []);
+    batchCleanupState.selectedRows = batchCleanupState.rows.map((item) => Number(item.rowNumber));
+    batchCleanupState.result = null;
+    elements.batchCleanupSubject.value = batchCleanupState.subjectCode || "当前科目";
+    elements.batchCleanupSheet.value = batchCleanupState.sheetName || "当前 Sheet";
+    elements.batchCleanupColumn.value = batchCleanupState.fieldAddress
+      ? `${batchCleanupState.fieldAddress}列 查证资料索引`
+      : "查证资料索引";
+    renderBatchCleanupRows();
+    batchUploadFeedback(
+      elements.batchCleanupTargetFeedback,
+      batchCleanupState.rows.length
+        ? `已识别 ${batchCleanupState.rows.length} 行附件关联`
+        : "当前 Sheet 没有附件关联",
+      batchCleanupState.rows.length ? "ok" : "",
+    );
+    if (advance && batchCleanupState.rows.length) {
+      batchCleanupState.step = 2;
+      renderBatchCleanupStep();
+    }
+    setStatus("批量清理对象识别完成", "ok");
+  } catch (error) {
+    batchUploadFeedback(elements.batchCleanupTargetFeedback, error.message || String(error), "error");
+    setStatus(`识别失败：${error.message || String(error)}`, "error");
+  } finally {
+    batchCleanupState.running = false;
+    setBusy(false);
+  }
+}
+
+function renderBatchCleanupReview() {
+  const selected = new Set(batchCleanupState.selectedRows);
+  const rows = batchCleanupState.rows.filter((item) => selected.has(Number(item.rowNumber)));
+  elements.batchCleanupReview.innerHTML = "";
+  const summary = document.createElement("p");
+  summary.textContent = `科目：${batchCleanupState.subjectCode || "-"} / Sheet：${batchCleanupState.sheetName || "-"} / 清理：${rows.length} 行`;
+  elements.batchCleanupReview.appendChild(summary);
+  const list = document.createElement("ul");
+  list.className = "batch-upload-review-list";
+  for (const item of rows) {
+    const entry = document.createElement("li");
+    entry.textContent = `第 ${item.rowNumber} 行 → ${batchCleanupIndexValue(item)}`;
+    list.appendChild(entry);
+  }
+  elements.batchCleanupReview.appendChild(list);
+  elements.batchCleanupExecutionSummary.textContent = `${rows.length} 行待清理`;
+}
+
+async function runBatchCleanup() {
+  if (busy || batchCleanupState.running) return;
+  if (!elements.batchCleanupExecuteConfirm.checked) {
+    setStatus("请先勾选清理确认。", "warn");
+    return;
+  }
+  const selected = new Set(batchCleanupState.selectedRows);
+  const rows = batchCleanupState.rows.filter((item) => selected.has(Number(item.rowNumber)));
+  if (!rows.length) {
+    setStatus("没有选择需要清理的行。", "warn");
+    return;
+  }
+  setBusy(true);
+  batchCleanupState.running = true;
+  elements.batchCleanupProgressBar.value = 15;
+  elements.batchCleanupProgressPercent.textContent = "15%";
+  elements.batchCleanupProgressText.textContent = "正在校验所选资料索引...";
+  elements.batchCleanupResultList.innerHTML = "";
+  try {
+    const session = await ensureCurrentPageConnectorSession();
+    const controlBinding = await ensureLocalScriptControlBinding(session);
+    const submitted = await connectorFetch(
+      `/api/sessions/${encodeURIComponent(connectorSessionId)}/ui-actions`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          action: "clear_audit_attachments",
+          bindingId: controlBinding.bindingId,
+          projectId: controlBinding.workspaceId || "",
+          threadId: controlBinding.conversationId || "",
+          subjectCode: batchCleanupState.subjectCode,
+          sheetName: batchCleanupState.sheetName,
+          fieldTitle: "查证资料索引",
+          rowNumbers: rows.map((item) => Number(item.rowNumber)),
+          expectedCleanupValues: rows.map((item) => ({
+            rowNumber: Number(item.rowNumber),
+            indexValue: batchCleanupIndexValue(item),
+            procedureValue: String(item.procedure?.text || item.procedure?.value || "").trim(),
+          })),
+          confirmText: "确认批量清理附件并保存",
+        }),
+      },
+    );
+    elements.batchCleanupProgressBar.value = 45;
+    elements.batchCleanupProgressPercent.textContent = "45%";
+    elements.batchCleanupProgressText.textContent = "正在清空资料索引并保存...";
+    const action = await waitForBatchUploadAction(submitted.action.actionId);
+    const result = action.result || { ok: action.status === "completed" };
+    batchCleanupState.result = result;
+    latestPayload = result;
+    elements.json.textContent = JSON.stringify(result, null, 2);
+    const readbacks = Array.isArray(result.readback) ? result.readback : [];
+    for (const item of rows) {
+      const readback = readbacks.find((entry) => Number(entry.rowNumber) === Number(item.rowNumber));
+      const row = document.createElement("div");
+      row.className = `batch-upload-result ${readback?.cleared ? "ok" : "error"}`;
+      row.textContent = readback?.cleared
+        ? `完成：第 ${item.rowNumber} 行核实程序和资料索引已清空`
+        : `失败：第 ${item.rowNumber} 行${result.reason ? `，${result.reason}` : ""}`;
+      elements.batchCleanupResultList.appendChild(row);
+    }
+    elements.batchCleanupProgressBar.value = result.ok ? 100 : 70;
+    elements.batchCleanupProgressPercent.textContent = `${elements.batchCleanupProgressBar.value}%`;
+    elements.batchCleanupProgressText.textContent = result.ok ? "所选核实程序和资料索引已清空并回读确认" : `清理未完成：${result.reason || "未知原因"}`;
+    elements.batchCleanupExecutionSummary.textContent = result.ok ? `已清理 ${rows.length} 行` : "清理失败";
+    setStatus(result.ok ? "批量清理附件完成" : `批量清理附件失败：${result.reason || "未知原因"}`, result.ok ? "ok" : "error");
+  } catch (error) {
+    elements.batchCleanupProgressText.textContent = `执行失败：${error.message || String(error)}`;
+    setStatus(`批量清理附件失败：${error.message || String(error)}`, "error");
+  } finally {
+    batchCleanupState.running = false;
+    setBusy(false);
   }
 }
 
@@ -3460,6 +3852,7 @@ function renderConnectorSession(session) {
 }
 
 async function connectorFetch(path, options = {}) {
+  const runtimeContract = await extensionRuntimeContractPromise;
   const response = await fetch(`${CONNECTOR_BASE_URL}${path}`, {
     cache: "no-store",
     ...options,
@@ -3467,6 +3860,7 @@ async function connectorFetch(path, options = {}) {
       "content-type": "application/json",
       "x-tianyuan-extension-id": chrome.runtime.id,
       "x-tianyuan-extension-version": extensionRuntimeVersion,
+      "x-tianyuan-runtime-build-id": runtimeContract?.runtimeBuildId || "",
       ...(options.headers || {}),
     },
   });
@@ -3738,8 +4132,14 @@ function setConnectorBindingFeedback(text, kind = "idle") {
 async function ensureCurrentPageConnectorSession() {
   let connection = await checkConnectorConnection();
   if (!connection.ok) {
-    setConnectorBindingFeedback("Connector 未运行，正在自动启动...", "idle");
-    const startResult = await sendNativeMessage({ action: "start_connector_bridge" });
+    setConnectorBindingFeedback(
+      connection.mismatch ? "Connector 版本不一致，正在自动更新..." : "Connector 未运行，正在自动启动...",
+      "idle",
+    );
+    const startResult = await sendNativeMessage({
+      action: "start_connector_bridge",
+      forceRestart: Boolean(connection.mismatch),
+    });
     if (!startResult?.ok) throw new Error(startResult?.reason || "CONNECTOR_START_FAILED");
     connection = await checkConnectorConnection();
     if (!connection.ok) throw new Error(connection.reason || "CONNECTOR_HEALTH_FAILED");
@@ -3908,11 +4308,16 @@ async function checkConnectorConnection({ silent = false } = {}) {
     if (protocol.protocolVersion !== EXPECTED_CONNECTOR_PROTOCOL_VERSION) {
       throw new Error("CONNECTOR_RUNTIME_VERSION_MISMATCH");
     }
-    if (
-      protocol.runtimeCompatibility?.extensionVersion
-      && protocol.runtimeCompatibility.extensionVersion !== extensionRuntimeVersion
-    ) {
+    const runtimeContract = await extensionRuntimeContractPromise;
+    if (!runtimeContract?.runtimeBuildId) {
+      throw new Error("EXTENSION_RUNTIME_CONTRACT_MISSING");
+    }
+    if (protocol.runtimeCompatibility?.extensionVersion
+      && protocol.runtimeCompatibility.extensionVersion !== extensionRuntimeVersion) {
       throw new Error("EXTENSION_RUNTIME_VERSION_MISMATCH");
+    }
+    if (protocol.runtimeCompatibility?.runtimeBuildId !== runtimeContract.runtimeBuildId) {
+      throw new Error("EXTENSION_RUNTIME_BUILD_MISMATCH");
     }
     connectorProtocol = protocol;
     setConnection(elements.connectorStatus, health.sessionCount ? "已绑定" : "已启动", "ok");
@@ -3938,11 +4343,27 @@ async function checkConnectorConnection({ silent = false } = {}) {
     }
     return { ok: true, health, protocol, session: connectorSession };
   } catch (error) {
-    const mismatch = ["CONNECTOR_RUNTIME_VERSION_MISMATCH", "EXTENSION_RUNTIME_VERSION_MISMATCH"].includes(error?.message);
-    setConnection(elements.connectorStatus, mismatch ? "需更新" : "未启动", "warn");
+    const mismatch = [
+      "CONNECTOR_RUNTIME_VERSION_MISMATCH",
+      "EXTENSION_RUNTIME_VERSION_MISMATCH",
+      "EXTENSION_RUNTIME_BUILD_MISMATCH",
+      "EXTENSION_RUNTIME_CONTRACT_MISSING",
+    ].includes(error?.message);
+    const runtimeContractMissing = error?.message === "EXTENSION_RUNTIME_CONTRACT_MISSING";
+    setConnection(elements.connectorStatus, runtimeContractMissing ? "路径不正确" : (mismatch ? "需更新" : "未启动"), "warn");
     renderConnectorSession(null);
     if (!connectorProtocol) renderConnectorCapabilities({});
-    return { ok: false, reason: mismatch ? "Connector 运行副本与扩展不一致，请重新加载扩展后点击启动 Connector。" : (error?.message || String(error)) };
+    return {
+      ok: false,
+      mismatch,
+      runtimeContractMissing,
+      reasonCode: error?.message || "CONNECTOR_HEALTH_FAILED",
+      reason: runtimeContractMissing
+        ? "当前 Chrome 加载的不是安装器生成的本机运行扩展。请从本机运行目录重新加载扩展。"
+        : mismatch
+        ? "Connector 运行副本与扩展不一致，点击启动 Connector 可自动更新。"
+        : (error?.message || String(error)),
+    };
   }
 }
 
@@ -3951,11 +4372,29 @@ async function startConnector() {
   setBusy(true);
   setStatus("正在启动 Connector...", "idle");
   try {
-    const result = await sendNativeMessage({ action: "start_connector_bridge" });
+    const current = await checkConnectorConnection({ silent: true });
+    if (current.ok) {
+      setStatus("Connector 已在运行，可以绑定当前页面", "ok");
+      return current;
+    }
+    if (current.runtimeContractMissing) {
+      setStatus("当前扩展加载路径不正确，请从本机运行目录重新加载扩展", "error");
+      return null;
+    }
+    if (current.mismatch) setStatus("检测到旧版 Connector，正在自动更新...", "idle");
+    const result = await sendNativeMessage({
+      action: "start_connector_bridge",
+      forceRestart: Boolean(current.mismatch),
+    });
     if (!result?.ok) throw new Error(result?.reason || "CONNECTOR_START_FAILED");
     const connection = await checkConnectorConnection();
     if (!connection.ok) throw new Error(connection.reason || "CONNECTOR_HEALTH_FAILED");
-    setStatus(result.started ? "Connector 已启动，可以绑定当前页面" : "Connector 已在运行，可以绑定当前页面", "ok");
+    setStatus(
+      result.restarted
+        ? "Connector 已更新并启动，可以继续执行"
+        : (result.started ? "Connector 已启动，可以绑定当前页面" : "Connector 已在运行，可以绑定当前页面"),
+      "ok",
+    );
     return connection;
   } catch (error) {
     setConnection(elements.connectorStatus, "启动失败", "error");
@@ -4099,7 +4538,7 @@ async function reportConnectorActionResult(actionId, result) {
 async function processConnectorActionQueue() {
   if (
     connectorActionBusy
-    || (busy && !batchUploadState.running)
+    || (busy && !batchUploadState.running && !batchCleanupState.running)
     || document.visibilityState !== "visible"
     || !connectorSessionId
     || !currentControlBinding()?.bindingId
@@ -4124,6 +4563,7 @@ async function processConnectorActionQueue() {
       upload_audit_attachment: "附件上传任务",
       batch_upload_audit_attachments: "附件批量上传任务",
       save_batch_upload_draft: "批量上传统一保存",
+      clear_audit_attachments: "批量清理附件",
       preview_audit_attachment_upload: "附件上传预演",
       inspect_audit_check_row: "查证核对情况读取",
       set_audit_check_result: "查证核对情况填写",
@@ -5004,6 +5444,7 @@ on(elements.openConnectionsTopCli, "click", () => navigateToRoute("connections")
 on(elements.openBatchSave, "click", () => navigateToRoute("batch-save"));
 on(elements.openBatchExit, "click", () => navigateToRoute("batch-exit"));
 on(elements.openBatchUpload, "click", () => navigateToRoute("batch-upload"));
+on(elements.openBatchCleanup, "click", () => navigateToRoute("batch-cleanup"));
 on(elements.openExportDetail, "click", () => navigateToRoute("export-detail"));
 on(elements.openExportDeclare, "click", () => navigateToRoute("export-declare"));
 on(elements.openFormatDetail, "click", () => navigateToRoute("format-detail"));
@@ -5012,6 +5453,7 @@ on(elements.backFromConnections, "click", () => navigateToRoute("home"));
 on(elements.backFromSave, "click", () => navigateToRoute("home"));
 on(elements.backFromExit, "click", () => navigateToRoute("home"));
 on(elements.backFromBatchUpload, "click", () => navigateToRoute("home"));
+on(elements.backFromBatchCleanup, "click", () => navigateToRoute("home"));
 on(elements.backFromExportDetail, "click", () => navigateToRoute("home"));
 on(elements.backFromExportDeclare, "click", () => navigateToRoute("home"));
 on(elements.backFromFormatDetail, "click", () => navigateToRoute("home"));
@@ -5081,7 +5523,7 @@ on(elements.refreshBatchUploadTarget, "click", inspectBatchUploadTarget);
 on(elements.batchUploadSheetSelect, "change", async () => {
   batchUploadState.sheetName = elements.batchUploadSheetSelect.value;
   batchUploadState.fieldColumn = null;
-  await inspectBatchUploadTarget();
+  await inspectBatchUploadTarget({ preserveSheet: true });
 });
 on(elements.batchUploadColumnSelect, "change", () => {
   batchUploadState.fieldColumn = elements.batchUploadColumnSelect.value === ""
@@ -5138,6 +5580,43 @@ on(elements.backToBatchUploadMapping, "click", () => {
 });
 on(elements.runBatchUpload, "click", runBatchUploadModule);
 on(elements.resumeBatchUpload, "click", runBatchUploadModule);
+on(elements.refreshBatchCleanupTarget, "click", () => inspectBatchCleanupTarget({ advance: false }));
+on(elements.confirmBatchCleanupTarget, "click", () => inspectBatchCleanupTarget({ advance: true }));
+on(elements.selectAllBatchCleanupRows, "click", () => {
+  batchCleanupState.selectedRows = batchCleanupState.rows.map((item) => Number(item.rowNumber));
+  renderBatchCleanupRows();
+});
+on(elements.clearAllBatchCleanupRows, "click", () => {
+  batchCleanupState.selectedRows = [];
+  renderBatchCleanupRows();
+});
+on(elements.batchCleanupRows, "change", (event) => {
+  if (!event.target?.classList?.contains("batch-cleanup-row-check")) return;
+  batchCleanupState.selectedRows = selectedBatchCleanupRows();
+  renderBatchCleanupRows();
+});
+on(elements.backToBatchCleanupTarget, "click", () => {
+  batchCleanupState.step = 1;
+  renderBatchCleanupStep();
+});
+on(elements.confirmBatchCleanupRows, "click", () => {
+  batchCleanupState.selectedRows = selectedBatchCleanupRows();
+  if (!batchCleanupState.selectedRows.length) {
+    batchUploadFeedback(elements.batchCleanupSelectionFeedback, "请至少选择一行。", "error");
+    return;
+  }
+  batchCleanupState.step = 3;
+  elements.batchCleanupExecuteConfirm.checked = false;
+  renderBatchCleanupReview();
+  renderBatchCleanupStep();
+  setStatus("清理范围已确认，请检查后执行", "ok");
+});
+on(elements.backToBatchCleanupRows, "click", () => {
+  batchCleanupState.step = 2;
+  renderBatchCleanupRows();
+  renderBatchCleanupStep();
+});
+on(elements.runBatchCleanup, "click", runBatchCleanup);
 on(elements.chooseDetailOutputPath, "click", () => chooseExportDirectory("asset_detail_table"));
 on(elements.chooseDeclareOutputPath, "click", () => chooseExportDirectory("asset_declare_table"));
 on(elements.runExportDetail, "click", () => runCliExport("asset_detail_table"));

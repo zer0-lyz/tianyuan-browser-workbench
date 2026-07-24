@@ -1085,9 +1085,84 @@ async function connectorBridgeHealth() {
   return connectorBridge.health(Number(process.env.TIANYUAN_CONNECTOR_PORT || DEFAULT_CONNECTOR_PORT));
 }
 
-async function startConnectorBridgeAction() {
+async function connectorBridgeListenerPids() {
+  if (process.platform === "win32") {
+    try {
+      const { stdout } = await execFilePromise("netstat.exe", ["-ano", "-p", "tcp"], { timeout: 5000 });
+      const portPattern = new RegExp(`(?:127\\.0\\.0\\.1|0\\.0\\.0\\.0|\\[::1\\]|\\[::\\]):${DEFAULT_CONNECTOR_PORT}\\s+\\S+\\s+LISTENING\\s+(\\d+)`, "i");
+      return [...new Set(String(stdout || "").split(/\r?\n/)
+        .map((line) => line.match(portPattern)?.[1])
+        .filter(Boolean)
+        .map(Number)
+        .filter((pid) => Number.isInteger(pid) && pid > 0))];
+    } catch {
+      return [];
+    }
+  }
+  const lsofBin = ["/usr/sbin/lsof", "/usr/bin/lsof", "lsof"].find((candidate) =>
+    candidate === "lsof" || fs.existsSync(candidate)
+  );
+  try {
+    const { stdout } = await execFilePromise(lsofBin, [
+      "-nP",
+      `-iTCP:${DEFAULT_CONNECTOR_PORT}`,
+      "-sTCP:LISTEN",
+      "-t",
+    ], { timeout: 5000 });
+    return [...new Set(String(stdout || "").split(/\s+/)
+      .map(Number)
+      .filter((pid) => Number.isInteger(pid) && pid > 0))];
+  } catch {
+    return [];
+  }
+}
+
+async function stopConnectorBridgeAction() {
   const existing = await connectorBridgeHealth();
-  if (existing?.ok) return { ok: true, started: false, connector: existing, security: { credentialsReturned: false } };
+  if (!existing?.ok) {
+    return { ok: true, stopped: false, reason: "CONNECTOR_NOT_RUNNING", security: { credentialsReturned: false } };
+  }
+  if (existing.service !== "tianyuan-connector-bridge") {
+    return { ok: false, stopped: false, reason: "CONNECTOR_PORT_OCCUPIED_BY_OTHER_SERVICE", security: { credentialsReturned: false } };
+  }
+  const pids = [...new Set([
+    Number(existing.pid || 0),
+    ...(await connectorBridgeListenerPids()),
+  ].filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid))];
+  if (!pids.length) {
+    return { ok: false, stopped: false, reason: "CONNECTOR_PROCESS_NOT_FOUND", security: { credentialsReturned: false } };
+  }
+  for (const pid of pids) {
+    try {
+      if (process.platform === "win32") {
+        await execFilePromise("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { timeout: 5000 });
+      } else {
+        process.kill(pid, "SIGTERM");
+      }
+    } catch {
+      // The health probe below decides whether the bridge actually stopped.
+    }
+  }
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const health = await connectorBridgeHealth();
+    if (!health?.ok) {
+      return { ok: true, stopped: true, pids, security: { credentialsReturned: false } };
+    }
+  }
+  return { ok: false, stopped: false, reason: "CONNECTOR_STOP_TIMEOUT", pids, security: { credentialsReturned: false } };
+}
+
+async function startConnectorBridgeAction({ forceRestart = false } = {}) {
+  const existing = await connectorBridgeHealth();
+  let restart = null;
+  if (existing?.ok && !forceRestart) {
+    return { ok: true, started: false, connector: existing, security: { credentialsReturned: false } };
+  }
+  if (existing?.ok && forceRestart) {
+    restart = await stopConnectorBridgeAction();
+    if (!restart.ok) return restart;
+  }
   const childArgs = IS_WINDOWS
     ? ["--connector-bridge"]
     : [process.argv[1], "--connector-bridge"];
@@ -1104,7 +1179,7 @@ async function startConnectorBridgeAction() {
     await new Promise((resolve) => setTimeout(resolve, 100));
     const health = await connectorBridgeHealth();
     if (health?.ok) {
-      return { ok: true, started: true, connector: health, security: { credentialsReturned: false } };
+      return { ok: true, started: true, restarted: Boolean(restart?.stopped), connector: health, security: { credentialsReturned: false } };
     }
   }
   return { ok: false, reason: "CONNECTOR_START_TIMEOUT", security: { credentialsReturned: false } };
@@ -2185,7 +2260,7 @@ async function handle(message) {
     return await health({ probe: message.probe === true });
   }
   if (message?.action === "start_connector_bridge") {
-    return await startConnectorBridgeAction();
+    return await startConnectorBridgeAction({ forceRestart: message.forceRestart === true });
   }
   if (message?.action === "cli_login") {
     return await startCliLogin();

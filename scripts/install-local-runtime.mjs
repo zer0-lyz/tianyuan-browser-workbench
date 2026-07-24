@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -44,11 +44,82 @@ function mustExist(targetPath, label) {
   if (!fs.existsSync(targetPath)) throw new Error(`${label} not found: ${targetPath}`);
 }
 
-function copyDir(src, dest) {
+function validateCopiedDirectory(dest, requiredRelativePaths = []) {
+  for (const relativePath of requiredRelativePaths) {
+    mustExist(path.join(dest, relativePath), `installed file ${relativePath}`);
+  }
+}
+
+function copyDir(src, dest, requiredRelativePaths = []) {
   mustExist(src, "source directory");
-  fs.rmSync(dest, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(dest), { recursive: true });
-  fs.cpSync(src, dest, { recursive: true, force: true });
+  const suffix = `${process.pid}-${randomBytes(5).toString("hex")}`;
+  const staging = `${dest}.staging-${suffix}`;
+  const backup = `${dest}.backup-${suffix}`;
+  fs.rmSync(staging, { recursive: true, force: true });
+  fs.cpSync(src, staging, { recursive: true, force: true });
+  validateCopiedDirectory(staging, requiredRelativePaths);
+  let movedExisting = false;
+  try {
+    if (fs.existsSync(dest)) {
+      fs.renameSync(dest, backup);
+      movedExisting = true;
+    }
+    fs.renameSync(staging, dest);
+    if (movedExisting) fs.rmSync(backup, { recursive: true, force: true });
+  } catch (error) {
+    fs.rmSync(staging, { recursive: true, force: true });
+    if (!fs.existsSync(dest) && movedExisting && fs.existsSync(backup)) {
+      fs.renameSync(backup, dest);
+    }
+    throw error;
+  }
+}
+
+function copyFileAtomic(src, dest) {
+  mustExist(src, "source file");
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  const temporary = `${dest}.tmp-${process.pid}-${randomBytes(5).toString("hex")}`;
+  fs.copyFileSync(src, temporary);
+  if (fs.statSync(temporary).size !== fs.statSync(src).size) {
+    fs.rmSync(temporary, { force: true });
+    throw new Error(`installed file size mismatch: ${dest}`);
+  }
+  fs.renameSync(temporary, dest);
+}
+
+function sourceBuildDigest() {
+  const hash = createHash("sha256");
+  const roots = [
+    "extension",
+    "native-helper",
+    "plugins/tianyuan-browser-connector",
+    "scripts/install-local-runtime.mjs",
+  ];
+  const files = [];
+  for (const relativeRoot of roots) {
+    const absoluteRoot = path.join(repoRoot, relativeRoot);
+    const stats = fs.statSync(absoluteRoot);
+    if (stats.isFile()) {
+      files.push(relativeRoot);
+      continue;
+    }
+    const visit = (directory) => {
+      for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+        const absolutePath = path.join(directory, entry.name);
+        if (entry.isDirectory()) visit(absolutePath);
+        else if (entry.isFile()) files.push(path.relative(repoRoot, absolutePath));
+      }
+    };
+    visit(absoluteRoot);
+  }
+  for (const relativePath of files.sort()) {
+    hash.update(relativePath);
+    hash.update("\0");
+    hash.update(fs.readFileSync(path.join(repoRoot, relativePath)));
+    hash.update("\0");
+  }
+  return hash.digest("hex");
 }
 
 function readJson(targetPath, fallback) {
@@ -130,16 +201,21 @@ function writeAgentConfig(pluginRoot, source) {
   });
 }
 
-function writeRuntimeCompatibility(extensionVersion) {
+function writeRuntimeCompatibility(extensionVersion, runtimeBuildId) {
   const compatibilityPath = path.join(nativeRuntimeRoot, "runtime-compat.json");
   const compatibility = {
-    version: 1,
+    version: 2,
     extensionVersion,
     bridgeProtocol: connectorBridge.PROTOCOL_VERSION,
     buildId: connectorBridge.BUILD_ID,
+    runtimeBuildId,
     generatedAt: new Date().toISOString(),
   };
   writePrivateJson(compatibilityPath, compatibility);
+  fs.writeFileSync(
+    path.join(runtimeProjectRoot, "extension", "runtime-compat.json"),
+    `${JSON.stringify(compatibility, null, 2)}\n`,
+  );
   const installedManifest = readJson(path.join(runtimeProjectRoot, "extension", "manifest.json"), {});
   if (installedManifest.version !== extensionVersion) {
     throw new Error("RUNTIME_EXTENSION_VERSION_MISMATCH");
@@ -290,8 +366,17 @@ function main() {
   fs.mkdirSync(runtimeProjectRoot, { recursive: true });
   fs.mkdirSync(nativeRuntimeRoot, { recursive: true });
 
-  copyDir(path.join(repoRoot, "extension"), path.join(runtimeProjectRoot, "extension"));
-  copyDir(path.join(repoRoot, "native-helper"), path.join(runtimeProjectRoot, "native-helper"));
+  const runtimeBuildId = sourceBuildDigest();
+  copyDir(
+    path.join(repoRoot, "extension"),
+    path.join(runtimeProjectRoot, "extension"),
+    ["manifest.json", "src/content/content.js", "src/injected/page_adapter.js", "src/sidepanel/sidepanel.js"],
+  );
+  copyDir(
+    path.join(repoRoot, "native-helper"),
+    path.join(runtimeProjectRoot, "native-helper"),
+    ["native_host.js", "connector_bridge.js"],
+  );
   copyDir(path.join(repoRoot, "skills"), path.join(runtimeProjectRoot, "skills"));
   copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), path.join(runtimeProjectRoot, "plugins", "tianyuan-browser-connector"));
   copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), userPluginRoot);
@@ -300,14 +385,14 @@ function main() {
     copyDir(path.join(repoRoot, "skills", skillName), path.join(printSkillsRoot, skillName));
   }
 
-  fs.cpSync(path.join(repoRoot, "native-helper", "native_host.js"), path.join(nativeRuntimeRoot, "native_host.js"), { force: true });
-  fs.cpSync(path.join(repoRoot, "native-helper", "connector_bridge.js"), path.join(nativeRuntimeRoot, "connector_bridge.js"), { force: true });
+  copyFileAtomic(path.join(repoRoot, "native-helper", "native_host.js"), path.join(nativeRuntimeRoot, "native_host.js"));
+  copyFileAtomic(path.join(repoRoot, "native-helper", "connector_bridge.js"), path.join(nativeRuntimeRoot, "connector_bridge.js"));
   if (fs.existsSync(path.join(repoRoot, "native-helper", "server.js"))) {
-    fs.cpSync(path.join(repoRoot, "native-helper", "server.js"), path.join(nativeRuntimeRoot, "server.js"), { force: true });
+    copyFileAtomic(path.join(repoRoot, "native-helper", "server.js"), path.join(nativeRuntimeRoot, "server.js"));
   }
   const { source: codexAgentSource, sourcesPath } = ensureCodexAgentSource();
   const extensionManifest = readJson(path.join(repoRoot, "extension", "manifest.json"), {});
-  const runtimeCompatibility = writeRuntimeCompatibility(extensionManifest.version);
+  const runtimeCompatibility = writeRuntimeCompatibility(extensionManifest.version, runtimeBuildId);
   for (const pluginRoot of [userPluginRoot, codexPluginRoot]) {
     writeAgentConfig(pluginRoot, codexAgentSource);
   }
