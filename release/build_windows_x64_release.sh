@@ -172,7 +172,10 @@ TEMP_OUTPUT="$BUILD_ROOT/${PACKAGE_NAME}.zip"
   COPYFILE_DISABLE=1 /usr/bin/zip -X -q -r "$TEMP_OUTPUT" "$PACKAGE_NAME"
 )
 cp -f "$TEMP_OUTPUT" "$OUTPUT"
-/usr/bin/shasum -a 256 "$OUTPUT" > "$OUTPUT_SHA"
+(
+  cd "$DIST_DIR"
+  /usr/bin/shasum -a 256 "$(basename "$OUTPUT")" > "$(basename "$OUTPUT_SHA")"
+)
 
 echo "$OUTPUT"
 echo "$OUTPUT_SHA"
