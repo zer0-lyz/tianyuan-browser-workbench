@@ -560,14 +560,10 @@
       <dialog id="mcpTokenDialog" class="modal">
         <form method="dialog" class="modal-panel">
           <h2>配置 MCP</h2>
-          <p>输入 MCP token。默认只用于当前会话；勾选“记住本机”后会保存到 Chrome 本地扩展存储。</p>
+          <p>输入 MCP token。token 仅用于当前侧边栏会话，关闭或重新加载扩展后需要重新输入。</p>
           <label>
             <span>MCP token</span>
             <input id="mcpTokenInput" type="password" autocomplete="off" spellcheck="false" placeholder="zhmcp_...">
-          </label>
-          <label class="check-row modal-check">
-            <input id="rememberMcpToken" type="checkbox">
-            <span>记住本机</span>
           </label>
           <div class="modal-actions">
             <button id="clearMcpToken" type="button" class="secondary">清除</button>

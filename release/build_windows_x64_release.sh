@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="0.3.0"
+VERSION="$(node -p "require(process.argv[1]).version" "$ROOT_DIR/extension/manifest.json")"
 REVISION="r2"
 RELEASE_DATE="20260723"
 PACKAGE_NAME="天源浏览器工作台-v${VERSION}-Windows-x64-测试版-${REVISION}"

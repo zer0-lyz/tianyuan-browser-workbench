@@ -31,6 +31,19 @@ const IS_WINDOWS = process.platform === "win32";
 const WINDOWS_LOCAL_APP_DATA = process.env.LOCALAPPDATA
   || path.join(os.homedir(), "AppData", "Local");
 const WINDOWS_RUNTIME_ROOT = path.join(WINDOWS_LOCAL_APP_DATA, "TianyuanWorkbench");
+const RUNTIME_CONFIG_PATH = process.env.TIANYUAN_RUNTIME_CONFIG_PATH
+  || path.join(path.dirname(process.execPath), "runtime-config.json");
+
+function loadRuntimeConfig() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(RUNTIME_CONFIG_PATH, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+const runtimeConfig = loadRuntimeConfig();
 
 function firstExistingPath(values, fallback) {
   for (const value of values) {
@@ -39,7 +52,7 @@ function firstExistingPath(values, fallback) {
   return fallback;
 }
 
-const CLI_BIN = process.env.TYCPV_BIN || (IS_WINDOWS
+const CLI_BIN = process.env.TYCPV_BIN || runtimeConfig.tycpvBin || (IS_WINDOWS
   ? firstExistingPath([
     path.join(WINDOWS_LOCAL_APP_DATA, "Programs", "tycpv", "tycpv.exe"),
     path.join(WINDOWS_LOCAL_APP_DATA, "Programs", "tycpv", "bin", "tycpv.exe"),
@@ -52,10 +65,10 @@ const CLI_BIN = process.env.TYCPV_BIN || (IS_WINDOWS
     path.join(os.homedir(), ".tycpv", "bin", "tycpv.exe"),
   ], "tycpv.exe")
   : "/usr/local/bin/tycpv");
-const PYTHON_BIN = process.env.TIANYUAN_PYTHON_BIN || (IS_WINDOWS
+const PYTHON_BIN = process.env.TIANYUAN_PYTHON_BIN || runtimeConfig.pythonBin || (IS_WINDOWS
   ? path.join(WINDOWS_RUNTIME_ROOT, "python", "python.exe")
   : "/usr/bin/python3");
-const PRINT_SKILLS_DIR = process.env.TIANYUAN_PRINT_SKILLS_DIR
+const PRINT_SKILLS_DIR = process.env.TIANYUAN_PRINT_SKILLS_DIR || runtimeConfig.printSkillsDir
   || (IS_WINDOWS
     ? path.join(WINDOWS_RUNTIME_ROOT, "print-format-skills")
     : path.join(os.homedir(), ".tianyuan-workbench", "dependencies", "天源评估系统", "print-format-skills"));
@@ -1810,7 +1823,12 @@ async function rpc(method, params, { notification = false } = {}) {
   if (responseSession) sessionId = responseSession;
 
   const text = await response.text();
-  if (!response.ok) throw new Error(`MCP_HTTP_${response.status}`);
+  if (!response.ok) {
+    if (response.status === 400 && /no valid session/i.test(text)) {
+      throw new Error("MCP_SESSION_EXPIRED");
+    }
+    throw new Error(`MCP_HTTP_${response.status}`);
+  }
   if (notification) return null;
 
   const parsed = parseSseOrJson(text);
@@ -1846,9 +1864,18 @@ function parseToolResult(result) {
 }
 
 async function callTool(name, args) {
-  await ensureInitialized();
-  const result = await rpc("tools/call", { name, arguments: args || {} });
-  return parseToolResult(result);
+  try {
+    await ensureInitialized();
+    const result = await rpc("tools/call", { name, arguments: args || {} });
+    return parseToolResult(result);
+  } catch (error) {
+    if (error?.message !== "MCP_SESSION_EXPIRED") throw error;
+    sessionId = null;
+    initialized = false;
+    await ensureInitialized();
+    const result = await rpc("tools/call", { name, arguments: args || {} });
+    return parseToolResult(result);
+  }
 }
 
 function parseNumericId(value, fieldName) {

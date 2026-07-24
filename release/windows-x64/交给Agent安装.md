@@ -8,7 +8,7 @@
 
 要求：
 
-1. 先确认系统为 64 位 Windows 10 或 Windows 11，并确认 Google Chrome 已安装。
+1. 先确认系统为 64 位 Windows 10 或 Windows 11，并确认 Google Chrome 或 Microsoft Edge 已安装。
 2. 不要把程序直接安装在 OneDrive、企业微信缓存或 ZIP 压缩包内。
 3. 先检查 `tycpv --version`、Python 版本以及 `python -c "import openpyxl, et_xmlfile"`，只记录是否可用和版本，不读取任何账号凭据。
 4. 运行当前目录中的 `安装.cmd`，等待全部 7 个步骤完成。安装器会自动选择快速安装或完整安装，不要手工重复安装已有依赖。
@@ -16,9 +16,9 @@
 6. 安装成功后读取：
    `%LOCALAPPDATA%\TianyuanWorkbench\安装检查结果.txt`
 7. 核对检查报告中的“安装模式”和“安装耗时”。如果已有 CLI、Python 和 openpyxl，预期应显示快速安装。
-8. 完全退出 Chrome 后重新打开 `chrome://extensions/`。
+8. 完全退出浏览器后，Chrome 打开 `chrome://extensions/`，Edge 打开 `edge://extensions/`。
 9. 开启开发者模式，点击“加载已解压的扩展程序”，选择：
-   `%LOCALAPPDATA%\TianyuanWorkbench\extension`
+   `%LOCALAPPDATA%\TianyuanWorkbench\projects\天源评估系统\extension`
 10. 确认扩展名称为“天源浏览器工作台”，扩展 ID 为：
    `lkflndcnklpeaejohaacoaolnmhgigoc`
 11. 打开用户已经登录的天源系统底稿页面，打开扩展侧栏。
@@ -38,6 +38,6 @@
 
 - 不绕过编辑锁；
 - 不修改正式底稿做安装测试；
-- 不保存 Cookie、Authorization、密码、验证码或 token；
+- 不保存 Cookie、Authorization、密码、验证码或 token；MCP token 仅在当前侧边栏会话中使用；
 - 不把文件名前端回显误判为保存成功；
 - 没有系统回读或输出文件校验，不宣称任务成功。

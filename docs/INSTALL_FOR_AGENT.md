@@ -14,9 +14,9 @@ The script copies runtime files locally, registers the Chrome Native Messaging h
 
 If Python print dependencies are unavailable, installation stops with `PRINT_PYTHON_OPENPYXL_NOT_FOUND` before registering a partial runtime.
 
-## Chrome Setup
+## Browser Setup
 
-1. Open `chrome://extensions`.
+1. Open `chrome://extensions` in Chrome, or `edge://extensions` in Edge.
 2. Enable Developer mode.
 3. Click "Load unpacked".
 4. Select the printed `extensionPath`.
@@ -25,7 +25,7 @@ If Python print dependencies are unavailable, installation stops with `PRINT_PYT
 
 ## Credentials
 
-The installer does not write MCP token, Cookie, Authorization, passwords, or verification codes. MCP token must be entered by the user in the extension panel when needed.
+The installer does not write MCP token, Cookie, Authorization, passwords, or verification codes. MCP token must be entered by the user in the extension panel when needed and is not persisted by the extension.
 
 ## Expected Runtime Paths
 
