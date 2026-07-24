@@ -280,6 +280,12 @@ function storageSet(values) {
   return new Promise((resolve) => chrome.storage.local.set(values, resolve));
 }
 
+function storageGet(key) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get([key], (values) => resolve(values?.[key]));
+  });
+}
+
 function storageRemove(key) {
   return new Promise((resolve) => chrome.storage.local.remove([key], resolve));
 }
