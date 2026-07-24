@@ -231,3 +231,8 @@
 - 页面绑定内部统一为 `agentBinding`。同页多来源可读，唯一控制者可写；切换控制者必须在侧栏确认，并取消旧控制者未完成队列。
 - Codex 维持本机项目/对话目录自动读取；WorkBuddy 仅支持手动来源和通用 stdio MCP 配置，不宣称真实 WorkBuddy API 集成。
 - 安装脚本优先在 macOS Keychain 保存 Agent 本机凭证，只在 `~/.tianyuan-workbench/` 保存不含明文凭证的 `credentialRef` 配置；不保存 MCP token、Cookie、Authorization、密码或验证码。
+
+## 2026-07-24 扩展运行契约
+
+- 侧栏调用 Bridge 必须发送 `x-tianyuan-extension-id` 和 `x-tianyuan-extension-version`；Bridge 以安装时生成的 `runtime-compat.json` 校验版本。
+- 不要将 `Origin` 是否存在作为 Chrome 扩展身份的唯一规则。版本或运行副本不一致时必须返回明确的重新加载提示，而不是模糊的“Connector 未启动”。

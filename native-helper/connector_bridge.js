@@ -7,7 +7,8 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const PROTOCOL_VERSION = "connector-agent-binding-v2";
+const PROTOCOL_VERSION = "connector-agent-binding-v3";
+const BUILD_ID = "2026-07-24-browser-contract-v1";
 const ACTION_TTL_MS = 5 * 60 * 1000;
 const ACTION_RESULT_TTL_MS = 15 * 60 * 1000;
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
@@ -67,12 +68,12 @@ function equal(a, b) { const left = Buffer.from(String(a || "")); const right = 
 
 function readJson(filePath, fallback) { try { return JSON.parse(fs.readFileSync(filePath, "utf8")); } catch (cause) { if (cause?.code === "ENOENT") return fallback; throw cause; } }
 function writeJson(filePath, payload) { fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 }); const temporary = `${filePath}.tmp`; fs.writeFileSync(temporary, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 }); fs.renameSync(temporary, filePath); }
-function isBrowser(req) {
-  return EXTENSION_ORIGINS.has(String(req.headers.origin || ""))
-    || EXTENSION_IDS.has(String(req.headers["x-tianyuan-extension-id"] || ""));
+function allowedOrigin(req) { const origin = String(req.headers.origin || ""); return EXTENSION_ORIGINS.has(origin) ? origin : ""; }
+function hasExtensionCandidate(req) {
+  return EXTENSION_IDS.has(String(req.headers["x-tianyuan-extension-id"] || ""))
+    || EXTENSION_ORIGINS.has(String(req.headers.origin || ""));
 }
-function allowedOrigin(req) { const origin = String(req.headers.origin || ""); return isBrowser(req) ? origin : ""; }
-function json(res, status, payload, origin = "") { const body = JSON.stringify({ ...payload, security: { credentialsReturned: false, ...(payload.security || {}) } }); res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "access-control-allow-methods": "GET,POST,DELETE,OPTIONS", "access-control-allow-headers": "content-type,x-tianyuan-agent-provider,x-tianyuan-agent-installation,x-tianyuan-agent-credential", ...(origin ? { "access-control-allow-origin": origin } : {}) }); res.end(body); }
+function json(res, status, payload, origin = "") { const body = JSON.stringify({ ...payload, security: { credentialsReturned: false, ...(payload.security || {}) } }); res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "access-control-allow-methods": "GET,POST,DELETE,OPTIONS", "access-control-allow-headers": "content-type,x-tianyuan-extension-id,x-tianyuan-extension-version,x-tianyuan-agent-provider,x-tianyuan-agent-installation,x-tianyuan-agent-credential", ...(origin ? { "access-control-allow-origin": origin } : {}) }); res.end(body); }
 function fail(res, cause, origin = "") { json(res, cause?.status || 500, { ok: false, reason: cause?.code || cause?.message || String(cause) }, origin); }
 function body(req, limit = 1024 * 1024) { return new Promise((resolve, reject) => { let text = ""; req.setEncoding("utf8"); req.on("data", (chunk) => { text += chunk; if (Buffer.byteLength(text, "utf8") > limit) { req.destroy(); reject(error("CONNECTOR_REQUEST_TOO_LARGE", 413)); } }); req.on("end", () => { if (!text.trim()) return resolve({}); try { resolve(JSON.parse(text)); } catch { reject(error("CONNECTOR_INVALID_JSON")); } }); req.on("error", reject); }); }
 
@@ -96,9 +97,40 @@ function createBridge(options = {}) {
   const sourcesPath = options.sourcesPath || process.env.TIANYUAN_CONNECTOR_AGENT_SOURCES_PATH || path.join(home, ".tianyuan-workbench", "native-helper", "agent-sources.json");
   const configDir = options.configDir || process.env.TIANYUAN_CONNECTOR_AGENT_CONFIG_DIR || path.join(home, ".tianyuan-workbench", "agent-sources");
   const codexStatePath = options.codexStatePath || process.env.TIANYUAN_CODEX_GLOBAL_STATE_PATH || path.join(home, ".codex", ".codex-global-state.json");
+  const compatibilityPath = options.compatibilityPath || process.env.TIANYUAN_CONNECTOR_RUNTIME_COMPATIBILITY_PATH || path.join(__dirname, "runtime-compat.json");
   const platformUrl = process.env.TIANYUAN_CONNECTOR_PLATFORM_URL || "http://127.0.0.1:40315";
   const sessions = new Map(); const actions = new Map(); const bindings = new Map(); const sources = new Map();
   let loaded = false; let migrated = false;
+  const compatibility = readJson(compatibilityPath, {
+    extensionVersion: "",
+    bridgeProtocol: PROTOCOL_VERSION,
+    buildId: BUILD_ID,
+  });
+
+  function browserIdentity(req, required = false) {
+    const extensionId = String(req.headers["x-tianyuan-extension-id"] || "");
+    const extensionVersion = limited(req.headers["x-tianyuan-extension-version"], 80);
+    if (!extensionId) {
+      if (EXTENSION_ORIGINS.has(String(req.headers.origin || ""))) {
+        if (required) throw error("EXTENSION_RELOAD_REQUIRED", 426);
+        return null;
+      }
+      if (required) throw error("BROWSER_EXTENSION_REQUIRED", 403);
+      return null;
+    }
+    if (!EXTENSION_IDS.has(extensionId)) {
+      if (required) throw error("BROWSER_EXTENSION_REQUIRED", 403);
+      return null;
+    }
+    const expectedVersion = limited(compatibility.extensionVersion, 80);
+    if (expectedVersion && extensionVersion !== expectedVersion) {
+      if (required) throw error("EXTENSION_RUNTIME_VERSION_MISMATCH", 426);
+      return null;
+    }
+    return { extensionId, extensionVersion };
+  }
+  function requireBrowser(req) { return browserIdentity(req, true); }
+  function isBrowser(req) { return Boolean(browserIdentity(req, false)); }
 
   function saveSources() { writeJson(sourcesPath, { version: 1, updatedAt: now(), sources: [...sources.values()] }); }
   function loadSources() { if (sources.size) return; const payload = readJson(sourcesPath, { sources: [] }); for (const source of Array.isArray(payload.sources) ? payload.sources : []) { if (source?.providerId && source?.installationId && source?.agentId) sources.set(`${source.providerId}|${source.installationId}`, source); } }
@@ -241,12 +273,12 @@ function createBridge(options = {}) {
   async function handle(req, res) {
     const origin = allowedOrigin(req); const suppliedOrigin = String(req.headers.origin || ""); if (suppliedOrigin && !origin) return fail(res, error("CONNECTOR_ORIGIN_FORBIDDEN", 403)); if (req.method === "OPTIONS") return json(res, 204, { ok: true }, origin); prune(); loadBindings(); const url = new URL(req.url, "http://127.0.0.1"); const parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
     try {
-      if (req.method === "GET" && url.pathname === "/health") return json(res, 200, { ok: true, service: "tianyuan-connector-bridge", protocolVersion: PROTOCOL_VERSION, adapter: "tianyuan-browser", mode: "local", sessionCount: sessions.size, bindingCount: bindings.size, agentSourceCount: sources.size }, origin);
-      if (req.method === "GET" && url.pathname === "/api/protocol") return json(res, 200, { ok: true, protocolVersion: PROTOCOL_VERSION, adapter: "tianyuan-browser", capabilities: capabilities(), safety: { genericBrowserAutomation: false, arbitraryJavaScript: false, editLockRequired: true, explicitConfirmationRequired: true, agentBindingRequired: true, singleControlAgentPerPage: true, credentialsStored: false } }, origin);
+      if (req.method === "GET" && url.pathname === "/health") return json(res, 200, { ok: true, service: "tianyuan-connector-bridge", protocolVersion: PROTOCOL_VERSION, buildId: BUILD_ID, runtimeCompatibility: compatibility, adapter: "tianyuan-browser", mode: "local", sessionCount: sessions.size, bindingCount: bindings.size, agentSourceCount: sources.size }, origin);
+      if (req.method === "GET" && url.pathname === "/api/protocol") return json(res, 200, { ok: true, protocolVersion: PROTOCOL_VERSION, buildId: BUILD_ID, runtimeCompatibility: compatibility, adapter: "tianyuan-browser", capabilities: capabilities(), safety: { genericBrowserAutomation: false, arbitraryJavaScript: false, editLockRequired: true, explicitConfirmationRequired: true, agentBindingRequired: true, singleControlAgentPerPage: true, credentialsStored: false } }, origin);
       if (req.method === "POST" && url.pathname === "/api/agent-sources/register") { const agent = identity(req, true); return json(res, 200, { ok: true, agentIdentity: agent }, origin); }
       if (req.method === "GET" && url.pathname === "/api/agent-sources") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); return json(res, 200, { ok: true, sources: [...sources.values()].map(publicSource) }, origin); }
       if (req.method === "POST" && url.pathname === "/api/agent-sources/manual") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const created = manualSource(await body(req)); return json(res, 200, { ok: true, source: publicSource(created.source), workbuddyConfig: { transport: "stdio", command: "node", args: ["~/plugins/tianyuan-browser-connector/runtime/apps/mcp/server.mjs"], env: { TIANYUAN_CONNECTOR_BRIDGE_URL: "http://127.0.0.1:40415", TIANYUAN_CONNECTOR_AGENT_CONFIG_PATH: created.configPath } } }, origin); }
-      if (req.method === "GET" && url.pathname === "/api/catalog") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); return json(res, 200, { ok: true, ...(await codexCatalog()) }, origin); }
+      if (req.method === "GET" && url.pathname === "/api/catalog") { requireBrowser(req); return json(res, 200, { ok: true, ...(await codexCatalog()) }, origin); }
       if (req.method === "POST" && url.pathname === "/api/sessions/register") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const input = await body(req); const sessionId = limited(input.sessionId || id("tianyuan"), 200); const existing = sessions.get(sessionId); const session = { sessionId, status: "online", registeredAt: existing?.registeredAt || now(), lastSeenAt: now(), binding: safePage(input.binding), client: safeClient(input.client), context: safeContext(input.context), capabilities: capabilities() }; sessions.set(sessionId, session); return json(res, 200, { ok: true, session: publicSession(session) }, origin); }
       if (req.method === "GET" && url.pathname === "/api/sessions") { const agent = isBrowser(req) ? null : identity(req, true); const result = [...sessions.values()].filter((session) => !agent || bindingsFor(session.binding).some((binding) => binding.agentId === agent.agentId && binding.providerId === agent.providerId && binding.installationId === agent.installationId)).map((session) => publicSession(session, agent)); return json(res, 200, { ok: true, sessions: result }, origin); }
       if (req.method === "POST" && parts.length === 4 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "heartbeat") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const input = await body(req); session.lastSeenAt = now(); if (input.binding) session.binding = safePage(input.binding); if (input.context) session.context = safeContext(input.context); return json(res, 200, { ok: true, session: publicSession(session) }, origin); }
@@ -268,4 +300,4 @@ function createBridge(options = {}) {
 
 async function health(port = 40415) { try { const response = await fetch(`http://127.0.0.1:${Number(port)}/health`); return response.ok ? await response.json() : { ok: false, reason: `CONNECTOR_HTTP_${response.status}` }; } catch { return { ok: false, reason: "CONNECTOR_NOT_RUNNING" }; } }
 async function start(options = {}) { const bridge = createBridge(options); const port = Number(options.port || process.env.TIANYUAN_CONNECTOR_PORT || 40415); const server = await bridge.start(port); process.stdout.write(`Tianyuan connector bridge listening on http://127.0.0.1:${port}\n`); return { bridge, server }; }
-module.exports = { PROTOCOL_VERSION, createBridge, health, start };
+module.exports = { BUILD_ID, PROTOCOL_VERSION, createBridge, health, start };

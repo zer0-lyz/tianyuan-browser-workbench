@@ -4,6 +4,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 const HOST_NAME = "com.tianyuan.workbench.helper";
@@ -13,6 +14,8 @@ const EXTENSION_IDS = [
 ];
 const PROJECT_NAME = "天源评估系统";
 const CONNECTOR_VERSION = "0.4.0";
+const require = createRequire(import.meta.url);
+const connectorBridge = require("../native-helper/connector_bridge.js");
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const isWindows = process.platform === "win32";
@@ -125,6 +128,27 @@ function writeAgentConfig(pluginRoot, source) {
     installationId: source.installationId,
     credentialRef: source.credentialRef,
   });
+}
+
+function writeRuntimeCompatibility(extensionVersion) {
+  const compatibilityPath = path.join(nativeRuntimeRoot, "runtime-compat.json");
+  const compatibility = {
+    version: 1,
+    extensionVersion,
+    bridgeProtocol: connectorBridge.PROTOCOL_VERSION,
+    buildId: connectorBridge.BUILD_ID,
+    generatedAt: new Date().toISOString(),
+  };
+  writePrivateJson(compatibilityPath, compatibility);
+  const installedManifest = readJson(path.join(runtimeProjectRoot, "extension", "manifest.json"), {});
+  if (installedManifest.version !== extensionVersion) {
+    throw new Error("RUNTIME_EXTENSION_VERSION_MISMATCH");
+  }
+  const bridgeText = fs.readFileSync(path.join(nativeRuntimeRoot, "connector_bridge.js"), "utf8");
+  if (!bridgeText.includes("x-tianyuan-extension-version")) {
+    throw new Error("RUNTIME_BROWSER_IDENTITY_CONTRACT_MISSING");
+  }
+  return { compatibilityPath, ...compatibility };
 }
 
 function executableCandidates(names) {
@@ -282,6 +306,8 @@ function main() {
     fs.cpSync(path.join(repoRoot, "native-helper", "server.js"), path.join(nativeRuntimeRoot, "server.js"), { force: true });
   }
   const { source: codexAgentSource, sourcesPath } = ensureCodexAgentSource();
+  const extensionManifest = readJson(path.join(repoRoot, "extension", "manifest.json"), {});
+  const runtimeCompatibility = writeRuntimeCompatibility(extensionManifest.version);
   for (const pluginRoot of [userPluginRoot, codexPluginRoot]) {
     writeAgentConfig(pluginRoot, codexAgentSource);
   }
@@ -306,6 +332,7 @@ function main() {
     },
     connectorPath: userPluginRoot,
     codexConnectorCachePath: codexPluginRoot,
+    runtimeCompatibility,
     agentSourceRegistryPath: sourcesPath,
     codexAgentSource: {
       providerId: codexAgentSource.providerId,

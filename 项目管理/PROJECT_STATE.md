@@ -435,3 +435,11 @@ Windows 测试包已完成 ZIP 解包、266 个文件逐项 SHA-256、PE x64 架
 - 连接配置页新增“Agent 控制者管理”：来源状态、页面权限、控制/只读切换和 WorkBuddy 手动绑定。WorkBuddy 未集成项目或对话 API，只接受用户填写的本机可见标识。
 - Connector 版本升至 `0.4.0`，扩展版本升至 `0.7.0`。
 - 本地模拟验证通过：`node tests/agent-binding-bridge.test.cjs`。证据见 `docs/test-evidence/2026-07-24-agent-binding-v2-local-validation.md`。未对天源线上页面执行写入。
+
+## 2026-07-24 扩展与 Bridge 运行契约加固
+
+- 浏览器端身份统一为固定扩展 ID 与扩展版本请求头；不再假设 Chrome 必然发送 `Origin`。
+- Native Runtime 新增 `runtime-compat.json`，安装脚本写入当前扩展版本、Bridge 协议和构建标识，并核验已安装扩展及 Bridge 身份头实现。
+- Bridge 协议升级为 `connector-agent-binding-v3`；旧扩展缺少身份头返回 `EXTENSION_RELOAD_REQUIRED`，版本不一致返回 `EXTENSION_RUNTIME_VERSION_MISMATCH`。
+- 侧栏启动检查会显示“需更新”，而非将运行版本不一致误报为 Connector 未启动。
+- 回归测试新增无 Origin 扩展请求与版本不一致拒绝，覆盖 Chrome 扩展实际请求差异。

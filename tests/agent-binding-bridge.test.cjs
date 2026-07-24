@@ -16,6 +16,7 @@ const credentialsPath = path.join(root, "credentials.json");
 const bindingsPath = path.join(root, "connector-bindings.json");
 const sourcesPath = path.join(root, "agent-sources.json");
 const configDir = path.join(root, "agent-configs");
+const compatibilityPath = path.join(root, "runtime-compat.json");
 const codexCredential = "codex-test-credential";
 const workbuddyCredential = "workbuddy-test-credential";
 
@@ -42,9 +43,22 @@ fs.writeFileSync(bindingsPath, JSON.stringify({
     updatedAt: "2026-07-24T00:00:00.000Z",
   }],
 }));
+fs.writeFileSync(compatibilityPath, JSON.stringify({
+  version: 1,
+  extensionVersion: "0.7.1",
+  bridgeProtocol: "connector-agent-binding-v3",
+  buildId: "test-build",
+}));
 
 function headers(agent) {
-  if (!agent) return { Origin: extensionOrigin, "content-type": "application/json" };
+  if (!agent) {
+    return {
+      Origin: extensionOrigin,
+      "content-type": "application/json",
+      "x-tianyuan-extension-id": "lkflndcnklpeaejohaacoaolnmhgigoc",
+      "x-tianyuan-extension-version": "0.7.1",
+    };
+  }
   return {
     "content-type": "application/json",
     "x-tianyuan-agent-provider": agent.providerId,
@@ -64,11 +78,28 @@ async function request(method, pathname, value, agent) {
 }
 
 async function main() {
-  const bridge = createBridge({ bindingsPath, sourcesPath, configDir });
+  const bridge = createBridge({ bindingsPath, sourcesPath, configDir, compatibilityPath });
   const server = await bridge.start(port);
   const codex = { providerId: "codex", installationId: "codex-test", credential: codexCredential };
   const workbuddy = { providerId: "workbuddy", installationId: "workbuddy-test", credential: workbuddyCredential };
   try {
+    const headerOnly = await fetch(`http://127.0.0.1:${port}/api/catalog`, {
+      headers: {
+        "x-tianyuan-extension-id": "lkflndcnklpeaejohaacoaolnmhgigoc",
+        "x-tianyuan-extension-version": "0.7.1",
+      },
+    });
+    assert.equal(headerOnly.status, 200);
+    const staleExtension = await fetch(`http://127.0.0.1:${port}/api/catalog`, {
+      headers: {
+        "x-tianyuan-extension-id": "lkflndcnklpeaejohaacoaolnmhgigoc",
+        "x-tianyuan-extension-version": "0.7.0",
+      },
+    });
+    const stalePayload = await staleExtension.json();
+    assert.equal(staleExtension.status, 426);
+    assert.equal(stalePayload.reason, "EXTENSION_RUNTIME_VERSION_MISMATCH");
+
     const page = { projectId: "project-a", companyId: "company-a", pageType: "asset-draft", tabId: 1 };
     const registered = await request("POST", "/api/sessions/register", { sessionId: "session-a", binding: page, context: { route: { isAssetDraftRoute: true, projectId: "project-a", companyId: "company-a" } } });
     assert.equal(registered.status, 200);
@@ -161,7 +192,7 @@ async function main() {
     assert.equal(clientResult.ok, true);
     assert.equal(clientResult.counts.matched, 1);
 
-    console.log(JSON.stringify({ ok: true, checks: ["legacy_codex_migration", "manual_workbuddy_read_binding", "agent_context_isolation", "read_cannot_write", "control_conflict_confirmation", "control_transfer_cancels_queue", "agent_error_codes", "codex_client_identity"], tempRoot: root }, null, 2));
+    console.log(JSON.stringify({ ok: true, checks: ["installed_extension_header_contract", "extension_version_mismatch", "legacy_codex_migration", "manual_workbuddy_read_binding", "agent_context_isolation", "read_cannot_write", "control_conflict_confirmation", "control_transfer_cancels_queue", "agent_error_codes", "codex_client_identity"], tempRoot: root }, null, 2));
   } finally {
     await new Promise((resolve) => server.close(resolve));
     fs.rmSync(root, { recursive: true, force: true });
