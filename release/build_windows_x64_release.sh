@@ -2,10 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="$(node -p "require(process.argv[1]).version" "$ROOT_DIR/extension/manifest.json")"
-REVISION="r3"
+VERSION="$(node -p "require(process.argv[1]).productVersion" "$ROOT_DIR/extension/version.json")"
+CHROME_VERSION="$(node -p "require(process.argv[1]).chromeVersion" "$ROOT_DIR/extension/version.json")"
+BUILD_NUMBER="$(node -p "require(process.argv[1]).buildNumber" "$ROOT_DIR/extension/version.json")"
 RELEASE_DATE="${RELEASE_DATE:-$(date +%Y%m%d)}"
-PACKAGE_NAME="天源浏览器工作台-v${VERSION}-Windows-x64-测试版-${REVISION}"
+PACKAGE_NAME="天源浏览器工作台-v${VERSION}-Windows-x64-测试版"
 BUILD_ROOT="$ROOT_DIR/release/.build/${PACKAGE_NAME}-$(date +%s)"
 STAGE="$BUILD_ROOT/$PACKAGE_NAME"
 DIST_DIR="$ROOT_DIR/dist"
@@ -30,6 +31,47 @@ PYTHON_URL="https://www.python.org/ftp/python/${PYTHON_VERSION}/python-${PYTHON_
 
 POSTJECT_VERSION="1.0.0-alpha.6"
 POSTJECT_BIN="$POSTJECT_DIR/node_modules/.bin/postject"
+
+RUNTIME_BUILD_ID="$(node - "$ROOT_DIR" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const { createHash } = require("node:crypto");
+
+const root = process.argv[2];
+const roots = [
+  "extension",
+  "native-helper",
+  "plugins/tianyuan-browser-connector",
+  "scripts/install-local-runtime.mjs",
+];
+const files = [];
+for (const relativeRoot of roots) {
+  const absoluteRoot = path.join(root, relativeRoot);
+  const stats = fs.statSync(absoluteRoot);
+  if (stats.isFile()) {
+    files.push(relativeRoot);
+    continue;
+  }
+  const visit = (directory) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      if (entry.name === ".DS_Store" || entry.name.startsWith("._") || entry.name === "runtime-compat.json") continue;
+      const absolutePath = path.join(directory, entry.name);
+      if (entry.isDirectory()) visit(absolutePath);
+      else if (entry.isFile()) files.push(path.relative(root, absolutePath));
+    }
+  };
+  visit(absoluteRoot);
+}
+const hash = createHash("sha256");
+for (const relativePath of files.sort()) {
+  hash.update(relativePath);
+  hash.update("\0");
+  hash.update(fs.readFileSync(path.join(root, relativePath)));
+  hash.update("\0");
+}
+process.stdout.write(hash.digest("hex"));
+NODE
+)"
 
 mkdir -p "$STAGE/runtime/python-portable/Lib/site-packages" \
   "$STAGE/runtime/python-wheels" \
@@ -107,12 +149,14 @@ cp "$WINDOWS_NODE" "$STAGE/native-helper/native_host.exe"
   --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
 cp "$ROOT_DIR/native-helper/native_host.js" "$STAGE/native-helper/native_host.js"
 cp "$ROOT_DIR/native-helper/connector_bridge.js" "$STAGE/native-helper/connector_bridge.js"
+cp "$ROOT_DIR/native-helper/update_checker.js" "$STAGE/native-helper/update_checker.js"
 cat > "$STAGE/native-helper/runtime-compat.json" <<EOF
 {
-  "version": 1,
-  "extensionVersion": "$VERSION",
+  "version": 2,
+  "extensionVersion": "$CHROME_VERSION",
   "bridgeProtocol": "connector-agent-binding-v3",
   "buildId": "2026-07-24-browser-contract-v2-capability-matrix",
+  "runtimeBuildId": "$RUNTIME_BUILD_ID",
   "generatedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
@@ -130,6 +174,7 @@ import site
 EOF
 
 /usr/bin/ditto "$ROOT_DIR/extension" "$STAGE/extension"
+cp "$STAGE/native-helper/runtime-compat.json" "$STAGE/extension/runtime-compat.json"
 /usr/bin/ditto "$ROOT_DIR/skills/appraisal-detail-print-format" "$STAGE/skills/appraisal-detail-print-format"
 /usr/bin/ditto "$ROOT_DIR/skills/appraisal-declaration-print-format" "$STAGE/skills/appraisal-declaration-print-format"
 cp "$TYCPV_SOURCE" "$STAGE/runtime/tycpv-setup-0.1.0-win-x64.exe"
@@ -141,14 +186,18 @@ cp "$ROOT_DIR/release/windows-x64/卸载.ps1" "$STAGE/卸载.ps1"
 cp "$ROOT_DIR/release/windows-x64/安装使用说明.md" "$STAGE/安装使用说明.md"
 cp "$ROOT_DIR/release/windows-x64/交给Agent安装.md" "$STAGE/交给Agent安装.md"
 
+find "$STAGE" -type f \( -name ".DS_Store" -o -name "._*" \) -delete
+find "$STAGE" -type d -name "__MACOSX" -prune -exec rm -rf {} +
+
 cat > "$STAGE/VERSION.txt" <<EOF
 name=天源浏览器工作台
 version=$VERSION
 platform=Windows-x64
 release_channel=test
-release_revision=$REVISION
+build_number=$BUILD_NUMBER
 build_date=$RELEASE_DATE
 git_commit=$(git -C "$ROOT_DIR" rev-parse HEAD)
+runtime_build_id=$RUNTIME_BUILD_ID
 extension_id=lkflndcnklpeaejohaacoaolnmhgigoc
 node_version=$NODE_VERSION
 node_sha256=$NODE_SHA256

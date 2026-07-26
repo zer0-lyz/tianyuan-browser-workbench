@@ -204,6 +204,9 @@
 - Windows r2 安装器采用自动双模式：已有 `tycpv`、Python 3.9+、`openpyxl >= 3.1.5` 和 `et_xmlfile` 时走快速安装；已有 Python 缺少库时优先从包内离线 wheels 补齐；检测或补齐失败时才复制便携 Python。
 - r2 核心校验只处理扩展、Native Host、打印脚本和版本文件；CLI、离线 wheels、便携 Python 等备用依赖在实际使用前才分别校验，避免快速路径无意义遍历全部备用文件。
 - r2 安装报告必须记录安装模式、安装耗时、实际 Python/CLI 路径和版本，以便判断是否真正进入快速路径。
+- Windows r4 对应扩展 `0.8.3` 和稳定提交 `75c40721a0bc0091ea5e9ca3867a02c34d01b5bb`。
+- r4 的扩展与 Native Host 必须包含完全一致的版本 2 `runtime-compat.json`，其中 `runtimeBuildId` 为 `7e2e3f8ba68207d5f5936f814dfb2a1f546a9de338000b4a36374ed4254771d9`。
+- r4 包含八个功能模块，并纳入批量清理附件功能；Windows 初次测试只验证识别、选择和确认页面，不在正式底稿执行上传或清理。
 
 ## 2026-07-24 批量评估核实附件上传排查
 
@@ -258,3 +261,16 @@
 
 - Agent 来源状态必须来自 Bridge 的注册心跳和当前 `agentBinding`，不能用进程扫描判断是否已连接。
 - UI 最少显示：MCP 已连接/未连接、最后活动、当前页未绑定/只读/控制。90 秒无心跳视为未连接。
+
+## 2026-07-26 GitHub 版本更新规则
+
+- `extension/version.json` 是产品版本的单一配置源；`manifest.json` 的 `version` 和 `version_name` 必须与之匹配。
+- 当前开发版本为 `0.9.0`，构建编号为 `2026072601`，发布通道为 `stable`。
+- GitHub Releases 是当前唯一在线更新源，固定仓库为 `zer0-lyz/tianyuan-browser-workbench`。
+- 更新检查由 Native Helper 访问公开 GitHub API，不使用、不传递、不保存 MCP token 或 GitHub token。
+- 自动检查间隔为 6 小时；检查失败不能阻断现有功能。
+- 更新判断顺序为产品 SemVer、构建编号、最低支持版本和 `runtimeBuildId`。
+- 产品版本相同但 `runtimeBuildId` 不同时，状态应为“组件版本不一致/需要修复安装”，不能显示“已是最新版”。
+- 第一阶段只检查、展示说明和打开 GitHub 安装包或发布页，不静默替换当前安装。
+- 下载地址必须是固定 GitHub HTTPS 地址，不能接受页面或远端清单传入任意协议和域名。
+- GitHub 尚无正式 Release 时，应显示“尚未发布”，不能误报连接失败或虚构最新版本。

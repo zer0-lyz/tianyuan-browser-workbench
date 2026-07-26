@@ -3397,3 +3397,119 @@ v20 已生效，空 `tag:{isClear:true}` 不再干扰当前最终扫描结果。
 - 固定版本：
   - 计划提交并标记 `baseline-workbench-0.8.3-stable-20260724`；
   - 本轮固定前不再修改已验收执行代码。
+
+## 2026-07-24 Windows x64 r4 更新与打包
+
+### 任务目标
+
+将已经固定并推送的天源浏览器工作台稳定版同步到 Windows 发行包，并把可交付 ZIP 放入用户下载目录。
+
+### 执行动作
+
+- Windows 发行修订号由 r3 升级为 r4。
+- 构建脚本按本机安装器相同规则计算源码 SHA-256 `runtimeBuildId`。
+- 扩展和 Native Host 同时写入版本 2 `runtime-compat.json`。
+- `VERSION.txt` 增加稳定提交号和运行指纹。
+- Windows 使用说明更新为八个模块。
+- Agent 安装提示增加批量清理附件页面检查，禁止在正式底稿执行首次写入测试。
+- 构建时清理 `.DS_Store`、`._*` 和 `__MACOSX`。
+
+### 输出
+
+- `dist/天源浏览器工作台-v0.8.3-Windows-x64-测试版-r4-20260724.zip`
+- `dist/天源浏览器工作台-v0.8.3-Windows-x64-测试版-r4-20260724.zip.sha256`
+- `~/Downloads/天源浏览器工作台-v0.8.3-Windows-x64-测试版-r4-20260724.zip`
+- `~/Downloads/天源浏览器工作台-v0.8.3-Windows-x64-测试版-r4-20260724.zip.sha256`
+
+### 验证结果
+
+- ZIP 解压测试通过。
+- 包内 271 个文件逐项 SHA-256 校验通过。
+- ZIP SHA-256：
+  `8c697f907a57ea0f1f90ae3c1dea522fc62e33a6c4a6eccd6f6b6bec47dd11f1`
+- 扩展版本：`0.8.3`。
+- 发行修订：`r4`。
+- 源码提交：`75c40721a0bc0091ea5e9ca3867a02c34d01b5bb`。
+- 扩展和 Native Host 运行指纹一致：
+  `7e2e3f8ba68207d5f5936f814dfb2a1f546a9de338000b4a36374ed4254771d9`。
+- Native Host 和便携 Python 为 Windows x86-64 PE。
+- 包内核心扩展、Native Host 和 Connector 源码与当前稳定源码逐文件一致。
+- 未发现 MCP token、Authorization、Cookie、密码、验证码、运行日志或绑定状态文件。
+- 未包含 `.DS_Store`、AppleDouble 或 `__MACOSX`。
+
+### 验证边界
+
+- 当前构建机不是 Windows。
+- Windows CLI 安装器是常见的 32 位 Inno Setup 启动程序外壳，包内来源和 SHA-256 与既有已核验安装器一致；实际 CLI 安装结果仍需 Windows x64 实机验证。
+- PowerShell 安装、当前用户注册表、Chrome/Edge Native Messaging、CLI 授权和八个模块仍需 Windows 实机测试。
+
+## 2026-07-26 GitHub 检测更新模块
+
+### 任务目标
+
+在不发布到 Chrome 商店的前提下，以 GitHub Releases 作为更新源，增加版本检测、更新说明和对应系统安装包入口。
+
+### 版本管理
+
+- 新增 `extension/version.json` 单一版本配置。
+- 产品版本升级为 `0.9.0`。
+- Chrome 版本和显示版本均为 `0.9.0`。
+- 构建编号为 `2026072601`。
+- 最低支持版本为 `0.8.3`。
+- 发布通道为 `stable`。
+
+### 实现
+
+- 首页模块数量更新为 9。
+- 顶部增加版本状态按钮。
+- 新增独立“版本更新”页面。
+- 新增 Native Helper 模块 `native-helper/update_checker.js`。
+- 新增白名单动作 `check_github_update`。
+- 固定 GitHub 仓库 `zer0-lyz/tianyuan-browser-workbench`。
+- 支持标准 SemVer、预发布版本、构建编号、最低支持版本和运行指纹判断。
+- 自动检查间隔为 6 小时，另支持手动检查。
+- 检查结果缓存在 Chrome 本机存储中，不保存凭据。
+- 下载和发布页只允许打开 `https://github.com`。
+- 第一阶段不自动替换或静默安装。
+- 新增 `scripts/generate-update-manifest.mjs`。
+- Windows 和 Mac 构建脚本改为读取单一版本文件。
+- 本机安装器增加版本配置一致性检查，并同步 `update_checker.js`。
+- 运行指纹计算排除 `.DS_Store`、AppleDouble 和生成的 `runtime-compat.json`。
+
+### 自动验证
+
+- 所有相关 JavaScript 语法检查通过。
+- Windows 和 Mac 构建脚本语法检查通过。
+- 静态扩展契约测试通过。
+- GitHub 更新检查器单元测试通过。
+- Connector/Agent Bridge 回归测试通过。
+- `git diff --check` 通过。
+- `1.10.0 > 1.9.0`、beta 数字顺序、正式版高于预发布版均通过测试。
+- 模拟验证覆盖：
+  - GitHub 无 Release；
+  - 发现 Windows 新版本；
+  - Release 资产 SHA-256；
+  - 同版本运行指纹不一致；
+  - 可选更新清单。
+
+### 本机验证
+
+- 本机运行目录安装成功。
+- 扩展版本：`0.9.0`。
+- Connector PID：`71661`。
+- 运行指纹：
+  `f1571a7fa7c6742ada340f827de56e80efc4be71f71a1454c156792fed4aecde`。
+- Native Messaging 直接调用 `check_github_update` 成功。
+- 真实 GitHub API 返回：
+  - `releasePublished=false`；
+  - `reason=GITHUB_RELEASE_NOT_PUBLISHED`；
+  - 未使用 token。
+- 更新清单生成器成功生成 `dist/update-manifest.json`；因尚未构建 `0.9.0` 安装包，当前 `assets` 为空。
+
+### 待验证
+
+- 在 Chrome 扩展页重新加载本机扩展目录。
+- 检查顶部五项状态在窄侧栏中的布局。
+- 检查首页九宫格和版本更新页面。
+- 当前 GitHub 仓库尚未发布正式 Release；真实页面应显示“尚未发布”。
+- 真实界面确认后，再构建 Windows/Mac `0.9.0` 包并发布 GitHub Release。

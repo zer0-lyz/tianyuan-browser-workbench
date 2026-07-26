@@ -81,6 +81,39 @@ git reset --hard baseline-workbench-0.3.0-windows-test-20260723
 git reset --hard baseline-workbench-0.3.0-windows-test-r2-20260723
 ```
 
+## 2026-07-24 Windows x64 稳定功能包 r4
+
+对应源码基线：`baseline-workbench-0.8.3-stable-20260724`
+
+发行文件：
+
+- `天源浏览器工作台-v0.8.3-Windows-x64-测试版-r4-20260724.zip`
+- SHA-256：`8c697f907a57ea0f1f90ae3c1dea522fc62e33a6c4a6eccd6f6b6bec47dd11f1`
+
+固定内容：
+
+- 扩展 `0.8.3` 八个功能模块；
+- 扩展、Native Host 与 Connector 共享 `runtimeBuildId`；
+- 页面重复注入保护；
+- 同一行多附件一次保存；
+- 批量清理核实程序和资料索引并保留核对情况；
+- Windows 快速安装与便携依赖回退。
+
+## 2026-07-26 GitHub 更新模块开发版
+
+产品版本：`0.9.0`
+
+构建编号：`2026072601`
+
+当前状态：
+
+- 已建立 `extension/version.json` 单一版本源；
+- 已实现 GitHub Releases 检查和 SemVer 比较；
+- 已实现九模块更新页面和顶部版本状态；
+- 已同步本机运行目录；
+- 尚未建立 Git 标签或 GitHub Release；
+- 尚未作为稳定回退基线固定。
+
 ## 2026-07-24 评估核实批量上传与本机运行基线
 
 基线名称：`baseline-audit-upload-cleanup-local-runtime-20260724`

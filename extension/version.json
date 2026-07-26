@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "productVersion": "0.9.0",
+  "chromeVersion": "0.9.0",
+  "versionName": "0.9.0",
+  "channel": "stable",
+  "buildNumber": 2026072601,
+  "repository": "zer0-lyz/tianyuan-browser-workbench",
+  "bridgeProtocol": "connector-agent-binding-v3",
+  "minimumSupportedVersion": "0.8.3",
+  "mandatory": false,
+  "releaseNotes": [
+    "新增 GitHub Releases 检测更新模块",
+    "统一产品版本、构建编号和运行指纹",
+    "更新检查不使用 MCP token，也不会静默覆盖当前安装"
+  ]
+}

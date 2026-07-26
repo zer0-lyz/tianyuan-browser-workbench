@@ -14,7 +14,10 @@ const content = fs.readFileSync(path.join(extensionRoot, "src", "content", "cont
 const adapter = fs.readFileSync(path.join(extensionRoot, "src", "injected", "page_adapter.js"), "utf8");
 const bridge = fs.readFileSync(path.join(repoRoot, "native-helper", "connector_bridge.js"), "utf8");
 const nativeHost = fs.readFileSync(path.join(repoRoot, "native-helper", "native_host.js"), "utf8");
+const updateChecker = fs.readFileSync(path.join(repoRoot, "native-helper", "update_checker.js"), "utf8");
 const installer = fs.readFileSync(path.join(repoRoot, "scripts", "install-local-runtime.mjs"), "utf8");
+const nativeInstaller = fs.readFileSync(path.join(repoRoot, "native-helper", "install_native_host.sh"), "utf8");
+const versionConfig = JSON.parse(fs.readFileSync(path.join(extensionRoot, "version.json"), "utf8"));
 const pluginServer = fs.readFileSync(path.join(repoRoot, "plugins", "tianyuan-browser-connector", "runtime", "apps", "mcp", "server.mjs"), "utf8");
 const pluginReadme = fs.readFileSync(path.join(repoRoot, "plugins", "tianyuan-browser-connector", "README.md"), "utf8");
 
@@ -45,6 +48,9 @@ for (const id of referencedIds) {
 assert.equal(quotedConstant(content, "ADAPTER_VERSION"), quotedConstant(adapter, "ADAPTER_VERSION"));
 assert.equal(quotedConstant(sidepanel, "EXPECTED_CONNECTOR_PROTOCOL_VERSION"), quotedConstant(bridge, "PROTOCOL_VERSION"));
 assert.equal(quotedConstant(nativeHost, "CONNECTOR_PROTOCOL_VERSION"), quotedConstant(bridge, "PROTOCOL_VERSION"));
+assert.equal(manifest.version, versionConfig.chromeVersion);
+assert.equal(manifest.version_name, versionConfig.versionName);
+assert.equal(versionConfig.productVersion, "0.9.0");
 
 const installerPluginVersion = quotedConstant(installer, "CONNECTOR_VERSION");
 assert.ok(installerPluginVersion);
@@ -76,6 +82,19 @@ assert.equal(adapter.includes("clearAuditAttachments"), true);
 assert.equal(adapter.includes("CLEAR_ATTACHMENTS_INDEX_VALUE_MISMATCH"), true);
 assert.equal(adapter.includes("rowsWithCleanupData"), true);
 assert.equal(sidepanel.includes("expectedCleanupValues"), true);
+assert.equal(html.includes('id="page-updates"'), true);
+assert.equal(html.includes('id="checkForUpdates"'), true);
+assert.equal(html.includes('<span class="badge">9 个模块</span>'), true);
+assert.equal(sidepanel.includes("check_github_update"), true);
+assert.equal(sidepanel.includes("maybeAutoCheckUpdates"), true);
+assert.equal(nativeHost.includes('message?.action === "check_github_update"'), true);
+assert.equal(updateChecker.includes("api.github.com"), true);
+assert.equal(updateChecker.includes("DEFAULT_REPOSITORY"), true);
+assert.equal(updateChecker.includes("tokenUsed: false"), true);
+assert.equal(installer.includes('copyFileAtomic(path.join(repoRoot, "native-helper", "update_checker.js")'), true);
+assert.equal(installer.includes('entry.name === ".DS_Store"'), true);
+assert.equal(nativeInstaller.includes("update_checker.js"), true);
+assert.equal(nativeInstaller.includes("connector_bridge.js"), true);
 assert.equal(bridge.includes("EXTENSION_RUNTIME_BUILD_MISMATCH"), true);
 assert.equal(nativeHost.includes("return connectorBridge.start({"), true);
 assert.equal(/\bconnectorHandle\s*\(/.test(nativeHost.slice(nativeHost.indexOf("function startConnectorBridge()"))), false);

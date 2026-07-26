@@ -19,6 +19,17 @@ const connectorBridge = (() => {
     }
   }
 })();
+const updateChecker = (() => {
+  try {
+    return require("./update_checker.js");
+  } catch (cause) {
+    try {
+      return createRequire(path.join(path.dirname(process.execPath), "native_host.js"))("./update_checker.js");
+    } catch {
+      throw cause;
+    }
+  }
+})();
 
 process.stdout.on("error", (error) => {
   if (error?.code === "EPIPE") {
@@ -2261,6 +2272,15 @@ async function handle(message) {
   }
   if (message?.action === "start_connector_bridge") {
     return await startConnectorBridgeAction({ forceRestart: message.forceRestart === true });
+  }
+  if (message?.action === "check_github_update") {
+    return await updateChecker.checkGithubUpdate({
+      currentVersion: message.currentVersion,
+      currentBuildNumber: message.currentBuildNumber,
+      currentRuntimeBuildId: message.currentRuntimeBuildId,
+      platform: process.platform,
+      architecture: process.arch,
+    });
   }
   if (message?.action === "cli_login") {
     return await startCliLogin();
