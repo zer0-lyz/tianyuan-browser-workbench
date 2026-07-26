@@ -1,10 +1,23 @@
 # 天源浏览器工作台项目状态
 
-更新时间：2026-07-24 23:20 CST
+更新时间：2026-07-26 CST
 
 ## 当前阶段
 
-项目进入整体稳定性收口阶段。本轮已完成页面注入、Connector 生命周期、本机安装和批量上传最终回读四条高风险链路的系统性修复；本机运行副本已同步并通过静态、协议、进程替换和 Native Helper 自检。尚需重新加载 Chrome 扩展和天源页面后做一次聚焦真实页面回归，确认无扩展错误并验证一组批量上传样本。
+项目进入 `0.10.0` 跨平台运行架构验证阶段。浏览器功能和 Native Messaging 协议保持不变，Native Helper 已拆分为共享核心与 Windows/macOS 平台适配层；本机运行副本已同步并通过统一自检。尚需重新加载 Chrome 扩展验证 `0.10.0`，并在 Windows 10/11 x64 实机验证安装、DPAPI、文件选择和 CLI 授权。
+
+## 2026-07-26 跨平台适配层
+
+- 新增 `native-helper/platform/common.js`、`windows.js`、`macos.js`、`unsupported.js` 和 `index.js`。
+- `native_host.js` 已移除直接 PowerShell、AppleScript、`netstat`、`taskkill`、`lsof` 和进程终止分支，改走统一平台接口。
+- `connector_bridge.js` 已统一运行目录和凭据接口。
+- Windows 新凭据优先使用当前用户 DPAPI；macOS 继续使用钥匙串。
+- 本机安装器、macOS 安装脚本和 Windows 包均复制完整平台目录。
+- 安装后统一自检会显示平台适配器、文件选择、凭据存储、进程控制和依赖状态。
+- 开发版本升级为 `0.10.0`，构建编号 `2026072602`，尚未发布 GitHub Release。
+- 本机运行指纹在最终源码提交和重建包后固定。
+- 构建缓存和测试包输出已从 OneDrive 迁到 `~/.tianyuan-workbench/`。
+- 两个平台测试包初次构建和校验通过，但因构建时源码尚未提交，包内提交号仍是改造前提交；已决定先提交源码再重新构建，不交付该批初次包。
 
 ## 本轮稳定性审计结论
 

@@ -276,3 +276,15 @@
 - 下载地址必须是固定 GitHub HTTPS 地址，不能接受页面或远端清单传入任意协议和域名。
 - GitHub 尚无正式 Release 时，应显示“尚未发布”，不能误报连接失败或虚构最新版本。
 - 当前正式 Release 为 `v0.9.0`；公开更新仓库只保存安装包、SHA-256、更新清单和发行说明。
+
+## 2026-07-26 跨平台 Native Helper 规则
+
+- `0.10.0` 起采用“共享浏览器扩展 + 共享 Native Messaging 协议 + 共享 Helper 核心 + Windows/macOS 平台适配层”。
+- 平台差异只允许放在 `native-helper/platform/`，业务动作、日志、更新检查和执行校验不得复制成两套。
+- Windows 适配层负责 PowerShell/WinForms 文件选择、当前用户 DPAPI、`netstat`、`taskkill` 和 `%LOCALAPPDATA%` 运行路径。
+- macOS 适配层负责 AppleScript 文件选择、登录钥匙串、`lsof`、`SIGTERM` 和 `~/.tianyuan-workbench` 运行路径。
+- Windows SEA 主程序依赖同目录外置平台模块；构建和安装必须把完整 `platform/` 目录纳入逐文件校验。
+- 安装完成必须执行统一 `native_host --self-test`，至少确认平台受支持、Python、打印脚本和 CLI 状态。
+- 构建缓存和最终测试包默认分别写入 `~/.tianyuan-workbench/release-builds/`、`~/.tianyuan-workbench/releases/`；不得在 OneDrive 项目目录产生重型构建目录。
+- Windows/macOS 包可以在 Mac 构建机生成和做静态、架构、哈希与协议验证；Windows 系统 API 和安装流程仍必须在 Windows 实机最终验收。
+- 浏览器首次加载扩展、系统安全提示、CLI 授权、MCP token 输入和文件授权不能静默绕过。

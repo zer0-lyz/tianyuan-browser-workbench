@@ -30,6 +30,17 @@ const updateChecker = (() => {
     }
   }
 })();
+const platformAdapter = (() => {
+  try {
+    return require("./platform/index.js");
+  } catch (cause) {
+    try {
+      return createRequire(path.join(path.dirname(process.execPath), "native_host.js"))("./platform/index.js");
+    } catch {
+      throw cause;
+    }
+  }
+})().createPlatformAdapter();
 
 process.stdout.on("error", (error) => {
   if (error?.code === "EPIPE") {
@@ -56,10 +67,7 @@ const CONNECTOR_ALLOWED_EXTENSION_ORIGINS = new Set([
   "chrome-extension://lkflndcnklpeaejohaacoaolnmhgigoc",
   "chrome-extension://fdbllnmaaklkcmoacoapbibiggnndkfpa",
 ]);
-const IS_WINDOWS = process.platform === "win32";
-const WINDOWS_LOCAL_APP_DATA = process.env.LOCALAPPDATA
-  || path.join(os.homedir(), "AppData", "Local");
-const WINDOWS_RUNTIME_ROOT = path.join(WINDOWS_LOCAL_APP_DATA, "TianyuanWorkbench");
+const IS_WINDOWS = platformAdapter.isWindows;
 const RUNTIME_CONFIG_PATH = process.env.TIANYUAN_RUNTIME_CONFIG_PATH
   || path.join(path.dirname(process.execPath), "runtime-config.json");
 
@@ -81,26 +89,14 @@ function firstExistingPath(values, fallback) {
   return fallback;
 }
 
-const CLI_BIN = process.env.TYCPV_BIN || runtimeConfig.tycpvBin || (IS_WINDOWS
-  ? firstExistingPath([
-    path.join(WINDOWS_LOCAL_APP_DATA, "Programs", "tycpv", "tycpv.exe"),
-    path.join(WINDOWS_LOCAL_APP_DATA, "Programs", "tycpv", "bin", "tycpv.exe"),
-    path.join(WINDOWS_LOCAL_APP_DATA, "tycpv", "tycpv.exe"),
-    path.join(WINDOWS_LOCAL_APP_DATA, "tycpv", "bin", "tycpv.exe"),
-    process.env.ProgramFiles && path.join(process.env.ProgramFiles, "tycpv", "tycpv.exe"),
-    process.env.ProgramFiles && path.join(process.env.ProgramFiles, "tycpv", "bin", "tycpv.exe"),
-    process.env["ProgramFiles(x86)"] && path.join(process.env["ProgramFiles(x86)"], "tycpv", "tycpv.exe"),
-    process.env["ProgramFiles(x86)"] && path.join(process.env["ProgramFiles(x86)"], "tycpv", "bin", "tycpv.exe"),
-    path.join(os.homedir(), ".tycpv", "bin", "tycpv.exe"),
-  ], "tycpv.exe")
-  : "/usr/local/bin/tycpv");
-const PYTHON_BIN = process.env.TIANYUAN_PYTHON_BIN || runtimeConfig.pythonBin || (IS_WINDOWS
-  ? path.join(WINDOWS_RUNTIME_ROOT, "python", "python.exe")
-  : "/usr/bin/python3");
+const CLI_BIN = process.env.TYCPV_BIN
+  || runtimeConfig.tycpvBin
+  || firstExistingPath(platformAdapter.cliCandidates, platformAdapter.cliFallback);
+const PYTHON_BIN = process.env.TIANYUAN_PYTHON_BIN
+  || runtimeConfig.pythonBin
+  || platformAdapter.defaultPythonBin;
 const PRINT_SKILLS_DIR = process.env.TIANYUAN_PRINT_SKILLS_DIR || runtimeConfig.printSkillsDir
-  || (IS_WINDOWS
-    ? path.join(WINDOWS_RUNTIME_ROOT, "print-format-skills")
-    : path.join(os.homedir(), ".tianyuan-workbench", "dependencies", "天源评估系统", "print-format-skills"));
+  || platformAdapter.defaultPrintSkillsDir;
 const COMPANY_HIERARCHY_CODE_KEYS = [
   "displayCode",
   "display_code",
@@ -1097,35 +1093,7 @@ async function connectorBridgeHealth() {
 }
 
 async function connectorBridgeListenerPids() {
-  if (process.platform === "win32") {
-    try {
-      const { stdout } = await execFilePromise("netstat.exe", ["-ano", "-p", "tcp"], { timeout: 5000 });
-      const portPattern = new RegExp(`(?:127\\.0\\.0\\.1|0\\.0\\.0\\.0|\\[::1\\]|\\[::\\]):${DEFAULT_CONNECTOR_PORT}\\s+\\S+\\s+LISTENING\\s+(\\d+)`, "i");
-      return [...new Set(String(stdout || "").split(/\r?\n/)
-        .map((line) => line.match(portPattern)?.[1])
-        .filter(Boolean)
-        .map(Number)
-        .filter((pid) => Number.isInteger(pid) && pid > 0))];
-    } catch {
-      return [];
-    }
-  }
-  const lsofBin = ["/usr/sbin/lsof", "/usr/bin/lsof", "lsof"].find((candidate) =>
-    candidate === "lsof" || fs.existsSync(candidate)
-  );
-  try {
-    const { stdout } = await execFilePromise(lsofBin, [
-      "-nP",
-      `-iTCP:${DEFAULT_CONNECTOR_PORT}`,
-      "-sTCP:LISTEN",
-      "-t",
-    ], { timeout: 5000 });
-    return [...new Set(String(stdout || "").split(/\s+/)
-      .map(Number)
-      .filter((pid) => Number.isInteger(pid) && pid > 0))];
-  } catch {
-    return [];
-  }
+  return await platformAdapter.listenerPids(DEFAULT_CONNECTOR_PORT);
 }
 
 async function stopConnectorBridgeAction() {
@@ -1144,15 +1112,7 @@ async function stopConnectorBridgeAction() {
     return { ok: false, stopped: false, reason: "CONNECTOR_PROCESS_NOT_FOUND", security: { credentialsReturned: false } };
   }
   for (const pid of pids) {
-    try {
-      if (process.platform === "win32") {
-        await execFilePromise("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { timeout: 5000 });
-      } else {
-        process.kill(pid, "SIGTERM");
-      }
-    } catch {
-      // The health probe below decides whether the bridge actually stopped.
-    }
+    await platformAdapter.terminateProcess(pid);
   }
   for (let attempt = 0; attempt < 30; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -1261,86 +1221,8 @@ function startCliLogin() {
   });
 }
 
-function runAppleScript(script, timeout = 120000) {
-  return new Promise((resolve) => {
-    execFile("/usr/bin/osascript", ["-e", script], { timeout }, (error, stdout) => {
-      if (error) {
-        resolve({
-          ok: false,
-          cancelled: String(error.message || "").includes("User canceled") || Number(error.code) === 1,
-          reason: "FILE_SELECTION_CANCELLED",
-          security: { credentialsReturned: false },
-        });
-        return;
-      }
-      resolve({
-        ok: true,
-        paths: String(stdout || "").split(/\r?\n/).map((item) => item.trim()).filter(Boolean),
-        security: { credentialsReturned: false },
-      });
-    });
-  });
-}
-
-function runPowerShellPicker(script, timeout = 120000) {
-  return new Promise((resolve) => {
-    const encodedCommand = Buffer.from(script, "utf16le").toString("base64");
-    execFile("powershell.exe", [
-      "-NoProfile",
-      "-STA",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-EncodedCommand",
-      encodedCommand,
-    ], {
-      timeout,
-      windowsHide: true,
-      encoding: "utf8",
-    }, (error, stdout) => {
-      if (error) {
-        resolve({
-          ok: false,
-          cancelled: Number(error.code) === 2,
-          reason: "FILE_SELECTION_CANCELLED",
-          security: { credentialsReturned: false },
-        });
-        return;
-      }
-      resolve({
-        ok: true,
-        paths: String(stdout || "").split(/\r?\n/).map((item) => item.trim()).filter(Boolean),
-        security: { credentialsReturned: false },
-      });
-    });
-  });
-}
-
-function windowsPickerPreamble() {
-  return [
-    "$ErrorActionPreference = 'Stop'",
-    "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
-    "Add-Type -AssemblyName System.Windows.Forms",
-  ].join("\n");
-}
-
 async function chooseDirectory(prompt) {
-  if (IS_WINDOWS) {
-    const safePrompt = String(prompt).replace(/'/g, "''");
-    const script = [
-      windowsPickerPreamble(),
-      "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
-      `$dialog.Description = '${safePrompt}'`,
-      "$dialog.ShowNewFolderButton = $true",
-      "if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { exit 2 }",
-      "[Console]::Out.WriteLine($dialog.SelectedPath)",
-    ].join("\n");
-    return await runPowerShellPicker(script);
-  }
-  const safePrompt = String(prompt).replace(/"/g, '\\"');
-  return await runAppleScript([
-    `set selectedFolder to choose folder with prompt "${safePrompt}"`,
-    "POSIX path of selectedFolder",
-  ].join("\n"));
+  return await platformAdapter.chooseDirectory(prompt);
 }
 
 async function chooseExportDirectory() {
@@ -1354,29 +1236,7 @@ async function chooseExportDirectory() {
 }
 
 async function chooseWorkbookFiles() {
-  let result;
-  if (IS_WINDOWS) {
-    const script = [
-      windowsPickerPreamble(),
-      "$dialog = New-Object System.Windows.Forms.OpenFileDialog",
-      "$dialog.Title = '选择需要调整打印格式的 Excel 文件'",
-      "$dialog.Filter = 'Excel 工作簿 (*.xlsx;*.xlsm)|*.xlsx;*.xlsm'",
-      "$dialog.Multiselect = $true",
-      "if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { exit 2 }",
-      "$dialog.FileNames | ForEach-Object { [Console]::Out.WriteLine($_) }",
-    ].join("\n");
-    result = await runPowerShellPicker(script);
-  } else {
-    const script = [
-      "set selectedFiles to choose file with prompt \"选择需要调整打印格式的 Excel 文件\" with multiple selections allowed",
-      "set outputText to \"\"",
-      "repeat with selectedFile in selectedFiles",
-      "set outputText to outputText & POSIX path of selectedFile & linefeed",
-      "end repeat",
-      "return outputText",
-    ].join("\n");
-    result = await runAppleScript(script);
-  }
+  const result = await platformAdapter.chooseWorkbookFiles();
   return {
     ...result,
     action: "print_workbook_files_selected",
@@ -2336,13 +2196,16 @@ async function handle(message) {
 
 async function runSelfTest() {
   const cli = await checkCli();
+  const platform = platformAdapter.diagnostics();
   return {
     ok: fs.existsSync(PYTHON_BIN)
       && fs.existsSync(PRINT_FORMAT_SCRIPTS.detail)
-      && fs.existsSync(PRINT_FORMAT_SCRIPTS.declaration),
+      && fs.existsSync(PRINT_FORMAT_SCRIPTS.declaration)
+      && platform.supported,
     service: "tianyuan-native-host",
     platform: process.platform,
     architecture: process.arch,
+    platformAdapter: platform,
     pythonAvailable: fs.existsSync(PYTHON_BIN),
     printScriptsAvailable: {
       detail: fs.existsSync(PRINT_FORMAT_SCRIPTS.detail),

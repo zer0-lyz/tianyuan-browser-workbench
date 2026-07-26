@@ -5,19 +5,21 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="$(node -p "require(process.argv[1]).productVersion" "$ROOT_DIR/extension/version.json")"
 CHROME_VERSION="$(node -p "require(process.argv[1]).chromeVersion" "$ROOT_DIR/extension/version.json")"
 BUILD_NUMBER="$(node -p "require(process.argv[1]).buildNumber" "$ROOT_DIR/extension/version.json")"
-RELEASE_DATE="${RELEASE_DATE:-$(date +%Y%m%d)}"
+RELEASE_DATE="${RELEASE_DATE:-$(TZ=Asia/Shanghai date +%Y%m%d)}"
 PACKAGE_NAME="天源浏览器工作台-v${VERSION}-Windows-x64-测试版"
-BUILD_ROOT="$ROOT_DIR/release/.build/${PACKAGE_NAME}-$(date +%s)"
+WORKBENCH_ROOT="${TIANYUAN_WORKBENCH_ROOT:-$HOME/.tianyuan-workbench}"
+BUILD_BASE="${TIANYUAN_RELEASE_BUILD_ROOT:-$WORKBENCH_ROOT/release-builds}"
+BUILD_ROOT="$BUILD_BASE/${PACKAGE_NAME}-$(date +%s)"
 STAGE="$BUILD_ROOT/$PACKAGE_NAME"
-DIST_DIR="$ROOT_DIR/dist"
+DIST_DIR="${TIANYUAN_RELEASE_OUTPUT_DIR:-$WORKBENCH_ROOT/releases}"
 OUTPUT="$DIST_DIR/${PACKAGE_NAME}-${RELEASE_DATE}.zip"
 OUTPUT_SHA="$OUTPUT.sha256"
 
-CACHE_DIR="$HOME/.tianyuan-workbench/release-cache"
+CACHE_DIR="$WORKBENCH_ROOT/release-cache"
 WINDOWS_CACHE="$CACHE_DIR/windows-x64"
 WHEEL_CACHE="$CACHE_DIR/python-wheels"
 POSTJECT_DIR="$CACHE_DIR/postject"
-TYCPV_SOURCE="$HOME/.tianyuan-workbench/dependencies/天源评估系统/tycpv-setup-0.1.0-win-x64.exe"
+TYCPV_SOURCE="$WORKBENCH_ROOT/dependencies/天源评估系统/tycpv-setup-0.1.0-win-x64.exe"
 
 NODE_VERSION="24.14.0"
 NODE_ARCHIVE="$WINDOWS_CACHE/node-v${NODE_VERSION}-win-x64.zip"
@@ -75,7 +77,7 @@ NODE
 
 mkdir -p "$STAGE/runtime/python-portable/Lib/site-packages" \
   "$STAGE/runtime/python-wheels" \
-  "$STAGE/native-helper" \
+  "$STAGE/native-helper/platform" \
   "$STAGE/skills" \
   "$DIST_DIR" \
   "$WINDOWS_CACHE" \
@@ -150,6 +152,7 @@ cp "$WINDOWS_NODE" "$STAGE/native-helper/native_host.exe"
 cp "$ROOT_DIR/native-helper/native_host.js" "$STAGE/native-helper/native_host.js"
 cp "$ROOT_DIR/native-helper/connector_bridge.js" "$STAGE/native-helper/connector_bridge.js"
 cp "$ROOT_DIR/native-helper/update_checker.js" "$STAGE/native-helper/update_checker.js"
+cp "$ROOT_DIR/native-helper/platform/"*.js "$STAGE/native-helper/platform/"
 cat > "$STAGE/native-helper/runtime-compat.json" <<EOF
 {
   "version": 2,

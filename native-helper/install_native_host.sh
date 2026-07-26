@@ -13,6 +13,7 @@ INSTALLED_HOST_SCRIPT="$INSTALL_DIR/native_host.js"
 INSTALLED_SERVER_SCRIPT="$INSTALL_DIR/server.js"
 INSTALLED_CONNECTOR_SCRIPT="$INSTALL_DIR/connector_bridge.js"
 INSTALLED_UPDATE_CHECKER="$INSTALL_DIR/update_checker.js"
+INSTALLED_PLATFORM_DIR="$INSTALL_DIR/platform"
 INSTALLED_RUNTIME_COMPAT="$INSTALL_DIR/runtime-compat.json"
 HOST_LAUNCHER="$INSTALL_DIR/native_host_launcher.sh"
 SERVER_LAUNCHER="$INSTALL_DIR/server_launcher.sh"
@@ -49,6 +50,8 @@ cp "$HOST_SCRIPT" "$INSTALLED_HOST_SCRIPT"
 cp "$ROOT_DIR/native-helper/server.js" "$INSTALLED_SERVER_SCRIPT"
 cp "$ROOT_DIR/native-helper/connector_bridge.js" "$INSTALLED_CONNECTOR_SCRIPT"
 cp "$ROOT_DIR/native-helper/update_checker.js" "$INSTALLED_UPDATE_CHECKER"
+rm -rf "$INSTALLED_PLATFORM_DIR"
+cp -R "$ROOT_DIR/native-helper/platform" "$INSTALLED_PLATFORM_DIR"
 if [[ -f "$ROOT_DIR/native-helper/runtime-compat.json" ]]; then
   cp "$ROOT_DIR/native-helper/runtime-compat.json" "$INSTALLED_RUNTIME_COMPAT"
 fi
@@ -58,6 +61,25 @@ cp "$ROOT_DIR/skills/appraisal-declaration-print-format/SKILL.md" "$PRINT_SKILLS
 cp "$ROOT_DIR/skills/appraisal-declaration-print-format/scripts/adjust_appraisal_declaration_print.py" "$PRINT_SKILLS_DIR/appraisal-declaration-print-format/scripts/adjust_appraisal_declaration_print.py"
 chmod +x "$INSTALLED_HOST_SCRIPT"
 chmod +x "$INSTALLED_SERVER_SCRIPT"
+
+SELF_TEST_OUTPUT="$(
+  TIANYUAN_PYTHON_BIN="$PYTHON_BIN" \
+  TIANYUAN_PRINT_SKILLS_DIR="$PRINT_SKILLS_DIR" \
+  "$NODE_BIN" "$INSTALLED_HOST_SCRIPT" --self-test
+)" || {
+  echo "Native Host self-test failed: $SELF_TEST_OUTPUT" >&2
+  exit 1
+}
+echo "$SELF_TEST_OUTPUT" | "$PYTHON_BIN" -c '
+import json
+import sys
+
+payload = json.load(sys.stdin)
+adapter = payload.get("platformAdapter") or {}
+if not payload.get("ok") or not adapter.get("supported"):
+    raise SystemExit("Native Host platform adapter self-test failed")
+print("Native Host self-test:", adapter.get("id"), adapter.get("credentialStore"), adapter.get("filePicker"))
+'
 
 cat > "$HOST_LAUNCHER" <<SH
 #!/bin/bash

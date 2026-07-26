@@ -117,6 +117,22 @@ git reset --hard baseline-workbench-0.3.0-windows-test-r2-20260723
 - 公开 Release：`v0.9.0`；
 - 运行指纹：`64b2cf6befaf748d38bd052da412171d3d781c6268188d3711e4a522251c07a2`。
 
+## 2026-07-26 跨平台 Native Helper 开发版
+
+产品版本：`0.10.0`
+
+构建编号：`2026072602`
+
+当前状态：
+
+- 已建立共享 Helper 核心和 Windows/macOS 平台适配层；
+- 已增加 Windows DPAPI、macOS Keychain 和统一文件选择、进程控制接口；
+- 已增加统一安装后自检；
+- 已通过源码、平台适配器、Connector 和更新模块回归；
+- 本机运行副本已同步；
+- 最终源码提交、运行指纹和测试包 SHA-256 待重新构建后固定；
+- 尚未建立正式标签或 GitHub Release。
+
 ## 2026-07-24 评估核实批量上传与本机运行基线
 
 基线名称：`baseline-audit-upload-cleanup-local-runtime-20260724`
