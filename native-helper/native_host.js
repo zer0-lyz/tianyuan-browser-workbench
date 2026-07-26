@@ -2232,6 +2232,22 @@ if (process.argv.includes("--connector-bridge")) {
       })}\n`);
       process.exitCode = 1;
     });
+} else if (process.argv.includes("--start-connector")) {
+  startConnectorBridgeAction({
+    forceRestart: process.argv.includes("--force-restart"),
+  })
+    .then((result) => {
+      process.stdout.write(`${JSON.stringify(result)}\n`);
+      process.exitCode = result.ok ? 0 : 1;
+    })
+    .catch((error) => {
+      process.stdout.write(`${JSON.stringify({
+        ok: false,
+        reason: error?.message || String(error),
+        security: { credentialsReturned: false },
+      })}\n`);
+      process.exitCode = 1;
+    });
 } else {
   readMessages((message) => {
     if (message?.action === "run_cli_export") {
