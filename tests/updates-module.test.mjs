@@ -42,7 +42,6 @@ const elementIds = [
   "page-updates",
   "openUpdatesTop",
   "updateTopStatus",
-  "openUpdates",
   "backFromUpdates",
   "updateHeadline",
   "updateDescription",
@@ -147,7 +146,7 @@ assert.equal(elements.get("updateHeadline").textContent, "已是最新版本");
 assert.equal(elements.get("updateCurrentVersion").textContent, "v0.11.0");
 assert.equal(elements.get("updateLatestVersion").textContent, "v0.11.0");
 
-elements.get("openUpdates").dispatchEvent(new Event("click"));
+elements.get("openUpdatesTop").dispatchEvent(new Event("click"));
 elements.get("backFromUpdates").dispatchEvent(new Event("click"));
 assert.deepEqual(navigation, ["updates", "home"]);
 assert.equal(statuses.length, 0);

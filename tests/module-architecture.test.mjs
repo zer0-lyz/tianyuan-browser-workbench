@@ -12,6 +12,8 @@ import { feedbackModule } from "../extension/src/modules/feedback/module.js";
 
 const definitions = [...legacyFeatureModules, updatesModule, feedbackModule];
 assert.equal(definitions.length, 10);
+assert.equal(definitions.filter((item) => item.manifest.type === "feature").length, 8);
+assert.equal(definitions.filter((item) => item.manifest.type === "utility").length, 2);
 assert.equal(new Set(definitions.map((item) => item.manifest.id)).size, definitions.length);
 assert.equal(new Set(definitions.map((item) => item.manifest.route)).size, definitions.length);
 for (const definition of definitions) {
