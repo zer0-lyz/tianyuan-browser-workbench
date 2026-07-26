@@ -285,6 +285,7 @@
 - macOS 适配层负责 AppleScript 文件选择、登录钥匙串、`lsof`、`SIGTERM` 和 `~/.tianyuan-workbench` 运行路径。
 - Windows SEA 主程序依赖同目录外置平台模块；构建和安装必须把完整 `platform/` 目录纳入逐文件校验。
 - 安装完成必须执行统一 `native_host --self-test`，至少确认平台受支持、Python、打印脚本和 CLI 状态。
+- 自检通过后安装器必须调用 `--start-connector --force-restart`，确保不是只安装文件而未启动连接服务。
 - 构建缓存和最终测试包默认分别写入 `~/.tianyuan-workbench/release-builds/`、`~/.tianyuan-workbench/releases/`；不得在 OneDrive 项目目录产生重型构建目录。
 - Windows/macOS 包可以在 Mac 构建机生成和做静态、架构、哈希与协议验证；Windows 系统 API 和安装流程仍必须在 Windows 实机最终验收。
 - 浏览器首次加载扩展、系统安全提示、CLI 授权、MCP token 输入和文件授权不能静默绕过。
