@@ -357,7 +357,22 @@ function main() {
   copyDir(
     path.join(repoRoot, "extension"),
     path.join(runtimeProjectRoot, "extension"),
-    ["manifest.json", "version.json", "src/content/content.js", "src/injected/page_adapter.js", "src/sidepanel/sidepanel.js"],
+    [
+      "manifest.json",
+      "version.json",
+      "src/content/content.js",
+      "src/injected/page_adapter.js",
+      "src/sidepanel/sidepanel.js",
+      "src/core/event-bus.js",
+      "src/core/feature-flags.js",
+      "src/core/module-registry.js",
+      "src/core/module-scope.js",
+      "src/core/module-storage.js",
+      "src/app/legacy-feature-modules.js",
+      "src/modules/updates/module.js",
+      "src/modules/updates/template.js",
+      "src/modules/updates/styles.css",
+    ],
   );
   copyDir(
     path.join(repoRoot, "native-helper"),

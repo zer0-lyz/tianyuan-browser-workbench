@@ -549,30 +549,6 @@ details.status-card,
     linear-gradient(180deg, #ffffff 0%, #f3f6f9 100%);
 }
 
-.update-panel,
-.update-notes-panel {
-  display: grid;
-  gap: 10px;
-}
-
-.update-version-grid dd,
-#updateAssetSha {
-  overflow-wrap: anywhere;
-}
-
-.update-notes {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-  padding-left: 20px;
-  color: var(--text);
-}
-
-.update-notes li {
-  line-height: 1.45;
-}
-
-
 .home-note,
 .selection-summary,
 .export-progress,

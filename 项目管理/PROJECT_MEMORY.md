@@ -289,3 +289,16 @@
 - 构建缓存和最终测试包默认分别写入 `~/.tianyuan-workbench/release-builds/`、`~/.tianyuan-workbench/releases/`；不得在 OneDrive 项目目录产生重型构建目录。
 - Windows/macOS 包可以在 Mac 构建机生成和做静态、架构、哈希与协议验证；Windows 系统 API 和安装流程仍必须在 Windows 实机最终验收。
 - 浏览器首次加载扩展、系统安全提示、CLI 授权、MCP token 输入和文件授权不能静默绕过。
+
+## 2026-07-26 浏览器功能模块化规则
+
+- 浏览器扩展采用模块化单体，不把每个功能拆成独立软件或微服务。
+- 新功能必须优先新增 `extension/src/modules/<module-id>/`，不能继续把业务逻辑直接追加到 `sidepanel.js`。
+- 每个模块必须有唯一 ID、路由、消息命名空间、独立存储版本和生命周期。
+- 模块之间禁止导入内部文件；只能通过公共接口或事件总线通信。
+- 模块状态必须写入 `tianyuanWorkbenchModule:<module-id>:v<version>`。
+- 模块监听、定时器和 AbortController 必须由 `ModuleScope` 管理并可清理。
+- 模块样式必须以自己的 `data-module-id` 为根，不能使用宽泛选择器污染其他模块。
+- 新模块默认设为 `beta`，显式启用并完成真实测试后才能改为 `stable`。
+- 第一阶段已将“版本更新”迁移为完整独立模块，其余八个功能先通过兼容模块清单接入。
+- 高风险的批量上传和批量清理最后迁移，迁移期间不得改变编辑锁、确认、保存和回读规则。

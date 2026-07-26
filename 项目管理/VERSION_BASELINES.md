@@ -136,6 +136,23 @@ git reset --hard baseline-workbench-0.3.0-windows-test-r2-20260723
 - macOS 测试包 SHA-256：`247ee1a9e88ac62fdb1ac6b86d1cf36ec5675d51241322f300c24e107d521c3e`；
 - 尚未建立正式标签或 GitHub Release。
 
+## 2026-07-26 浏览器模块化单体开发版
+
+产品版本：`0.11.0`
+
+构建编号：`2026072603`
+
+当前状态：
+
+- 已建立模块注册中心、事件总线、生命周期、模块存储和功能开关；
+- “版本更新”已迁移为独立模块；
+- 其余八个功能已注册兼容模块清单；
+- 自动架构测试、更新模块测试和旧功能回归通过；
+- 本机运行副本已同步；
+- 运行指纹：`edbae1f8c20a6ab8fe7c755c78b77734049631bf727fb75e8b596c6129bfad7a`；
+- 尚需 Chrome 重新加载后的视觉验收；
+- 尚未建立稳定标签或 GitHub Release。
+
 ## 2026-07-24 评估核实批量上传与本机运行基线
 
 基线名称：`baseline-audit-upload-cleanup-local-runtime-20260724`
