@@ -14,8 +14,8 @@ test("validates the bounded allow-listed payload", () => {
     description: "点击加载后没有显示内容",
     steps: "打开工作台后点击加载",
     diagnostics: {
-      version: "0.12.1",
-      buildNumber: 2026072605,
+      version: "0.12.2",
+      buildNumber: 2026072606,
       platform: "mac",
       architecture: "arm64",
       connectorConnected: true,
@@ -25,7 +25,7 @@ test("validates the bounded allow-listed payload", () => {
     privacyConfirmed: true,
   });
   assert.equal(result.type, "bug");
-  assert.equal(result.diagnostics.version, "0.12.1");
+  assert.equal(result.diagnostics.version, "0.12.2");
   assert.throws(
     () => validateFeedbackPayload({ ...result, token: "secret" }),
     /UNKNOWN_FIELD:token/,

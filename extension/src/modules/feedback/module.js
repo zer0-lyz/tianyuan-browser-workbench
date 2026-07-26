@@ -10,7 +10,7 @@ const TYPE_LABELS = {
 
 function elementMap(documentRef) {
   const ids = [
-    "openFeedback",
+    "openFeedbackTop",
     "backFromFeedback",
     "feedbackDraftStatus",
     "feedbackType",
@@ -116,12 +116,12 @@ export function validateFeedbackDraft(draft, privacyConfirmed) {
 export const feedbackModule = {
   manifest: {
     id: "feedback",
-    type: "feature",
+    type: "utility",
     stage: "stable",
     route: "feedback",
     displayName: "反馈",
     messageNamespace: "feedback",
-    entryElementId: "openFeedback",
+    entryElementId: "openFeedbackTop",
     pageElementId: "page-feedback",
     storageVersion: 1,
     usesLegacyScope: false,
@@ -315,7 +315,7 @@ export const feedbackModule = {
         renderDraft();
         renderDelivery();
 
-        context.scope.on(elements.openFeedback, "click", () =>
+        context.scope.on(elements.openFeedbackTop, "click", () =>
           context.navigate("feedback")
         );
         context.scope.on(elements.backFromFeedback, "click", () =>

@@ -41,7 +41,6 @@ function elementMap(documentRef) {
   const ids = [
     "openUpdatesTop",
     "updateTopStatus",
-    "openUpdates",
     "backFromUpdates",
     "updateHeadline",
     "updateDescription",
@@ -67,14 +66,13 @@ function elementMap(documentRef) {
 export const updatesModule = {
   manifest: {
     id: "updates",
-    type: "feature",
+    type: "utility",
     stage: "stable",
     route: "updates",
     displayName: "版本更新",
     messageNamespace: "updates",
-    entryElementId: "openUpdates",
+    entryElementId: "openUpdatesTop",
     pageElementId: "page-updates",
-    controlElementIds: ["openUpdatesTop"],
     storageVersion: 1,
     usesLegacyScope: false,
     scope: { companies: false, subjects: false },
@@ -317,9 +315,6 @@ export const updatesModule = {
         render(latestResult);
 
         context.scope.on(elements.openUpdatesTop, "click", () =>
-          context.navigate("updates")
-        );
-        context.scope.on(elements.openUpdates, "click", () =>
           context.navigate("updates")
         );
         context.scope.on(elements.backFromUpdates, "click", () =>

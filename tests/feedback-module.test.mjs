@@ -46,7 +46,7 @@ globalThis.window = fakeWindow;
 
 const elementIds = [
   "page-feedback",
-  "openFeedback",
+  "openFeedbackTop",
   "backFromFeedback",
   "feedbackDraftStatus",
   "feedbackType",
@@ -126,8 +126,8 @@ await instance.initialize({
   storage,
   async getSafeDiagnostics() {
     return {
-      version: "0.12.1",
-      buildNumber: 2026072605,
+      version: "0.12.2",
+      buildNumber: 2026072606,
       platform: "mac",
       architecture: "arm64",
       connectorConnected: true,
@@ -152,7 +152,7 @@ assert.equal(
 assert.equal(elements.get("feedbackTitle").value, "草稿标题");
 assert.equal(elements.get("submitFeedback").disabled, true);
 
-elements.get("openFeedback").dispatchEvent(new Event("click"));
+elements.get("openFeedbackTop").dispatchEvent(new Event("click"));
 elements.get("backFromFeedback").dispatchEvent(new Event("click"));
 assert.deepEqual(navigation, ["feedback", "home"]);
 
@@ -161,7 +161,7 @@ elements.get("copyFeedback").dispatchEvent(new Event("click"));
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(copied.length, 1);
 assert.match(copied[0], /草稿标题/);
-assert.match(copied[0], /"version": "0.12.1"/);
+assert.match(copied[0], /"version": "0.12.2"/);
 assert.equal(copied[0].includes("projectId"), false);
 assert.equal(statuses.at(-1).kind, "ok");
 
