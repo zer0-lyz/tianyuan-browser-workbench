@@ -3465,7 +3465,8 @@ v20 已生效，空 `tag:{isClear:true}` 不再干扰当前最终扫描结果。
 - 新增独立“版本更新”页面。
 - 新增 Native Helper 模块 `native-helper/update_checker.js`。
 - 新增白名单动作 `check_github_update`。
-- 固定 GitHub 仓库 `zer0-lyz/tianyuan-browser-workbench`。
+- 初版固定 GitHub 仓库 `zer0-lyz/tianyuan-browser-workbench`，但真实匿名请求发现该仓库为私有，公开 API 返回 `404`。
+- 经用户确认，新建公开发行仓库 `zer0-lyz/tianyuan-browser-workbench-releases`，源码仓库继续保持私有。
 - 支持标准 SemVer、预发布版本、构建编号、最低支持版本和运行指纹判断。
 - 自动检查间隔为 6 小时，另支持手动检查。
 - 检查结果缓存在 Chrome 本机存储中，不保存凭据。
@@ -3496,20 +3497,43 @@ v20 已生效，空 `tag:{isClear:true}` 不再干扰当前最终扫描结果。
 
 - 本机运行目录安装成功。
 - 扩展版本：`0.9.0`。
-- Connector PID：`71661`。
+- Connector PID：`52560`。
 - 运行指纹：
-  `f1571a7fa7c6742ada340f827de56e80efc4be71f71a1454c156792fed4aecde`。
+  `64b2cf6befaf748d38bd052da412171d3d781c6268188d3711e4a522251c07a2`。
 - Native Messaging 直接调用 `check_github_update` 成功。
 - 真实 GitHub API 返回：
   - `releasePublished=false`；
   - `reason=GITHUB_RELEASE_NOT_PUBLISHED`；
   - 未使用 token。
-- 更新清单生成器成功生成 `dist/update-manifest.json`；因尚未构建 `0.9.0` 安装包，当前 `assets` 为空。
+- 更新清单生成器成功生成 `dist/update-manifest.json`，包含 Windows x64 和 macOS ARM64 两个平台资产。
 
 ### 待验证
 
 - 在 Chrome 扩展页重新加载本机扩展目录。
 - 检查顶部五项状态在窄侧栏中的布局。
 - 检查首页九宫格和版本更新页面。
-- 当前 GitHub 仓库尚未发布正式 Release；真实页面应显示“尚未发布”。
-- 真实界面确认后，再构建 Windows/Mac `0.9.0` 包并发布 GitHub Release。
+- 已构建、校验并发布 Windows/Mac `0.9.0` 包。
+
+### 正式 GitHub Release
+
+- 公开仓库：
+  `https://github.com/zer0-lyz/tianyuan-browser-workbench-releases`
+- Release：
+  `https://github.com/zer0-lyz/tianyuan-browser-workbench-releases/releases/tag/v0.9.0`
+- Windows：
+  - 文件：`tianyuan-workbench-v0.9.0-windows-x64.zip`
+  - SHA-256：`c24e4255736ec35c1074273faff8c0aefa7332cdcffba9df56c9c350689a542a`
+  - 大小：`76551657` 字节
+- macOS：
+  - 文件：`tianyuan-workbench-v0.9.0-macos-arm64.zip`
+  - SHA-256：`83d29b52435a1f89b792cb8150d4ac0689672e6fe5b7096c2f9d816ff5c448c5`
+  - 大小：`127364644` 字节
+- 同时发布两个 `.sha256` 文件和 `update-manifest.json`。
+- Mac 初次 ZIP 校验发现 `__MACOSX/._*` 资源分叉条目，已改用干净 ZIP 重新构建；最终 Windows 和 Mac 包的元数据条目均为 0。
+- GitHub 首次上传中文附件名时自动清洗为短横线名称；已改为稳定英文文件名并替换附件。
+- 匿名 GitHub API 可读取 Release 和五个附件。
+- 真实更新检查：
+  - 当前 `0.9.0`：`updateAvailable=false`；
+  - 旧版 `0.8.3`：`updateAvailable=true`；
+  - 正确返回平台安装包、大小和 SHA-256。
+- 私有源码仓库重复 Release 已删除，源码标签保留。

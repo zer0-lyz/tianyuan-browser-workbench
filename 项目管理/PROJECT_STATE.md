@@ -105,9 +105,14 @@
 - 更新比较支持标准 SemVer，包括预发布版本，避免 `1.10.0` 与 `1.9.0` 字符串比较错误。
 - 支持可选 `update-manifest.json`；没有清单时回退 GitHub Release 标签、正文和资产列表。
 - 新增 `scripts/generate-update-manifest.mjs`，根据单一版本配置和 `dist/` 当前版本安装包生成 Release 更新清单。
-- 本机运行目录已同步到扩展 `0.9.0`；Connector PID `71661`，运行指纹 `f1571a7fa7c6742ada340f827de56e80efc4be71f71a1454c156792fed4aecde`。
-- 真实 GitHub API 检查返回仓库尚无正式 Release；更新页面应显示“尚未发布”。
-- 下一步需要重新加载本机扩展目录，检查真实侧栏布局；确认后再决定是否提交、推送和发布 `v0.9.0` GitHub Release。
+- 本机运行目录已同步到扩展 `0.9.0`；Connector PID `52560`，运行指纹 `64b2cf6befaf748d38bd052da412171d3d781c6268188d3711e4a522251c07a2`。
+- 已创建公开发行仓库 `zer0-lyz/tianyuan-browser-workbench-releases`，源码仓库继续保持私有。
+- 已发布公开 `v0.9.0` Release：
+  `https://github.com/zer0-lyz/tianyuan-browser-workbench-releases/releases/tag/v0.9.0`
+- 匿名 GitHub API 回读成功，不需要 GitHub token。
+- 当前 `0.9.0` 检查结果为“已是最新版”；模拟 `0.8.3` 检查结果为发现 `0.9.0`，并返回正确的 Windows x64 安装包和 SHA-256。
+- 私有源码仓库中的重复 Release 已删除，源码标签 `v0.9.0` 保留并指向提交 `d0695d2f7e44e42a2e67bc243e4e4e1643f2c04b`。
+- 下一步只需重新加载本机扩展目录，检查真实侧栏布局和“已是最新版”显示。
 - 扩展开发版本升级为 `0.4.0`，固定扩展 ID 不变。
 - 连接配置页已增加 Codex 项目、对话、绑定范围和解除绑定控件。
 - Connector Bridge 已持久化 Codex 绑定，并支持项目/对话目录读取。

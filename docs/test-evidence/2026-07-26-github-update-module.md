@@ -34,13 +34,25 @@
 - Connector 协议：`connector-agent-binding-v3`
 - 扩展版本：`0.9.0`
 - Runtime build：
-  `f1571a7fa7c6742ada340f827de56e80efc4be71f71a1454c156792fed4aecde`
+  `64b2cf6befaf748d38bd052da412171d3d781c6268188d3711e4a522251c07a2`
 - Native Messaging 调用 `check_github_update` 成功。
-- 真实 GitHub API 返回仓库尚无正式 Release。
+- 初次真实检查发现私有源码仓库对匿名请求返回 `404`。
+- 已改用公开发行仓库 `zer0-lyz/tianyuan-browser-workbench-releases`。
+- 匿名 GitHub API 已成功返回 `v0.9.0` Release。
 - 返回结果未包含或使用 MCP token、GitHub token、Cookie 或 Authorization。
+
+## 正式 Release
+
+- Release：
+  `https://github.com/zer0-lyz/tianyuan-browser-workbench-releases/releases/tag/v0.9.0`
+- Windows SHA-256：
+  `c24e4255736ec35c1074273faff8c0aefa7332cdcffba9df56c9c350689a542a`
+- macOS SHA-256：
+  `83d29b52435a1f89b792cb8150d4ac0689672e6fe5b7096c2f9d816ff5c448c5`
+- 当前 `0.9.0` 实测显示无需更新。
+- 模拟 `0.8.3` 实测发现新版本并正确选择 Windows x64 安装包。
 
 ## 当前边界
 
 - Chrome 侧栏尚需重新加载扩展后进行视觉检查。
-- 仓库尚未发布 `v0.9.0` Release，因此当前页面应显示“尚未发布”。
-- `0.9.0` Windows 和 Mac 安装包尚未构建和上传。
+- Windows 安装仍需真实 Windows 10/11 x64 验证。
