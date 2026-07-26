@@ -56,8 +56,12 @@ function findPackage(patterns) {
       && name.includes(`v${versionConfig.productVersion}`)
       && patterns.some((pattern) => name.toLowerCase().includes(pattern))
     )
-    .sort()
-    .reverse();
+    .sort((left, right) => {
+      const leftReleaseName = left.startsWith("tianyuan-workbench-") ? 1 : 0;
+      const rightReleaseName = right.startsWith("tianyuan-workbench-") ? 1 : 0;
+      if (leftReleaseName !== rightReleaseName) return rightReleaseName - leftReleaseName;
+      return right.localeCompare(left);
+    });
   if (!candidates.length) return null;
   const fileName = candidates[0];
   const targetPath = path.join(distRoot, fileName);
@@ -68,14 +72,32 @@ function findPackage(patterns) {
   };
 }
 
+function releaseAsset(source, key) {
+  if (!source) return null;
+  const fileName = `tianyuan-workbench-v${versionConfig.productVersion}-${key}.zip`;
+  const targetPath = path.join(distRoot, fileName);
+  const sourcePath = path.join(distRoot, source.fileName);
+  if (path.resolve(sourcePath) !== path.resolve(targetPath)) {
+    fs.copyFileSync(sourcePath, targetPath);
+  }
+  const digest = sha256(targetPath);
+  fs.writeFileSync(path.join(distRoot, `${fileName}.sha256`), `${digest}  ${fileName}\n`);
+  return {
+    fileName,
+    sha256: digest,
+    size: fs.statSync(targetPath).size,
+  };
+}
+
 const assets = {};
-const windows = findPackage(["windows-x64"]);
-const macos = findPackage(["macos-arm64", "macos-apple"]);
+const windows = releaseAsset(findPackage(["windows-x64"]), "windows-x64");
+const macos = releaseAsset(findPackage(["macos-arm64", "macos-apple"]), "macos-arm64");
 if (windows) assets["windows-x64"] = windows;
 if (macos) assets["macos-arm64"] = macos;
 
 const payload = {
   schemaVersion: 1,
+  repository: versionConfig.repository,
   productVersion: versionConfig.productVersion,
   chromeVersion: versionConfig.chromeVersion,
   channel: versionConfig.channel,

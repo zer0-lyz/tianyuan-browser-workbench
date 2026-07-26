@@ -51,6 +51,7 @@ assert.equal(quotedConstant(nativeHost, "CONNECTOR_PROTOCOL_VERSION"), quotedCon
 assert.equal(manifest.version, versionConfig.chromeVersion);
 assert.equal(manifest.version_name, versionConfig.versionName);
 assert.equal(versionConfig.productVersion, "0.9.0");
+assert.equal(versionConfig.repository, "zer0-lyz/tianyuan-browser-workbench-releases");
 
 const installerPluginVersion = quotedConstant(installer, "CONNECTOR_VERSION");
 assert.ok(installerPluginVersion);
@@ -90,6 +91,7 @@ assert.equal(sidepanel.includes("maybeAutoCheckUpdates"), true);
 assert.equal(nativeHost.includes('message?.action === "check_github_update"'), true);
 assert.equal(updateChecker.includes("api.github.com"), true);
 assert.equal(updateChecker.includes("DEFAULT_REPOSITORY"), true);
+assert.equal(updateChecker.includes("tianyuan-browser-workbench-releases"), true);
 assert.equal(updateChecker.includes("tokenUsed: false"), true);
 assert.equal(installer.includes('copyFileAtomic(path.join(repoRoot, "native-helper", "update_checker.js")'), true);
 assert.equal(installer.includes('entry.name === ".DS_Store"'), true);
