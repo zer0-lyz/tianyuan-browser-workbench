@@ -1,6 +1,34 @@
 # 天源浏览器工作台项目长期记忆
 
-更新时间：2026-07-24 00:18:00 CST
+更新时间：2026-07-26 CST
+
+## 2026-07-26 Windows Connector 升级修复
+
+- Windows 实机从旧版升级时出现 `CONNECTOR_VERSION_MISMATCH` 和 `CONNECTOR_START_TIMEOUT`。
+- 用户报告封面写 `2026-07-27`，晚于当前日期 `2026-07-26`；按测试机时钟提前一天记录，不作为发布时间。
+- Native Host 必须同时支持 SEA 独立 EXE 和 Node 脚本两种自启动方式。
+- SEA EXE 启动 Connector 时只传 `--connector-bridge`；Node 脚本模式必须传 `native_host.js --connector-bridge`。
+- Windows `.cmd`、`.bat` CLI 包装器通过固定 PowerShell 包装执行，参数使用 Base64 JSON 环境变量传递；禁止使用 `shell:true`。
+- 运行配置兼容 `tycpvBin/pythonBin/printSkillsDir` 和旧 `cli/python/printSkills`。
+- Windows 升级必须先确认并停止旧 Connector，再暂存和原子替换扩展、Native Helper；失败时回滚。
+- 升级必须保留 Agent 来源、凭据引用和 Connector 绑定。
+- 启动前必须核对扩展、Native Helper 和 Connector 的版本及 `runtimeBuildId`。
+- 修复开发版为 `0.12.1`，构建编号 `2026072605`。
+- Windows 测试包 SHA-256 为 `171cba0c09829f2b06a27365ec8ec6cdf7c61181d142a06524315557a15d3661`，当前标记 `source_dirty=true`，复测前不发布。
+
+## 2026-07-26 私有反馈模块
+
+- 扩展新增第 10 个功能模块“反馈”，独立位于 `extension/src/modules/feedback/`。
+- 反馈模块随正式版本 `0.12.1` 发布，构建编号 `2026072605`。
+- 反馈草稿仅保存在扩展本机存储；服务未配置时只允许复制，不假装自动提交成功。
+- 用户提交前必须确认不包含客户名称、项目编号、文件路径、token、Cookie、Authorization、密码或验证码。
+- 插件安全诊断只允许版本、构建编号、运行指纹、系统、架构、Connector/MCP/CLI 状态、模块路由和采集时间。
+- 不采集当前页面 URL、页面正文、项目 ID、公司 ID、科目、附件或文件路径。
+- 自动同步采用私有 `/api/feedback` 服务加 GitHub App，不允许在扩展中保存 GitHub PAT、App 私钥或安装 token。
+- 私有反馈仓库已创建：`zer0-lyz/tianyuan-browser-workbench-feedback`，Issues 已启用。
+- 私有仓库标签为 `feedback`、`feature`、`configuration`、`bug`、`experience`、`needs-triage`。
+- 服务端源码位于 `feedback-service/`，包含字段白名单、大小限制、固定来源 CORS、匿名限流、敏感信息脱敏、反馈编号和 GitHub App Issue Client。
+- 当前尚未部署 HTTPS 服务、创建 GitHub App 和完成真实端到端提交；`extension/feedback.json` 必须保持 `deliveryMode: "copy"`，直到部署完成。
 
 ## 项目定位
 

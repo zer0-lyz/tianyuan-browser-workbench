@@ -5,8 +5,13 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="$(node -p "require(process.argv[1]).productVersion" "$ROOT_DIR/extension/version.json")"
 CHROME_VERSION="$(node -p "require(process.argv[1]).chromeVersion" "$ROOT_DIR/extension/version.json")"
 BUILD_NUMBER="$(node -p "require(process.argv[1]).buildNumber" "$ROOT_DIR/extension/version.json")"
+RELEASE_CHANNEL="$(node -p "require(process.argv[1]).channel" "$ROOT_DIR/extension/version.json")"
 RELEASE_DATE="${RELEASE_DATE:-$(TZ=Asia/Shanghai date +%Y%m%d)}"
-PACKAGE_NAME="天源浏览器工作台-v${VERSION}-Windows-x64-测试版"
+PACKAGE_SUFFIX=""
+if [[ "$RELEASE_CHANNEL" != "stable" ]]; then
+  PACKAGE_SUFFIX="-测试版"
+fi
+PACKAGE_NAME="天源浏览器工作台-v${VERSION}-Windows-x64${PACKAGE_SUFFIX}"
 WORKBENCH_ROOT="${TIANYUAN_WORKBENCH_ROOT:-$HOME/.tianyuan-workbench}"
 BUILD_BASE="${TIANYUAN_RELEASE_BUILD_ROOT:-$WORKBENCH_ROOT/release-builds}"
 BUILD_ROOT="$BUILD_BASE/${PACKAGE_NAME}-$(date +%s)"
@@ -33,6 +38,11 @@ PYTHON_URL="https://www.python.org/ftp/python/${PYTHON_VERSION}/python-${PYTHON_
 
 POSTJECT_VERSION="1.0.0-alpha.6"
 POSTJECT_BIN="$POSTJECT_DIR/node_modules/.bin/postject"
+SOURCE_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+SOURCE_DIRTY=false
+if [[ -n "$(git -C "$ROOT_DIR" status --porcelain)" ]]; then
+  SOURCE_DIRTY=true
+fi
 
 RUNTIME_BUILD_ID="$(node - "$ROOT_DIR" <<'NODE'
 const fs = require("node:fs");
@@ -151,6 +161,7 @@ cp "$WINDOWS_NODE" "$STAGE/native-helper/native_host.exe"
   --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
 cp "$ROOT_DIR/native-helper/native_host.js" "$STAGE/native-helper/native_host.js"
 cp "$ROOT_DIR/native-helper/connector_bridge.js" "$STAGE/native-helper/connector_bridge.js"
+cp "$ROOT_DIR/native-helper/process_launcher.js" "$STAGE/native-helper/process_launcher.js"
 cp "$ROOT_DIR/native-helper/update_checker.js" "$STAGE/native-helper/update_checker.js"
 cp "$ROOT_DIR/native-helper/platform/"*.js "$STAGE/native-helper/platform/"
 cat > "$STAGE/native-helper/runtime-compat.json" <<EOF
@@ -196,10 +207,11 @@ cat > "$STAGE/VERSION.txt" <<EOF
 name=天源浏览器工作台
 version=$VERSION
 platform=Windows-x64
-release_channel=test
+release_channel=$RELEASE_CHANNEL
 build_number=$BUILD_NUMBER
 build_date=$RELEASE_DATE
-git_commit=$(git -C "$ROOT_DIR" rev-parse HEAD)
+git_commit=$SOURCE_COMMIT
+source_dirty=$SOURCE_DIRTY
 runtime_build_id=$RUNTIME_BUILD_ID
 extension_id=lkflndcnklpeaejohaacoaolnmhgigoc
 node_version=$NODE_VERSION

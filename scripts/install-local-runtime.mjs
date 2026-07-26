@@ -372,12 +372,16 @@ function main() {
       "src/modules/updates/module.js",
       "src/modules/updates/template.js",
       "src/modules/updates/styles.css",
+      "feedback.json",
+      "src/modules/feedback/module.js",
+      "src/modules/feedback/template.js",
+      "src/modules/feedback/styles.css",
     ],
   );
   copyDir(
     path.join(repoRoot, "native-helper"),
     path.join(runtimeProjectRoot, "native-helper"),
-    ["native_host.js", "connector_bridge.js", "update_checker.js"],
+    ["native_host.js", "connector_bridge.js", "process_launcher.js", "update_checker.js"],
   );
   copyDir(path.join(repoRoot, "skills"), path.join(runtimeProjectRoot, "skills"));
   copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), path.join(runtimeProjectRoot, "plugins", "tianyuan-browser-connector"));
@@ -389,6 +393,7 @@ function main() {
 
   copyFileAtomic(path.join(repoRoot, "native-helper", "native_host.js"), path.join(nativeRuntimeRoot, "native_host.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "connector_bridge.js"), path.join(nativeRuntimeRoot, "connector_bridge.js"));
+  copyFileAtomic(path.join(repoRoot, "native-helper", "process_launcher.js"), path.join(nativeRuntimeRoot, "process_launcher.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "update_checker.js"), path.join(nativeRuntimeRoot, "update_checker.js"));
   copyDir(
     path.join(repoRoot, "native-helper", "platform"),

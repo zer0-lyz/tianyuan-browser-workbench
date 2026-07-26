@@ -1,17 +1,18 @@
 {
   "schemaVersion": 1,
-  "productVersion": "0.11.0",
-  "chromeVersion": "0.11.0",
-  "versionName": "0.11.0",
-  "channel": "development",
-  "buildNumber": 2026072603,
+  "productVersion": "0.12.1",
+  "chromeVersion": "0.12.1",
+  "versionName": "0.12.1",
+  "channel": "stable",
+  "buildNumber": 2026072605,
   "repository": "zer0-lyz/tianyuan-browser-workbench-releases",
   "bridgeProtocol": "connector-agent-binding-v3",
   "minimumSupportedVersion": "0.8.3",
   "mandatory": false,
   "releaseNotes": [
-    "建立浏览器扩展模块注册中心、生命周期和功能开关",
-    "版本更新已迁移为拥有独立界面、状态、存储和测试的功能模块",
-    "其余八个功能通过兼容模块契约接入，后续可逐个安全迁移"
+    "新增独立反馈模块，支持本机草稿、隐私检查、安全诊断和复制反馈",
+    "修复 Windows Node 脚本模式下 Connector 子进程缺少脚本路径的问题",
+    "安全兼容 Windows cmd/bat 形式的天源 CLI，不启用 shell:true",
+    "Windows 升级安装改为停旧 Connector、原子替换、契约校验和失败回滚"
   ]
 }

@@ -24,6 +24,10 @@ $LegacyExtensionId = "fdbllnmaaklkcmoacoapbibiggnndkfpa"
 $StartedAt = Get-Date
 $ChecksumIndex = $null
 $CurrentStep = "启动"
+$ExtensionBackupPath = $null
+$NativeHelperBackupPath = $null
+$PackageVersion = "未知"
+$PackageBuildNumber = "未知"
 
 function Write-Step([string]$Message) {
   $script:CurrentStep = $Message
@@ -44,6 +48,97 @@ function Copy-DirectoryContents([string]$Source, [string]$Destination) {
   }
   New-Item -ItemType Directory -Path $Destination -Force | Out-Null
   Get-ChildItem -LiteralPath $Source -Force | Copy-Item -Destination $Destination -Recurse -Force
+}
+
+function Install-DirectoryAtomic(
+  [string]$Source,
+  [string]$Destination,
+  [string[]]$PreserveRelativePaths = @()
+) {
+  if (-not (Test-Path -LiteralPath $Source)) {
+    throw "安装源目录不存在：$Source"
+  }
+  $Parent = Split-Path -Parent $Destination
+  New-Item -ItemType Directory -Path $Parent -Force | Out-Null
+  $Suffix = "$PID-$([Guid]::NewGuid().ToString('N').Substring(0, 8))"
+  $Staging = "$Destination.staging-$Suffix"
+  $Backup = "$Destination.previous"
+  Remove-Item -LiteralPath $Staging -Recurse -Force -ErrorAction SilentlyContinue
+  New-Item -ItemType Directory -Path $Staging -Force | Out-Null
+  Get-ChildItem -LiteralPath $Source -Force |
+    Copy-Item -Destination $Staging -Recurse -Force
+
+  foreach ($RelativePath in $PreserveRelativePaths) {
+    $Existing = Join-Path $Destination $RelativePath
+    if (-not (Test-Path -LiteralPath $Existing)) {
+      continue
+    }
+    $PreservedTarget = Join-Path $Staging $RelativePath
+    New-Item -ItemType Directory -Path (Split-Path -Parent $PreservedTarget) -Force | Out-Null
+    Copy-Item -LiteralPath $Existing -Destination $PreservedTarget -Recurse -Force
+  }
+
+  Remove-Item -LiteralPath $Backup -Recurse -Force -ErrorAction SilentlyContinue
+  try {
+    if (Test-Path -LiteralPath $Destination) {
+      Move-Item -LiteralPath $Destination -Destination $Backup
+    }
+    Move-Item -LiteralPath $Staging -Destination $Destination
+    return $(if (Test-Path -LiteralPath $Backup) { $Backup } else { $null })
+  }
+  catch {
+    Remove-Item -LiteralPath $Staging -Recurse -Force -ErrorAction SilentlyContinue
+    if (-not (Test-Path -LiteralPath $Destination) -and (Test-Path -LiteralPath $Backup)) {
+      Move-Item -LiteralPath $Backup -Destination $Destination
+    }
+    throw
+  }
+}
+
+function Restore-PreviousDirectory([string]$Destination, [string]$Backup) {
+  if (-not $Backup -or -not (Test-Path -LiteralPath $Backup)) {
+    return
+  }
+  Remove-Item -LiteralPath $Destination -Recurse -Force -ErrorAction SilentlyContinue
+  Move-Item -LiteralPath $Backup -Destination $Destination
+}
+
+function Stop-ExistingConnector {
+  try {
+    $Health = Invoke-RestMethod -Uri "http://127.0.0.1:40415/health" -TimeoutSec 2
+  }
+  catch {
+    return
+  }
+  if (-not $Health.ok) {
+    return
+  }
+  if ($Health.service -ne "tianyuan-connector-bridge") {
+    throw "端口 40415 被其他程序占用，不能安全升级 Connector。"
+  }
+  if ($Health.pid) {
+    Stop-Process -Id ([int]$Health.pid) -Force -ErrorAction SilentlyContinue
+  } else {
+    $ListenerLine = netstat.exe -ano -p tcp |
+      Select-String -Pattern "127\.0\.0\.1:40415\s+\S+\s+LISTENING\s+(\d+)" |
+      Select-Object -First 1
+    if ($ListenerLine -and $ListenerLine.Matches[0].Groups[1].Value) {
+      Stop-Process -Id ([int]$ListenerLine.Matches[0].Groups[1].Value) -Force -ErrorAction SilentlyContinue
+    }
+  }
+  for ($Attempt = 0; $Attempt -lt 30; $Attempt += 1) {
+    Start-Sleep -Milliseconds 100
+    try {
+      $StillRunning = Invoke-RestMethod -Uri "http://127.0.0.1:40415/health" -TimeoutSec 1
+      if (-not $StillRunning.ok) {
+        return
+      }
+    }
+    catch {
+      return
+    }
+  }
+  throw "旧 Connector 未能在升级前停止。"
 }
 
 function Get-PackageChecksumIndex {
@@ -307,6 +402,9 @@ try {
   Test-PackagePrefix "extension/"
   Test-PackagePrefix "native-helper/"
   Test-PackagePrefix "skills/"
+  $PackageVersionConfig = Get-Content -LiteralPath (Join-Path $RootDir "extension\version.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+  $PackageVersion = [string]$PackageVersionConfig.productVersion
+  $PackageBuildNumber = [string]$PackageVersionConfig.buildNumber
   Write-Host "核心文件校验通过。备用依赖将在实际使用前校验。"
 
   Write-Step "2/7 安装或检查天源 CLI"
@@ -388,13 +486,25 @@ try {
   }
 
   Write-Step "5/7 安装扩展、Native Host 和打印格式脚本"
-  Copy-DirectoryContents (Join-Path $RootDir "extension") $ExtensionDir
-  Copy-DirectoryContents (Join-Path $RootDir "native-helper") $NativeHelperDir
+  Stop-ExistingConnector
+  $ExtensionBackupPath = Install-DirectoryAtomic (Join-Path $RootDir "extension") $ExtensionDir
+  $NativeHelperBackupPath = Install-DirectoryAtomic `
+    (Join-Path $RootDir "native-helper") `
+    $NativeHelperDir `
+    @(
+      "agent-sources.json",
+      "agent-credentials.json",
+      "connector-bindings.json",
+      "native_host.log"
+    )
   Copy-DirectoryContents (Join-Path $RootDir "skills\appraisal-detail-print-format") (Join-Path $PrintSkillsDir "appraisal-detail-print-format")
   Copy-DirectoryContents (Join-Path $RootDir "skills\appraisal-declaration-print-format") (Join-Path $PrintSkillsDir "appraisal-declaration-print-format")
 
   if (-not (Test-Path -LiteralPath $NativeHostExe)) {
     throw "Native Host 可执行文件没有安装成功。"
+  }
+  if (Test-Path -LiteralPath (Join-Path $NativeHelperDir "native-helper")) {
+    throw "Native Helper 目录发生异常嵌套。"
   }
 
   $RuntimeConfig = [ordered]@{
@@ -408,6 +518,14 @@ try {
     ($RuntimeConfig | ConvertTo-Json -Depth 3),
     [Text.UTF8Encoding]::new($false)
   )
+  $AgentSourcesPath = Join-Path $NativeHelperDir "agent-sources.json"
+  if (-not (Test-Path -LiteralPath $AgentSourcesPath)) {
+    [IO.File]::WriteAllText(
+      $AgentSourcesPath,
+      (@{ version = 1; sources = @() } | ConvertTo-Json -Depth 3),
+      [Text.UTF8Encoding]::new($false)
+    )
+  }
 
   Write-Step "6/7 注册 Chrome Native Messaging"
   $Manifest = [ordered]@{
@@ -428,7 +546,20 @@ try {
   }
 
   Write-Step "7/7 执行环境检查"
+  $InstalledManifest = Get-Content -LiteralPath (Join-Path $ExtensionDir "manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+  $ExtensionContract = Get-Content -LiteralPath (Join-Path $ExtensionDir "runtime-compat.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+  $NativeContract = Get-Content -LiteralPath (Join-Path $NativeHelperDir "runtime-compat.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+  if ($InstalledManifest.version -ne $ExtensionContract.extensionVersion) {
+    throw "扩展版本与扩展运行契约不一致。"
+  }
+  if ($ExtensionContract.extensionVersion -ne $NativeContract.extensionVersion) {
+    throw "扩展与 Native Helper 版本不一致。"
+  }
+  if (-not $ExtensionContract.runtimeBuildId -or $ExtensionContract.runtimeBuildId -ne $NativeContract.runtimeBuildId) {
+    throw "扩展与 Native Helper 运行指纹不一致。"
+  }
   $OpenpyxlVersion = (& $PythonExe -c "import openpyxl; print(openpyxl.__version__)").Trim()
+  $env:TIANYUAN_RUNTIME_CONFIG_PATH = $RuntimeConfigPath
   $SelfTestJson = (& $NativeHostExe --self-test 2>&1 | Out-String).Trim()
   if ($LASTEXITCODE -ne 0) {
     throw "Native Host 自检失败：$SelfTestJson"
@@ -445,6 +576,12 @@ try {
   if (-not $Connector.ok -or -not $Connector.connector.ok) {
     throw "Connector 自动启动未通过：$ConnectorJson"
   }
+  if ($Connector.connector.runtimeCompatibility.extensionVersion -ne $InstalledManifest.version) {
+    throw "Connector 启动版本与已安装扩展不一致。"
+  }
+  if ($Connector.connector.runtimeCompatibility.runtimeBuildId -ne $ExtensionContract.runtimeBuildId) {
+    throw "Connector 启动指纹与已安装扩展不一致。"
+  }
 
   $InstallMode = if (-not $UsedBundledCli -and -not $UsedBundledPython -and -not $InstalledPrintDependencies) {
     "快速安装（复用已有 CLI、Python 和打印依赖）"
@@ -460,6 +597,9 @@ try {
     "安装时间：$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
     "安装模式：$InstallMode"
     "安装耗时：$ElapsedSeconds 秒"
+    "产品版本：$PackageVersion"
+    "构建编号：$PackageBuildNumber"
+    "运行指纹：$($ExtensionContract.runtimeBuildId)"
     "扩展目录：$ExtensionDir"
     "扩展 ID：$ExtensionId"
     "Native Host：$NativeHostExe"
@@ -474,6 +614,13 @@ try {
     "Connector：$ConnectorJson"
     "安全：安装程序未写入 MCP token、Cookie、Authorization、密码或验证码。"
   ) | Set-Content -LiteralPath $ReportPath -Encoding UTF8
+
+  if ($ExtensionBackupPath) {
+    Remove-Item -LiteralPath $ExtensionBackupPath -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  if ($NativeHelperBackupPath) {
+    Remove-Item -LiteralPath $NativeHelperBackupPath -Recurse -Force -ErrorAction SilentlyContinue
+  }
 
   Write-Host ""
   Write-Host "安装完成。" -ForegroundColor Green
@@ -491,6 +638,15 @@ try {
   exit 0
 }
 catch {
+  $OriginalError = $_
+  if ($NativeHelperBackupPath -or $ExtensionBackupPath) {
+    try { Stop-ExistingConnector } catch {}
+    Restore-PreviousDirectory $NativeHelperDir $NativeHelperBackupPath
+    Restore-PreviousDirectory $ExtensionDir $ExtensionBackupPath
+    if (Test-Path -LiteralPath $NativeHostExe) {
+      try { & $NativeHostExe --start-connector *> $null } catch {}
+    }
+  }
   $ReportPath = Join-Path $InstallRoot "安装检查结果.txt"
   New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
   @(
@@ -498,11 +654,17 @@ catch {
     "安装状态：失败"
     "失败时间：$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
     "失败阶段：$CurrentStep"
-    "错误：$(Protect-Message $_.Exception.Message)"
+    "错误：$(Protect-Message $OriginalError.Exception.Message)"
+    "包内产品版本：$PackageVersion"
+    "包内构建编号：$PackageBuildNumber"
+    "扩展目录存在：$(Test-Path -LiteralPath $ExtensionDir)"
+    "Native Host 存在：$(Test-Path -LiteralPath $NativeHostExe)"
+    "运行配置存在：$(Test-Path -LiteralPath $RuntimeConfigPath)"
+    "Native Messaging 清单存在：$(Test-Path -LiteralPath $ManifestPath)"
     "安全：安装失败报告不记录 MCP token、Cookie、Authorization、密码或验证码。"
   ) | Set-Content -LiteralPath $ReportPath -Encoding UTF8
   Write-Host ""
-  Write-Host "安装失败：$(Protect-Message $_.Exception.Message)" -ForegroundColor Red
+  Write-Host "安装失败：$(Protect-Message $OriginalError.Exception.Message)" -ForegroundColor Red
   Write-Host "安装检查结果：$ReportPath"
   exit 1
 }

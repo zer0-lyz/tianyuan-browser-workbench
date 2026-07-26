@@ -1,0 +1,22 @@
+[data-module-id="feedback"] .feedback-form,
+[data-module-id="feedback"] .feedback-security {
+  display: grid;
+  gap: 11px;
+}
+
+[data-module-id="feedback"] textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 88px;
+  font: inherit;
+}
+
+[data-module-id="feedback"] .feedback-privacy {
+  align-items: start;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 10px;
+}
+
+[data-module-id="feedback"] #feedbackChannelStatus {
+  overflow-wrap: anywhere;
+}
