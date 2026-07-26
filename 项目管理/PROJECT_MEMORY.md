@@ -266,7 +266,8 @@
 
 - `extension/version.json` 是产品版本的单一配置源；`manifest.json` 的 `version` 和 `version_name` 必须与之匹配。
 - 当前开发版本为 `0.9.0`，构建编号为 `2026072601`，发布通道为 `stable`。
-- GitHub Releases 是当前唯一在线更新源，固定仓库为 `zer0-lyz/tianyuan-browser-workbench`。
+- GitHub Releases 是当前唯一在线更新源，固定公开发行仓库为 `zer0-lyz/tianyuan-browser-workbench-releases`。
+- 私有仓库 `zer0-lyz/tianyuan-browser-workbench` 只保存源码，不作为匿名更新源，也不保存重复 Release。
 - 更新检查由 Native Helper 访问公开 GitHub API，不使用、不传递、不保存 MCP token 或 GitHub token。
 - 自动检查间隔为 6 小时；检查失败不能阻断现有功能。
 - 更新判断顺序为产品 SemVer、构建编号、最低支持版本和 `runtimeBuildId`。
@@ -274,3 +275,4 @@
 - 第一阶段只检查、展示说明和打开 GitHub 安装包或发布页，不静默替换当前安装。
 - 下载地址必须是固定 GitHub HTTPS 地址，不能接受页面或远端清单传入任意协议和域名。
 - GitHub 尚无正式 Release 时，应显示“尚未发布”，不能误报连接失败或虚构最新版本。
+- 当前正式 Release 为 `v0.9.0`；公开更新仓库只保存安装包、SHA-256、更新清单和发行说明。

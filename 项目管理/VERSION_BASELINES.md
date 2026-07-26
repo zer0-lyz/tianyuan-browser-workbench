@@ -99,20 +99,23 @@ git reset --hard baseline-workbench-0.3.0-windows-test-r2-20260723
 - 批量清理核实程序和资料索引并保留核对情况；
 - Windows 快速安装与便携依赖回退。
 
-## 2026-07-26 GitHub 更新模块开发版
+## 2026-07-26 GitHub 更新模块正式版
 
 产品版本：`0.9.0`
 
 构建编号：`2026072601`
 
-当前状态：
+正式发行：
 
 - 已建立 `extension/version.json` 单一版本源；
 - 已实现 GitHub Releases 检查和 SemVer 比较；
 - 已实现九模块更新页面和顶部版本状态；
 - 已同步本机运行目录；
-- 尚未建立 Git 标签或 GitHub Release；
-- 尚未作为稳定回退基线固定。
+- 私有源码标签：`v0.9.0`；
+- 源码提交：`d0695d2f7e44e42a2e67bc243e4e4e1643f2c04b`；
+- 公开发行仓库：`zer0-lyz/tianyuan-browser-workbench-releases`；
+- 公开 Release：`v0.9.0`；
+- 运行指纹：`64b2cf6befaf748d38bd052da412171d3d781c6268188d3711e4a522251c07a2`。
 
 ## 2026-07-24 评估核实批量上传与本机运行基线
 
