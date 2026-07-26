@@ -1,0 +1,22 @@
+[data-module-id="updates"] .update-panel,
+[data-module-id="updates"] .update-notes-panel {
+  display: grid;
+  gap: 10px;
+}
+
+[data-module-id="updates"] .update-version-grid dd,
+[data-module-id="updates"] #updateAssetSha {
+  overflow-wrap: anywhere;
+}
+
+[data-module-id="updates"] .update-notes {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text);
+}
+
+[data-module-id="updates"] .update-notes li {
+  line-height: 1.45;
+}

@@ -1,3 +1,10 @@
+import { legacyFeatureModules } from "../app/legacy-feature-modules.js";
+import { EventBus } from "../core/event-bus.js";
+import { FeatureFlagService } from "../core/feature-flags.js";
+import { ModuleRegistry } from "../core/module-registry.js";
+import { createModuleStorageFactory } from "../core/module-storage.js";
+import { updatesModule } from "../modules/updates/module.js";
+
 const REQUEST_TYPE = "TIANYUAN_WORKBENCH_GET_CONTEXT_V2";
 const ACTION_REQUEST_TYPE = "TIANYUAN_WORKBENCH_RUN_ACTION_V2";
 const HELPER_BASE_URL = "http://127.0.0.1:8765";
@@ -9,8 +16,6 @@ const STORAGE_CONNECTOR_SESSION_KEY = "tianyuanWorkbenchConnectorSessionId";
 const STORAGE_MCP_TOKEN_KEY = "tianyuanWorkbenchMcpToken";
 const STORAGE_LAST_BATCH_RESULT_KEY = "tianyuanWorkbenchLastBatchResult";
 const STORAGE_LAST_EXPORT_RESULT_KEY = "tianyuanWorkbenchLastExportResult";
-const STORAGE_UPDATE_RESULT_KEY = "tianyuanWorkbenchUpdateResult";
-const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const COMPANY_HIERARCHY_CODE_KEYS = [
   "displayCode",
   "display_code",
@@ -59,8 +64,6 @@ const elements = {
   openConnectionsTop: document.getElementById("openConnectionsTop"),
   openConnectionsTopMcp: document.getElementById("openConnectionsTopMcp"),
   openConnectionsTopCli: document.getElementById("openConnectionsTopCli"),
-  openUpdatesTop: document.getElementById("openUpdatesTop"),
-  updateTopStatus: document.getElementById("updateTopStatus"),
   openBatchSave: document.getElementById("openBatchSave"),
   openBatchExit: document.getElementById("openBatchExit"),
   openBatchUpload: document.getElementById("openBatchUpload"),
@@ -69,7 +72,6 @@ const elements = {
   openExportDeclare: document.getElementById("openExportDeclare"),
   openFormatDetail: document.getElementById("openFormatDetail"),
   openFormatDeclaration: document.getElementById("openFormatDeclaration"),
-  openUpdates: document.getElementById("openUpdates"),
   backFromConnections: document.getElementById("backFromConnections"),
   backFromSave: document.getElementById("backFromSave"),
   backFromExit: document.getElementById("backFromExit"),
@@ -79,9 +81,7 @@ const elements = {
   backFromExportDeclare: document.getElementById("backFromExportDeclare"),
   backFromFormatDetail: document.getElementById("backFromFormatDetail"),
   backFromFormatDeclaration: document.getElementById("backFromFormatDeclaration"),
-  backFromUpdates: document.getElementById("backFromUpdates"),
   pageHome: document.getElementById("page-home"),
-  pageUpdates: document.getElementById("page-updates"),
   pageConnections: document.getElementById("page-connections"),
   pageBatchSave: document.getElementById("page-batch-save"),
   pageBatchExit: document.getElementById("page-batch-exit"),
@@ -91,23 +91,6 @@ const elements = {
   pageExportDeclare: document.getElementById("page-export-declare"),
   pageFormatDetail: document.getElementById("page-format-detail"),
   pageFormatDeclaration: document.getElementById("page-format-declaration"),
-  updateHeadline: document.getElementById("updateHeadline"),
-  updateDescription: document.getElementById("updateDescription"),
-  updateBadge: document.getElementById("updateBadge"),
-  updateCurrentVersion: document.getElementById("updateCurrentVersion"),
-  updateLatestVersion: document.getElementById("updateLatestVersion"),
-  updateChannel: document.getElementById("updateChannel"),
-  updateBuildNumber: document.getElementById("updateBuildNumber"),
-  updatePlatform: document.getElementById("updatePlatform"),
-  updateCheckedAt: document.getElementById("updateCheckedAt"),
-  updateFeedback: document.getElementById("updateFeedback"),
-  checkForUpdates: document.getElementById("checkForUpdates"),
-  downloadUpdate: document.getElementById("downloadUpdate"),
-  openReleasePage: document.getElementById("openReleasePage"),
-  updateNotes: document.getElementById("updateNotes"),
-  updateAssetName: document.getElementById("updateAssetName"),
-  updateAssetSize: document.getElementById("updateAssetSize"),
-  updateAssetSha: document.getElementById("updateAssetSha"),
   scopeSection: document.getElementById("scopeSection"),
   supportSection: document.getElementById("supportSection"),
   saveScopeMount: document.getElementById("saveScopeMount"),
@@ -336,10 +319,6 @@ let workbuddyCatalog = { projects: [], threads: [], updatedAt: null };
 let connectorAgentSources = [];
 let connectorBindingFormDirty = false;
 let connectorActionBusy = false;
-let updateChecking = false;
-let latestUpdateResult = null;
-let extensionVersionConfig = null;
-let extensionRuntimeContract = null;
 let confirmedSubjectCodes = null;
 let mcpSubjectListLoaded = false;
 let confirmedCompanyValues = null;
@@ -373,47 +352,37 @@ let batchCleanupState = {
   running: false,
   result: null,
 };
-const moduleScopeStates = {
-  "batch-save": null,
-  "batch-exit": null,
-  "batch-upload": null,
-  "batch-cleanup": null,
-  "export-detail": null,
-  "export-declare": null,
-  "format-detail": null,
-  "format-declaration": null,
-};
+const moduleScopeStates = Object.fromEntries(
+  legacyFeatureModules
+    .filter((module) => module.manifest.usesLegacyScope)
+    .map((module) => [module.manifest.route, null]),
+);
 const printTaskStates = {
   detail: { inputPaths: [] },
   declaration: { inputPaths: [] },
 };
 
-const ROUTE_LABELS = {
+const CORE_ROUTE_LABELS = {
   home: "首页",
   connections: "连接配置",
-  "batch-save": "批量保存底稿",
-  "batch-exit": "批量退出编辑",
-  "batch-upload": "批量上传文件",
-  "batch-cleanup": "批量清理附件",
-  "export-detail": "导出明细表",
-  "export-declare": "导出申报表",
-  "format-detail": "明细表打印格式",
-  "format-declaration": "申报表打印格式",
-  updates: "版本更新",
 };
 
 const extensionManifest = chrome.runtime.getManifest();
 const extensionRuntimeVersion = extensionManifest.version;
-const extensionVersionConfigPromise = fetch(chrome.runtime.getURL("version.json"), {
-  cache: "no-store",
-})
-  .then((response) => response.ok ? response.json() : null)
-  .catch(() => null);
 const extensionRuntimeContractPromise = fetch(chrome.runtime.getURL("runtime-compat.json"), {
   cache: "no-store",
 })
   .then((response) => response.ok ? response.json() : null)
   .catch(() => null);
+const eventBus = new EventBus();
+const moduleRegistry = new ModuleRegistry({
+  featureFlags: new FeatureFlagService(chrome),
+  eventBus,
+  storageFactory: createModuleStorageFactory(chrome),
+  documentRef: document,
+});
+for (const module of legacyFeatureModules) moduleRegistry.register(module);
+moduleRegistry.register(updatesModule);
 elements.extensionId.textContent = chrome.runtime.id;
 
 function on(element, eventName, handler) {
@@ -487,7 +456,6 @@ function setBusy(nextBusy) {
     elements.openConnectionsTop,
     elements.openConnectionsTopMcp,
     elements.openConnectionsTopCli,
-    elements.openUpdatesTop,
     elements.openBatchSave,
     elements.openBatchExit,
     elements.openBatchUpload,
@@ -496,7 +464,6 @@ function setBusy(nextBusy) {
     elements.openExportDeclare,
     elements.openFormatDetail,
     elements.openFormatDeclaration,
-    elements.openUpdates,
     elements.backFromConnections,
     elements.backFromSave,
     elements.backFromExit,
@@ -506,7 +473,6 @@ function setBusy(nextBusy) {
     elements.backFromExportDeclare,
     elements.backFromFormatDetail,
     elements.backFromFormatDeclaration,
-    elements.backFromUpdates,
     elements.refresh,
     elements.copyJson,
     elements.runBatchSave,
@@ -597,25 +563,24 @@ function clearTaskLog() {
   }
 }
 
+function routeExists(route) {
+  return Boolean(CORE_ROUTE_LABELS[route] || moduleRegistry.routeExists(route));
+}
+
+function routeLabel(route) {
+  return CORE_ROUTE_LABELS[route] || moduleRegistry.routeLabel(route) || "";
+}
+
 function isModuleRoute(route = currentRoute) {
-  return [
-    "batch-save",
-    "batch-exit",
-    "batch-upload",
-    "batch-cleanup",
-    "export-detail",
-    "export-declare",
-    "format-detail",
-    "format-declaration",
-  ].includes(route);
+  return Boolean(moduleRegistry.getByRoute(route)?.manifest?.usesLegacyScope);
 }
 
 function routeNeedsSubjects(route = currentRoute) {
-  return route === "batch-save" || route === "batch-exit";
+  return Boolean(moduleRegistry.getByRoute(route)?.manifest?.scope?.subjects);
 }
 
 function routeNeedsScope(route = currentRoute) {
-  return !["format-detail", "format-declaration", "batch-upload", "batch-cleanup"].includes(route);
+  return Boolean(moduleRegistry.getByRoute(route)?.manifest?.scope?.companies);
 }
 
 function syncSelectedItems() {
@@ -765,24 +730,13 @@ function restoreModuleState(route) {
 }
 
 function renderRoute(route) {
-  const safeRoute = ROUTE_LABELS[route] ? route : "home";
+  const safeRoute = routeExists(route) ? route : "home";
   currentRoute = safeRoute;
-  const pages = [
-    elements.pageHome,
-    elements.pageUpdates,
-    elements.pageConnections,
-    elements.pageBatchSave,
-    elements.pageBatchExit,
-    elements.pageBatchUpload,
-    elements.pageBatchCleanup,
-    elements.pageExportDetail,
-    elements.pageExportDeclare,
-    elements.pageFormatDetail,
-    elements.pageFormatDeclaration,
-  ];
+  const pages = document.querySelectorAll(".route-page");
   for (const page of pages) {
     page?.classList.toggle("hidden", page.dataset.route !== safeRoute);
   }
+  void moduleRegistry.activateRoute(safeRoute);
 
   elements.scopeSection?.classList.add("hidden");
   elements.supportSection?.classList.add("hidden");
@@ -790,30 +744,17 @@ function renderRoute(route) {
     if (safeRoute === "batch-upload" || safeRoute === "batch-cleanup") {
       if (safeRoute === "batch-upload") renderBatchUploadStep();
       else renderBatchCleanupStep();
-      elements.subtitle.textContent = ROUTE_LABELS[safeRoute];
+      elements.subtitle.textContent = routeLabel(safeRoute);
       updateHomePageState();
       return;
     }
-    const scopeMount = {
-      "batch-save": elements.saveScopeMount,
-      "batch-exit": elements.exitScopeMount,
-      "batch-upload": null,
-      "batch-cleanup": null,
-      "export-detail": elements.detailScopeMount,
-      "export-declare": elements.declareScopeMount,
-      "format-detail": null,
-      "format-declaration": null,
-    }[safeRoute];
-    const supportMount = {
-      "batch-save": elements.saveSupportMount,
-      "batch-exit": elements.exitSupportMount,
-      "batch-upload": null,
-      "batch-cleanup": null,
-      "export-detail": elements.detailSupportMount,
-      "export-declare": elements.declareSupportMount,
-      "format-detail": elements.detailPrintSupportMount,
-      "format-declaration": elements.declarationPrintSupportMount,
-    }[safeRoute];
+    const moduleManifest = moduleRegistry.getByRoute(safeRoute)?.manifest;
+    const scopeMount = moduleManifest?.mounts?.scope
+      ? document.getElementById(moduleManifest.mounts.scope)
+      : null;
+    const supportMount = moduleManifest?.mounts?.support
+      ? document.getElementById(moduleManifest.mounts.support)
+      : null;
     if (routeNeedsScope(safeRoute)) scopeMount?.appendChild(elements.scopeSection);
     supportMount?.appendChild(elements.supportSection);
     elements.scopeSection?.classList.toggle("hidden", !routeNeedsScope(safeRoute));
@@ -824,7 +765,7 @@ function renderRoute(route) {
     }
   }
 
-  elements.subtitle.textContent = ROUTE_LABELS[safeRoute];
+  elements.subtitle.textContent = routeLabel(safeRoute);
   updateHomePageState();
   if (safeRoute === "home" || safeRoute === "connections") {
     elements.json.textContent = latestPayload ? JSON.stringify(latestPayload, null, 2) : "暂无数据";
@@ -834,10 +775,6 @@ function renderRoute(route) {
     window.setTimeout(() => {
       if (!busy) loadConnectorCatalog();
     }, 0);
-  }
-  if (safeRoute === "updates") {
-    renderUpdateResult(latestUpdateResult);
-    window.setTimeout(() => maybeAutoCheckUpdates(), 0);
   }
 }
 
@@ -859,7 +796,7 @@ function maybeAutoLoadExportCompanies() {
 }
 
 function navigateToRoute(route) {
-  if (!ROUTE_LABELS[route]) return;
+  if (!routeExists(route)) return;
   if (isModuleRoute(currentRoute)) captureModuleState(currentRoute);
   const hash = `#${route}`;
   if (window.location.hash === hash) {
@@ -3513,206 +3450,6 @@ function setConnection(element, text, kind = "idle") {
   element.textContent = text;
 }
 
-function formatUpdateBytes(value) {
-  const bytes = Number(value || 0);
-  if (!bytes) return "-";
-  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatUpdateTime(value) {
-  if (!value) return "-";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString("zh-CN", { hour12: false });
-}
-
-function safeGithubUrl(value) {
-  try {
-    const url = new URL(String(value || ""));
-    return url.protocol === "https:" && url.hostname === "github.com" ? url.href : "";
-  } catch {
-    return "";
-  }
-}
-
-async function loadExtensionVersionContext() {
-  if (!extensionVersionConfig) {
-    extensionVersionConfig = await extensionVersionConfigPromise || {
-      productVersion: extensionManifest.version_name || extensionRuntimeVersion,
-      chromeVersion: extensionRuntimeVersion,
-      channel: "stable",
-      buildNumber: 0,
-      bridgeProtocol: EXPECTED_CONNECTOR_PROTOCOL_VERSION,
-    };
-  }
-  if (!extensionRuntimeContract) {
-    extensionRuntimeContract = await extensionRuntimeContractPromise || null;
-  }
-  return {
-    config: extensionVersionConfig,
-    contract: extensionRuntimeContract,
-  };
-}
-
-function renderUpdateNotes(notes) {
-  if (!elements.updateNotes) return;
-  elements.updateNotes.innerHTML = "";
-  const values = Array.isArray(notes) && notes.length ? notes : ["暂无更新说明"];
-  for (const value of values) {
-    const item = document.createElement("li");
-    item.textContent = String(value);
-    elements.updateNotes.appendChild(item);
-  }
-}
-
-function renderUpdateResult(result = latestUpdateResult) {
-  const config = extensionVersionConfig || {};
-  const currentVersion = config.productVersion || extensionManifest.version_name || extensionRuntimeVersion;
-  const buildNumber = Number(config.buildNumber || 0);
-  elements.updateCurrentVersion.textContent = `v${currentVersion}`;
-  elements.updateBuildNumber.textContent = buildNumber ? String(buildNumber) : "-";
-  elements.updateChannel.textContent = String(result?.channel || config.channel || "stable");
-  elements.updateLatestVersion.textContent = result?.latestVersion ? `v${result.latestVersion}` : "-";
-  elements.updatePlatform.textContent = result?.platform || "-";
-  elements.updateCheckedAt.textContent = formatUpdateTime(result?.checkedAt);
-  elements.updateAssetName.textContent = result?.asset?.name || "-";
-  elements.updateAssetSize.textContent = formatUpdateBytes(result?.asset?.size);
-  elements.updateAssetSha.textContent = result?.asset?.sha256 || (
-    result?.checksumAsset?.url ? "请使用同名 .sha256 文件校验" : "-"
-  );
-  renderUpdateNotes(result?.notes);
-
-  const assetUrl = safeGithubUrl(result?.asset?.url);
-  const releaseUrl = safeGithubUrl(result?.releaseUrl);
-  elements.downloadUpdate.disabled = !assetUrl;
-  elements.downloadUpdate.dataset.url = assetUrl;
-  elements.openReleasePage.disabled = !releaseUrl;
-  elements.openReleasePage.dataset.url = releaseUrl;
-
-  if (!result) {
-    elements.updateHeadline.textContent = `天源浏览器工作台 v${currentVersion}`;
-    elements.updateDescription.textContent = "更新检查不使用 MCP token，也不会修改当前安装。";
-    elements.updateBadge.textContent = "未检查";
-    elements.updateFeedback.textContent = "尚未检查 GitHub Release";
-    elements.updateFeedback.dataset.kind = "";
-    setConnection(elements.updateTopStatus, `v${currentVersion}`, "idle");
-    return;
-  }
-  if (!result.ok) {
-    elements.updateHeadline.textContent = "暂时无法检查更新";
-    elements.updateDescription.textContent = "当前版本可以继续使用，稍后可重新检查。";
-    elements.updateBadge.textContent = "检查失败";
-    elements.updateFeedback.textContent = result.reason || "GitHub 更新检查失败";
-    elements.updateFeedback.dataset.kind = "error";
-    setConnection(elements.updateTopStatus, "检查失败", "warn");
-    return;
-  }
-  if (!result.releasePublished) {
-    elements.updateHeadline.textContent = `当前版本 v${currentVersion}`;
-    elements.updateDescription.textContent = "GitHub 尚未发布正式 Release，当前安装保持不变。";
-    elements.updateBadge.textContent = "尚未发布";
-    elements.updateFeedback.textContent = "仓库目前没有可供更新的正式 GitHub Release";
-    elements.updateFeedback.dataset.kind = "";
-    setConnection(elements.updateTopStatus, `v${currentVersion}`, "ok");
-    return;
-  }
-  if (result.repairRequired) {
-    elements.updateHeadline.textContent = "检测到组件版本不一致";
-    elements.updateDescription.textContent = "产品版本相同，但运行指纹不同，需要重新下载安装当前版本。";
-    elements.updateBadge.textContent = "需要修复";
-    elements.updateFeedback.textContent = assetUrl ? "请下载并重新安装当前正式版本" : "请打开发布页重新下载安装";
-    elements.updateFeedback.dataset.kind = "error";
-    setConnection(elements.updateTopStatus, "需修复", "error");
-    return;
-  }
-  if (result.updateAvailable) {
-    elements.updateHeadline.textContent = `发现新版本 v${result.latestVersion}`;
-    elements.updateDescription.textContent = result.mandatory
-      ? "当前版本低于最低支持版本，需要更新后再继续正式操作。"
-      : "可下载安装包更新；当前版本不会被静默覆盖。";
-    elements.updateBadge.textContent = result.mandatory ? "必须更新" : "有新版本";
-    elements.updateFeedback.textContent = assetUrl
-      ? `已找到适用于 ${result.platform} 的安装包`
-      : "未找到当前平台安装包，请查看 GitHub 发布页";
-    elements.updateFeedback.dataset.kind = result.mandatory ? "error" : "ok";
-    setConnection(elements.updateTopStatus, result.mandatory ? "必须更新" : "有更新", result.mandatory ? "error" : "warn");
-    return;
-  }
-  elements.updateHeadline.textContent = "已是最新版本";
-  elements.updateDescription.textContent = `当前版本 v${currentVersion} 与 GitHub 最新正式版本一致。`;
-  elements.updateBadge.textContent = "最新";
-  elements.updateFeedback.textContent = "无需更新";
-  elements.updateFeedback.dataset.kind = "ok";
-  setConnection(elements.updateTopStatus, `v${currentVersion}`, "ok");
-}
-
-async function checkForUpdates({ automatic = false } = {}) {
-  if (updateChecking) return latestUpdateResult;
-  updateChecking = true;
-  elements.checkForUpdates.disabled = true;
-  elements.downloadUpdate.disabled = true;
-  setConnection(elements.updateTopStatus, "检查中", "idle");
-  elements.updateBadge.textContent = "检查中";
-  elements.updateFeedback.textContent = "正在连接 GitHub Releases...";
-  elements.updateFeedback.dataset.kind = "";
-  try {
-    const { config, contract } = await loadExtensionVersionContext();
-    const result = await sendNativeMessage({
-      action: "check_github_update",
-      currentVersion: config.productVersion || extensionManifest.version_name || extensionRuntimeVersion,
-      currentBuildNumber: Number(config.buildNumber || 0),
-      currentRuntimeBuildId: String(contract?.runtimeBuildId || ""),
-    }, 20000);
-    if (!result?.ok) throw new Error(result?.reason || "GITHUB_UPDATE_CHECK_FAILED");
-    latestUpdateResult = result;
-    await storageSet({ [STORAGE_UPDATE_RESULT_KEY]: result });
-    renderUpdateResult(result);
-    if (!automatic) {
-      setStatus(
-        result.updateAvailable ? "发现 GitHub 新版本" : "版本检查完成",
-        result.mandatory ? "error" : (result.updateAvailable ? "warn" : "ok"),
-      );
-    }
-    return result;
-  } catch (error) {
-    latestUpdateResult = {
-      ok: false,
-      action: "check_github_update",
-      reason: error?.message || String(error),
-      checkedAt: new Date().toISOString(),
-    };
-    renderUpdateResult(latestUpdateResult);
-    if (!automatic) setStatus(`更新检查失败：${latestUpdateResult.reason}`, "warn");
-    return latestUpdateResult;
-  } finally {
-    updateChecking = false;
-    elements.checkForUpdates.disabled = false;
-    renderUpdateResult(latestUpdateResult);
-  }
-}
-
-async function restoreUpdateState() {
-  await loadExtensionVersionContext();
-  latestUpdateResult = await storageGet(STORAGE_UPDATE_RESULT_KEY) || null;
-  renderUpdateResult(latestUpdateResult);
-}
-
-async function maybeAutoCheckUpdates() {
-  if (updateChecking || busy || document.visibilityState !== "visible") return;
-  const checkedAt = new Date(latestUpdateResult?.checkedAt || 0).getTime();
-  if (checkedAt && Date.now() - checkedAt < UPDATE_CHECK_INTERVAL_MS) return;
-  await checkForUpdates({ automatic: true });
-}
-
-async function openGithubUpdateUrl(element) {
-  const url = safeGithubUrl(element?.dataset?.url);
-  if (!url) {
-    setStatus("没有可打开的 GitHub 更新地址", "warn");
-    return;
-  }
-  await chrome.tabs.create({ url });
-}
-
 function connectorLevelLabel(level) {
   return {
     read: "可读取",
@@ -5683,7 +5420,6 @@ on(elements.openConnectionsTopConnector, "click", () => navigateToRoute("connect
 on(elements.openConnectionsTop, "click", () => navigateToRoute("connections"));
 on(elements.openConnectionsTopMcp, "click", () => navigateToRoute("connections"));
 on(elements.openConnectionsTopCli, "click", () => navigateToRoute("connections"));
-on(elements.openUpdatesTop, "click", () => navigateToRoute("updates"));
 on(elements.openBatchSave, "click", () => navigateToRoute("batch-save"));
 on(elements.openBatchExit, "click", () => navigateToRoute("batch-exit"));
 on(elements.openBatchUpload, "click", () => navigateToRoute("batch-upload"));
@@ -5692,7 +5428,6 @@ on(elements.openExportDetail, "click", () => navigateToRoute("export-detail"));
 on(elements.openExportDeclare, "click", () => navigateToRoute("export-declare"));
 on(elements.openFormatDetail, "click", () => navigateToRoute("format-detail"));
 on(elements.openFormatDeclaration, "click", () => navigateToRoute("format-declaration"));
-on(elements.openUpdates, "click", () => navigateToRoute("updates"));
 on(elements.backFromConnections, "click", () => navigateToRoute("home"));
 on(elements.backFromSave, "click", () => navigateToRoute("home"));
 on(elements.backFromExit, "click", () => navigateToRoute("home"));
@@ -5702,29 +5437,21 @@ on(elements.backFromExportDetail, "click", () => navigateToRoute("home"));
 on(elements.backFromExportDeclare, "click", () => navigateToRoute("home"));
 on(elements.backFromFormatDetail, "click", () => navigateToRoute("home"));
 on(elements.backFromFormatDeclaration, "click", () => navigateToRoute("home"));
-on(elements.backFromUpdates, "click", () => navigateToRoute("home"));
 window.addEventListener("hashchange", () => {
   renderRoute(window.location.hash.slice(1) || "home");
 });
 window.addEventListener("focus", () => {
-  if (!busy) {
-    checkConnections();
-    maybeAutoCheckUpdates();
-  }
+  if (!busy) checkConnections();
 });
 window.setInterval(() => {
   if (!busy && document.visibilityState === "visible") checkConnections();
 }, 30000);
 window.setInterval(connectorHeartbeat, 20000);
 window.setInterval(processConnectorActionQueue, 1500);
-window.setInterval(maybeAutoCheckUpdates, 30 * 60 * 1000);
 
 on(elements.refresh, "click", refreshAll);
 on(elements.checkConnections, "click", checkConnections);
 on(elements.startConnector, "click", startConnector);
-on(elements.checkForUpdates, "click", () => checkForUpdates({ automatic: false }));
-on(elements.downloadUpdate, "click", () => openGithubUpdateUrl(elements.downloadUpdate));
-on(elements.openReleasePage, "click", () => openGithubUpdateUrl(elements.openReleasePage));
 on(elements.bindCurrentPage, "click", bindCurrentPage);
 on(elements.refreshConnectorCatalog, "click", loadConnectorCatalog);
 on(elements.refreshAgentSources, "click", loadAgentSources);
@@ -5925,6 +5652,28 @@ on(elements.exitMode, "change", () => {
   elements.exitConfirmWrap.classList.toggle("hidden", elements.exitMode.value !== "execute");
 });
 
-renderRoute(window.location.hash.slice(1) || "home");
-restoreUpdateState().finally(maybeAutoCheckUpdates);
-restoreRememberedMcpToken().finally(refreshAll);
+async function bootstrapApplication() {
+  await moduleRegistry.initialize({
+    chrome,
+    document,
+    extensionManifest,
+    connectorProtocolVersion: EXPECTED_CONNECTOR_PROTOCOL_VERSION,
+    isBusy: () => busy,
+    navigate: navigateToRoute,
+    sendNativeMessage,
+    setConnection,
+    setStatus,
+  });
+  renderRoute(window.location.hash.slice(1) || "home");
+  await restoreRememberedMcpToken();
+  await refreshAll();
+}
+
+window.addEventListener("beforeunload", () => {
+  void moduleRegistry.dispose();
+}, { once: true });
+
+bootstrapApplication().catch((error) => {
+  setStatus(`工作台初始化失败：${error?.message || String(error)}`, "error");
+  console.error(error);
+});

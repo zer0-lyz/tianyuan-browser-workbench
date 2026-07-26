@@ -1,0 +1,101 @@
+function legacyFeature(manifest) {
+  return {
+    manifest: {
+      type: "feature",
+      stage: "stable",
+      storageVersion: 1,
+      usesLegacyScope: false,
+      ...manifest,
+      messageNamespace: manifest.messageNamespace || manifest.id,
+    },
+    create() {
+      return {
+        initialize() {},
+        activate() {},
+        deactivate() {},
+        dispose() {},
+      };
+    },
+  };
+}
+
+export const legacyFeatureModules = [
+  legacyFeature({
+    id: "batch-save",
+    route: "batch-save",
+    displayName: "批量保存底稿",
+    entryElementId: "openBatchSave",
+    pageElementId: "page-batch-save",
+    usesLegacyScope: true,
+    scope: { companies: true, subjects: true },
+    mounts: { scope: "saveScopeMount", support: "saveSupportMount" },
+  }),
+  legacyFeature({
+    id: "batch-exit",
+    route: "batch-exit",
+    displayName: "批量退出编辑",
+    entryElementId: "openBatchExit",
+    pageElementId: "page-batch-exit",
+    usesLegacyScope: true,
+    scope: { companies: true, subjects: true },
+    mounts: { scope: "exitScopeMount", support: "exitSupportMount" },
+  }),
+  legacyFeature({
+    id: "batch-upload",
+    route: "batch-upload",
+    displayName: "批量上传文件",
+    entryElementId: "openBatchUpload",
+    pageElementId: "page-batch-upload",
+    usesLegacyScope: true,
+    scope: { companies: false, subjects: false },
+  }),
+  legacyFeature({
+    id: "batch-cleanup",
+    route: "batch-cleanup",
+    displayName: "批量清理附件",
+    entryElementId: "openBatchCleanup",
+    pageElementId: "page-batch-cleanup",
+    usesLegacyScope: true,
+    scope: { companies: false, subjects: false },
+  }),
+  legacyFeature({
+    id: "export-detail",
+    route: "export-detail",
+    displayName: "导出明细表",
+    entryElementId: "openExportDetail",
+    pageElementId: "page-export-detail",
+    usesLegacyScope: true,
+    scope: { companies: true, subjects: false },
+    mounts: { scope: "detailScopeMount", support: "detailSupportMount" },
+  }),
+  legacyFeature({
+    id: "export-declaration",
+    route: "export-declare",
+    displayName: "导出申报表",
+    entryElementId: "openExportDeclare",
+    pageElementId: "page-export-declare",
+    usesLegacyScope: true,
+    scope: { companies: true, subjects: false },
+    mounts: { scope: "declareScopeMount", support: "declareSupportMount" },
+  }),
+  legacyFeature({
+    id: "format-detail",
+    route: "format-detail",
+    displayName: "明细表打印格式",
+    entryElementId: "openFormatDetail",
+    pageElementId: "page-format-detail",
+    usesLegacyScope: true,
+    scope: { companies: false, subjects: false },
+    mounts: { support: "detailPrintSupportMount" },
+  }),
+  legacyFeature({
+    id: "format-declaration",
+    route: "format-declaration",
+    displayName: "申报表打印格式",
+    entryElementId: "openFormatDeclaration",
+    pageElementId: "page-format-declaration",
+    usesLegacyScope: true,
+    scope: { companies: false, subjects: false },
+    mounts: { support: "declarationPrintSupportMount" },
+  }),
+];
