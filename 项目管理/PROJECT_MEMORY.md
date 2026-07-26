@@ -13,8 +13,12 @@
 - Windows 升级必须先确认并停止旧 Connector，再暂存和原子替换扩展、Native Helper；失败时回滚。
 - 升级必须保留 Agent 来源、凭据引用和 Connector 绑定。
 - 启动前必须核对扩展、Native Helper 和 Connector 的版本及 `runtimeBuildId`。
-- 修复开发版为 `0.12.1`，构建编号 `2026072605`。
-- Windows 测试包 SHA-256 为 `171cba0c09829f2b06a27365ec8ec6cdf7c61181d142a06524315557a15d3661`，当前标记 `source_dirty=true`，复测前不发布。
+- 修复正式版为 `0.12.1`，构建编号 `2026072605`。
+- 正式发布源码提交为 `c7d2705d2129e94460335ce14aea67cf426584b1`，标签为 `v0.12.1`。
+- Windows 正式包 SHA-256 为 `489aa4391858f221aade904358123614b41b81d5040740c6236a5159632ae600`。
+- macOS ARM64 正式包 SHA-256 为 `4ea3105f3feb0e3b518d285eed50993132f05069daaf88c774e315d34b31ef1f`。
+- 两个平台包均为 `source_dirty=false`、`release_channel=stable`，共同运行指纹为 `48ba6f75380b1cbbac4efe7aad2be1d9ae34eebb0e7ce086538146308005a180`。
+- 公开发行仓库 `zer0-lyz/tianyuan-browser-workbench-releases` 已创建正式 `v0.12.1` Release。
 
 ## 2026-07-26 私有反馈模块
 
