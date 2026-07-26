@@ -105,6 +105,7 @@ assert.equal(bridge.includes("EXTENSION_RUNTIME_BUILD_MISMATCH"), true);
 assert.equal(nativeHost.includes("return connectorBridge.start({"), true);
 assert.equal(nativeHost.includes("platformAdapter.chooseDirectory"), true);
 assert.equal(nativeHost.includes("platformAdapter.listenerPids"), true);
+assert.equal(nativeHost.includes('process.argv.includes("--start-connector")'), true);
 assert.equal(nativeHost.includes("powershell.exe"), false);
 assert.equal(nativeHost.includes("/usr/bin/osascript"), false);
 assert.equal(bridge.includes("platformAdapter.createCredentialReference"), true);
@@ -112,6 +113,7 @@ assert.equal(platformIndex.includes('platform === "win32"'), true);
 assert.equal(platformIndex.includes('platform === "darwin"'), true);
 assert.equal(windowsPlatform.includes("windows-dpapi"), true);
 assert.equal(macosPlatform.includes("macos-keychain"), true);
+assert.equal(installer.includes('"--start-connector", "--force-restart"'), true);
 assert.equal(/\bconnectorHandle\s*\(/.test(nativeHost.slice(nativeHost.indexOf("function startConnectorBridge()"))), false);
 
 let activeContentListener = null;

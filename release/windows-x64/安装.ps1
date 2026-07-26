@@ -437,6 +437,14 @@ try {
   if (-not $SelfTest.ok -or -not $SelfTest.pythonAvailable) {
     throw "Native Host 自检未通过：$SelfTestJson"
   }
+  $ConnectorJson = (& $NativeHostExe --start-connector --force-restart 2>&1 | Out-String).Trim()
+  if ($LASTEXITCODE -ne 0) {
+    throw "Connector 自动启动失败：$ConnectorJson"
+  }
+  $Connector = $ConnectorJson | ConvertFrom-Json
+  if (-not $Connector.ok -or -not $Connector.connector.ok) {
+    throw "Connector 自动启动未通过：$ConnectorJson"
+  }
 
   $InstallMode = if (-not $UsedBundledCli -and -not $UsedBundledPython -and -not $InstalledPrintDependencies) {
     "快速安装（复用已有 CLI、Python 和打印依赖）"
@@ -463,6 +471,7 @@ try {
     "天源 CLI：$TycpvExe"
     "天源 CLI 版本：$TycpvVersion"
     "自检：$SelfTestJson"
+    "Connector：$ConnectorJson"
     "安全：安装程序未写入 MCP token、Cookie、Authorization、密码或验证码。"
   ) | Set-Content -LiteralPath $ReportPath -Encoding UTF8
 

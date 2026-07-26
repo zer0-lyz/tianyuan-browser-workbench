@@ -419,6 +419,24 @@ function main() {
   if (!selfTest.ok || !selfTest.platformAdapter?.supported) {
     throw new Error(`NATIVE_HOST_SELF_TEST_FAILED: ${selfTestOutput}`);
   }
+  const connectorOutput = execFileSync(
+    nodeBin,
+    [path.join(nativeRuntimeRoot, "native_host.js"), "--start-connector", "--force-restart"],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        TIANYUAN_PYTHON_BIN: printPython.path,
+        TIANYUAN_RUNTIME_CONFIG_PATH: path.join(nativeRuntimeRoot, "runtime-config.json"),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 15000,
+    },
+  ).trim();
+  const connector = JSON.parse(connectorOutput);
+  if (!connector.ok || !connector.connector?.ok) {
+    throw new Error(`CONNECTOR_START_FAILED: ${connectorOutput}`);
+  }
 
   const summary = {
     ok: true,
@@ -428,6 +446,7 @@ function main() {
     nativeRuntimeRoot,
     nativeManifest,
     selfTest,
+    connector,
     printSkillsRoot,
     printFormat: {
       ready: true,

@@ -115,5 +115,24 @@ path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\\n", encod
 print(path)
 PY
 
+CONNECTOR_OUTPUT="$(
+  TIANYUAN_PYTHON_BIN="$PYTHON_BIN" \
+  TIANYUAN_PRINT_SKILLS_DIR="$PRINT_SKILLS_DIR" \
+  "$NODE_BIN" "$INSTALLED_HOST_SCRIPT" --start-connector --force-restart
+)" || {
+  echo "Connector start failed: $CONNECTOR_OUTPUT" >&2
+  exit 1
+}
+echo "$CONNECTOR_OUTPUT" | "$PYTHON_BIN" -c '
+import json
+import sys
+
+payload = json.load(sys.stdin)
+connector = payload.get("connector") or {}
+if not payload.get("ok") or not connector.get("ok"):
+    raise SystemExit("Connector automatic start failed")
+print("Connector:", connector.get("pid"), connector.get("protocolVersion"))
+'
+
 echo "Native host installed for extension IDs: $EXTENSION_ID, $LEGACY_EXTENSION_ID"
 echo "Local runtime installed at: $INSTALL_DIR"
