@@ -1,6 +1,6 @@
 "use strict";
 
-const DEFAULT_REPOSITORY = "zer0-lyz/tianyuan-browser-workbench";
+const DEFAULT_REPOSITORY = "zer0-lyz/tianyuan-browser-workbench-releases";
 const GITHUB_API_BASE = "https://api.github.com";
 const UPDATE_MANIFEST_NAME = "update-manifest.json";
 const DEFAULT_TIMEOUT_MS = 12000;
