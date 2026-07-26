@@ -94,6 +94,20 @@
 - Native Messaging 支持点击“启动 Connector”自动拉起本地 Bridge。
 - 能力矩阵明确显示读取、预演、确认后执行、本机执行和暂不支持边界。
 - Connector 暂不接入浏览器内 Agent 对话和任意浏览器自动化。
+
+## 2026-07-26 GitHub 检测更新模块
+
+- 产品版本升级为 `0.9.0`，构建编号 `2026072601`。
+- 首页模块由 8 个增加为 9 个，新增“版本更新”入口。
+- 顶部连接栏新增版本状态，持续显示当前版本、发现更新、必须更新或组件需修复。
+- 新增独立更新页面，显示当前版本、最新版本、通道、构建编号、平台、最后检查、更新说明、安装包、大小和 SHA-256。
+- Native Helper 新增 `check_github_update` 白名单动作，固定读取公开 GitHub Releases，不接受任意仓库或 URL。
+- 更新比较支持标准 SemVer，包括预发布版本，避免 `1.10.0` 与 `1.9.0` 字符串比较错误。
+- 支持可选 `update-manifest.json`；没有清单时回退 GitHub Release 标签、正文和资产列表。
+- 新增 `scripts/generate-update-manifest.mjs`，根据单一版本配置和 `dist/` 当前版本安装包生成 Release 更新清单。
+- 本机运行目录已同步到扩展 `0.9.0`；Connector PID `71661`，运行指纹 `f1571a7fa7c6742ada340f827de56e80efc4be71f71a1454c156792fed4aecde`。
+- 真实 GitHub API 检查返回仓库尚无正式 Release；更新页面应显示“尚未发布”。
+- 下一步需要重新加载本机扩展目录，检查真实侧栏布局；确认后再决定是否提交、推送和发布 `v0.9.0` GitHub Release。
 - 扩展开发版本升级为 `0.4.0`，固定扩展 ID 不变。
 - 连接配置页已增加 Codex 项目、对话、绑定范围和解除绑定控件。
 - Connector Bridge 已持久化 Codex 绑定，并支持项目/对话目录读取。
@@ -396,6 +410,14 @@
 Windows 测试包已完成 ZIP 解包、266 个文件逐项 SHA-256、PE x64 架构、扩展固定 ID、凭据模式、macOS 路径残留和 Native Messaging 健康消息验证。真实 Windows 安装和六模块端到端测试仍待对方电脑执行。
 
 第五十七轮 Windows 安装优化已完成：Windows r2 安装器不再默认重复处理 CLI 和便携 Python。安装时自动复用已有 CLI 和 Python；已有 Python 缺少打印依赖时只校验并安装两个离线 wheel；只有缺失或补齐失败才回退包内完整依赖。安装报告新增安装模式和耗时。
+
+2026-07-24 Windows r4 已完成：基于稳定提交 `75c4072` 重新构建扩展 `0.8.3` Windows x64 测试包。构建脚本已补齐版本 2 运行契约，在扩展和 Native Host 中写入相同 `runtimeBuildId`，避免 Windows 出现旧扩展与新 Connector 混用。包内已包含八个模块、批量上传按行执行和批量清理附件联动逻辑。
+
+- 成品：`dist/天源浏览器工作台-v0.8.3-Windows-x64-测试版-r4-20260724.zip`
+- SHA-256：`8c697f907a57ea0f1f90ae3c1dea522fc62e33a6c4a6eccd6f6b6bec47dd11f1`
+- 下载目录副本：`~/Downloads/天源浏览器工作台-v0.8.3-Windows-x64-测试版-r4-20260724.zip`
+- 校验结果：ZIP 完整、271 个文件逐项哈希一致、核心源码与稳定提交一致、Native Host 和便携 Python 为 Windows x86-64 PE、未包含凭据或运行态文件。
+- 仍需真实 Windows 10/11 x64 + Chrome/Edge 验证 PowerShell 安装、注册表、Native Messaging、CLI 授权和八个模块。
 
 第五十八轮批量上传排查修复已完成：统一 `content.js` 和 `page_adapter.js` 适配器版本为 `2026-07-24-page-tree-mirror-v19-upload-residual-guard`；补齐批量上传工具的 `procedureText` 参数；分类失败时增加前置程序和弹窗文本诊断；上传弹窗存在残留文件时直接中止，避免重复附件入库；Native Host 与 Connector 运行副本已同步并重启 Bridge。当前 Bridge 已恢复并重新匹配到当前天源页面。
 

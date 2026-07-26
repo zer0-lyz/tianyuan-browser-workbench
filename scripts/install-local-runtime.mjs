@@ -106,6 +106,7 @@ function sourceBuildDigest() {
     }
     const visit = (directory) => {
       for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+        if (entry.name === ".DS_Store" || entry.name.startsWith("._") || entry.name === "runtime-compat.json") continue;
         const absolutePath = path.join(directory, entry.name);
         if (entry.isDirectory()) visit(absolutePath);
         else if (entry.isFile()) files.push(path.relative(repoRoot, absolutePath));
@@ -370,12 +371,12 @@ function main() {
   copyDir(
     path.join(repoRoot, "extension"),
     path.join(runtimeProjectRoot, "extension"),
-    ["manifest.json", "src/content/content.js", "src/injected/page_adapter.js", "src/sidepanel/sidepanel.js"],
+    ["manifest.json", "version.json", "src/content/content.js", "src/injected/page_adapter.js", "src/sidepanel/sidepanel.js"],
   );
   copyDir(
     path.join(repoRoot, "native-helper"),
     path.join(runtimeProjectRoot, "native-helper"),
-    ["native_host.js", "connector_bridge.js"],
+    ["native_host.js", "connector_bridge.js", "update_checker.js"],
   );
   copyDir(path.join(repoRoot, "skills"), path.join(runtimeProjectRoot, "skills"));
   copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), path.join(runtimeProjectRoot, "plugins", "tianyuan-browser-connector"));
@@ -387,11 +388,19 @@ function main() {
 
   copyFileAtomic(path.join(repoRoot, "native-helper", "native_host.js"), path.join(nativeRuntimeRoot, "native_host.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "connector_bridge.js"), path.join(nativeRuntimeRoot, "connector_bridge.js"));
+  copyFileAtomic(path.join(repoRoot, "native-helper", "update_checker.js"), path.join(nativeRuntimeRoot, "update_checker.js"));
   if (fs.existsSync(path.join(repoRoot, "native-helper", "server.js"))) {
     copyFileAtomic(path.join(repoRoot, "native-helper", "server.js"), path.join(nativeRuntimeRoot, "server.js"));
   }
   const { source: codexAgentSource, sourcesPath } = ensureCodexAgentSource();
   const extensionManifest = readJson(path.join(repoRoot, "extension", "manifest.json"), {});
+  const versionConfig = readJson(path.join(repoRoot, "extension", "version.json"), {});
+  if (
+    extensionManifest.version !== versionConfig.chromeVersion
+    || (extensionManifest.version_name || extensionManifest.version) !== versionConfig.versionName
+  ) {
+    throw new Error("PRODUCT_VERSION_CONFIG_MISMATCH");
+  }
   const runtimeCompatibility = writeRuntimeCompatibility(extensionManifest.version, runtimeBuildId);
   for (const pluginRoot of [userPluginRoot, codexPluginRoot]) {
     writeAgentConfig(pluginRoot, codexAgentSource);

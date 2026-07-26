@@ -36,6 +36,8 @@ node scripts/install-local-runtime.mjs
 
 安装本机运行组件后，批量上传等页面写入模块不需要配置 Codex、WorkBuddy 或其他 Agent MCP。扩展会自动注册“天源工作台本机脚本”来源；首次执行写入时只需确认当前页面控制权。仅加载扩展文件而未注册 Native Messaging Host 时，文件夹选择和本机 Bridge 不会工作。
 
+版本更新模块通过公开 GitHub Releases 检查新版本，不使用 MCP token。更新检查只提供版本、说明、安装包和校验信息；下载安装后仍由本机安装程序更新运行目录，不会静默覆盖当前版本。
+
 ## 运行目录
 
 - macOS：`~/.tianyuan-workbench/projects/天源评估系统/extension`
