@@ -130,10 +130,10 @@ git reset --hard baseline-workbench-0.3.0-windows-test-r2-20260723
 - 已增加统一安装后自检；
 - 已通过源码、平台适配器、Connector 和更新模块回归；
 - 本机运行副本已同步；
-- 功能提交：`57c3df7bd96a4b154db353efb5f0573c2f08905c`；
-- 运行指纹：`4451baa70fff759c1eb8691a634ba7b5a7b1a7765ec102f880b7f04d4190e8ee`；
-- Windows 测试包 SHA-256：`8363b0ac6c82529792e2974bbd7c97809cceaa31751cefaffc30493a959e0b59`；
-- macOS 测试包 SHA-256：`5d447b883756270644f7697285acce66d025a159a0fcce875070474129ba52b0`；
+- 功能提交：`4f1c456239d44223e2fc173e4a79c71af8bfdcce`；
+- 运行指纹：`d508d40fe7d7fba7c0ff7ec50d94c1ce81a709eababfa8b04d7d0c251cffa646`；
+- Windows 测试包 SHA-256：`d3379a9941e06483776d5858fba95204bf7f0e199157f5a358559e66fe506354`；
+- macOS 测试包 SHA-256：`247ee1a9e88ac62fdb1ac6b86d1cf36ec5675d51241322f300c24e107d521c3e`；
 - 尚未建立正式标签或 GitHub Release。
 
 ## 2026-07-24 评估核实批量上传与本机运行基线

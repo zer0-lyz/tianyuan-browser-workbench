@@ -15,13 +15,13 @@
 - 本机安装器、macOS 安装脚本和 Windows 包均复制完整平台目录。
 - 安装后统一自检会显示平台适配器、文件选择、凭据存储、进程控制和依赖状态。
 - 开发版本升级为 `0.10.0`，构建编号 `2026072602`，尚未发布 GitHub Release。
-- 本机运行指纹已固定为 `4451baa70fff759c1eb8691a634ba7b5a7b1a7765ec102f880b7f04d4190e8ee`。
+- 本机运行指纹已固定为 `d508d40fe7d7fba7c0ff7ec50d94c1ce81a709eababfa8b04d7d0c251cffa646`。
 - 构建缓存和测试包输出已从 OneDrive 迁到 `~/.tianyuan-workbench/`。
-- 功能提交固定为 `57c3df7bd96a4b154db353efb5f0573c2f08905c`。
+- 功能提交固定为 `4f1c456239d44223e2fc173e4a79c71af8bfdcce`。
 - Windows 和 macOS 最终测试包已从该提交重新构建，外层和包内哈希、日期、提交号、运行指纹均一致。
-- Windows SHA-256：`8363b0ac6c82529792e2974bbd7c97809cceaa31751cefaffc30493a959e0b59`。
-- macOS SHA-256：`5d447b883756270644f7697285acce66d025a159a0fcce875070474129ba52b0`。
-- Connector 当前 PID `54482`。
+- Windows SHA-256：`d3379a9941e06483776d5858fba95204bf7f0e199157f5a358559e66fe506354`。
+- macOS SHA-256：`247ee1a9e88ac62fdb1ac6b86d1cf36ec5675d51241322f300c24e107d521c3e`。
+- 安装器已实现自检后自动启动 Connector，当前 PID `79593`。
 
 ## 本轮稳定性审计结论
 

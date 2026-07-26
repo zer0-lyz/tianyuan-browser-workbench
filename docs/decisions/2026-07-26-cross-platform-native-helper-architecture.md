@@ -32,6 +32,7 @@ Chromium 浏览器扩展，共享 Manifest V3 代码
 - 构建缓存默认写入 `~/.tianyuan-workbench/release-builds/`。
 - 最终测试包默认写入 `~/.tianyuan-workbench/releases/`，不写入 OneDrive 项目目录。
 - 安装器负责复制共享核心和完整平台目录、注册 Native Messaging、检测 CLI/Python，并执行统一 `--self-test`。
+- 自检通过后，安装器统一调用 `--start-connector --force-restart`，自动替换旧 Bridge 并回读健康状态。
 - Windows 新建 Agent 连接凭据优先使用当前用户 DPAPI。
 - macOS 新建 Agent 连接凭据优先使用登录钥匙串。
 - 平台安全存储不可用时，才回退到权限受限的本机文件。
