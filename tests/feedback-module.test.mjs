@@ -127,7 +127,7 @@ await instance.initialize({
   async getSafeDiagnostics() {
     return {
       version: "0.12.2",
-      buildNumber: 2026072606,
+      buildNumber: 2026072701,
       platform: "mac",
       architecture: "arm64",
       connectorConnected: true,
