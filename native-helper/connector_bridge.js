@@ -6,6 +6,9 @@ const { randomBytes, randomUUID, timingSafeEqual } = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { createPlatformAdapter } = require("./platform/index.js");
+
+const platformAdapter = createPlatformAdapter();
 
 const PROTOCOL_VERSION = "connector-agent-binding-v3";
 const BUILD_ID = "2026-07-24-browser-contract-v2-capability-matrix";
@@ -78,24 +81,12 @@ function fail(res, cause, origin = "") { json(res, cause?.status || 500, { ok: f
 function body(req, limit = 1024 * 1024) { return new Promise((resolve, reject) => { let text = ""; req.setEncoding("utf8"); req.on("data", (chunk) => { text += chunk; if (Buffer.byteLength(text, "utf8") > limit) { req.destroy(); reject(error("CONNECTOR_REQUEST_TOO_LARGE", 413)); } }); req.on("end", () => { if (!text.trim()) return resolve({}); try { resolve(JSON.parse(text)); } catch { reject(error("CONNECTOR_INVALID_JSON")); } }); req.on("error", reject); }); }
 
 function resolveCredential(reference) {
-  const ref = String(reference || "");
-  if (ref.startsWith("keychain:")) {
-    const [, service, account] = ref.split(":");
-    if (!service || !account) return "";
-    try { return execFileSync("security", ["find-generic-password", "-s", service, "-a", account, "-w"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch { return ""; }
-  }
-  if (ref.startsWith("file:")) {
-    const [filePart, key] = ref.slice(5).split("#");
-    try { const values = readJson(filePart, {}); return String(values?.secrets?.[key] || values?.[key] || ""); } catch { return ""; }
-  }
-  return "";
+  return platformAdapter.resolveCredentialReference(reference);
 }
 
 function createBridge(options = {}) {
   const home = os.homedir();
-  const runtimeRoot = process.platform === "win32"
-    ? path.join(process.env.LOCALAPPDATA || path.join(home, "AppData", "Local"), "TianyuanWorkbench")
-    : path.join(home, ".tianyuan-workbench");
+  const runtimeRoot = platformAdapter.runtimeRoot;
   const bindingsPath = options.bindingsPath || process.env.TIANYUAN_CONNECTOR_BINDINGS_PATH || path.join(runtimeRoot, "native-helper", "connector-bindings.json");
   const sourcesPath = options.sourcesPath || process.env.TIANYUAN_CONNECTOR_AGENT_SOURCES_PATH || path.join(runtimeRoot, "native-helper", "agent-sources.json");
   const configDir = options.configDir || process.env.TIANYUAN_CONNECTOR_AGENT_CONFIG_DIR || path.join(runtimeRoot, "agent-sources");
@@ -307,21 +298,15 @@ function createBridge(options = {}) {
     const service = `com.tianyuan.workbench.agent.${providerId}.${installationId}`;
     const account = "connector-bridge";
     const secret = randomBytes(32).toString("base64url");
-    if (process.platform === "darwin") {
-      try {
-        execFileSync("security", ["add-generic-password", "-U", "-s", service, "-a", account, "-w", secret], { stdio: ["ignore", "ignore", "ignore"] });
-        return `keychain:${service}:${account}`;
-      } catch {
-        // Fall through to the restricted local runtime.
-      }
-    }
     const credentialPath = path.join(path.dirname(sourcesPath), "agent-credentials.json");
     const key = `${providerId}-${installationId}`;
-    const values = readJson(credentialPath, { secrets: {} });
-    values.secrets = values.secrets || {};
-    values.secrets[key] = secret;
-    writeJson(credentialPath, values);
-    return `file:${credentialPath}#${key}`;
+    return platformAdapter.createCredentialReference({
+      service,
+      account,
+      fallbackPath: credentialPath,
+      key,
+      secret,
+    });
   }
   function manualSource(input) {
     const providerId = limited(input.providerId || "workbuddy", 80).toLowerCase(); if (!/^[a-z0-9][a-z0-9._-]{1,79}$/.test(providerId)) throw error("AGENT_PROVIDER_ID_INVALID");

@@ -2,11 +2,15 @@
 
 import { createHash } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const distRoot = path.join(repoRoot, "dist");
+const workbenchRoot = process.env.TIANYUAN_WORKBENCH_ROOT
+  || path.join(os.homedir(), ".tianyuan-workbench");
+const distRoot = process.env.TIANYUAN_RELEASE_OUTPUT_DIR
+  || path.join(workbenchRoot, "releases");
 const versionConfig = JSON.parse(fs.readFileSync(path.join(repoRoot, "extension", "version.json"), "utf8"));
 
 function sha256(targetPath) {

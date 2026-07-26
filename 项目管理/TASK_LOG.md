@@ -3537,3 +3537,38 @@ v20 已生效，空 `tag:{isClear:true}` 不再干扰当前最终扫描结果。
   - 旧版 `0.8.3`：`updateAvailable=true`；
   - 正确返回平台安装包、大小和 SHA-256。
 - 私有源码仓库重复 Release 已删除，源码标签保留。
+
+## 2026-07-26 跨平台 Native Helper 架构落地
+
+### 任务目标
+
+把天源浏览器工作台调整为共享浏览器插件、共享 Native Helper 核心和 Windows/macOS 平台适配层，支持各系统自动安装、自检和后续统一扩展。
+
+### 执行动作
+
+- 创建改造前本地基线 `baseline-pre-platform-adapters-20260726`。
+- 使用 Project Architect 保存改造前架构模型。
+- 新增 `native-helper/platform/` 五个模块。
+- 将文件选择、Bridge 进程控制、运行目录和 Agent 凭据存储迁移到平台接口。
+- Windows 新凭据优先使用当前用户 DPAPI；macOS 使用钥匙串。
+- 本机安装器、macOS Native Host 安装器和 Windows 构建脚本同步复制平台目录。
+- 新增统一安装后 `--self-test`。
+- 新增 `tests/platform-adapters.test.cjs`，并扩展静态契约测试。
+- 开发版本升级为 `0.10.0`，构建编号 `2026072602`。
+- 本机运行副本安装成功，Connector 从 PID `52560` 替换为 PID `54482`。
+- 构建日期默认值固定为 `Asia/Shanghai`，本次包日期固定为 `20260726`。
+- 将构建缓存和最终包默认目录迁到 `~/.tianyuan-workbench/release-builds/` 和 `~/.tianyuan-workbench/releases/`，避免在 OneDrive 产生数 GB 临时文件。
+
+### 验证结果
+
+- 平台适配器、静态扩展契约、Agent Bridge 和更新检查测试全部通过。
+- macOS 本机统一自检通过：AppleScript、Keychain、`lsof`、Python、打印脚本和 CLI 均可用。
+- Windows Native Host 确认为 PE32+ x86-64。
+- Windows 和 macOS 初次测试包外层及包内哈希通过，平台模块完整，macOS 包内自检通过。
+- 发现初次包的 `VERSION.txt` 记录的是改造前 Git 提交，因此不作为交付包；先提交源码，再重新构建固定最终提交号和 SHA-256。
+
+### 风险与下一步
+
+- 需要在 Windows 10/11 x64 实机验证 PowerShell/WinForms、DPAPI、注册表、Native Messaging 和 CLI 授权。
+- 需要重新加载 Chrome 中的本机 `0.10.0` 扩展，确认侧栏和 Connector 版本一致。
+- 当前不推送 GitHub、不发布 Release，待本机和 Windows 测试确认后再发布。

@@ -15,6 +15,9 @@ const adapter = fs.readFileSync(path.join(extensionRoot, "src", "injected", "pag
 const bridge = fs.readFileSync(path.join(repoRoot, "native-helper", "connector_bridge.js"), "utf8");
 const nativeHost = fs.readFileSync(path.join(repoRoot, "native-helper", "native_host.js"), "utf8");
 const updateChecker = fs.readFileSync(path.join(repoRoot, "native-helper", "update_checker.js"), "utf8");
+const platformIndex = fs.readFileSync(path.join(repoRoot, "native-helper", "platform", "index.js"), "utf8");
+const windowsPlatform = fs.readFileSync(path.join(repoRoot, "native-helper", "platform", "windows.js"), "utf8");
+const macosPlatform = fs.readFileSync(path.join(repoRoot, "native-helper", "platform", "macos.js"), "utf8");
 const installer = fs.readFileSync(path.join(repoRoot, "scripts", "install-local-runtime.mjs"), "utf8");
 const nativeInstaller = fs.readFileSync(path.join(repoRoot, "native-helper", "install_native_host.sh"), "utf8");
 const versionConfig = JSON.parse(fs.readFileSync(path.join(extensionRoot, "version.json"), "utf8"));
@@ -50,7 +53,7 @@ assert.equal(quotedConstant(sidepanel, "EXPECTED_CONNECTOR_PROTOCOL_VERSION"), q
 assert.equal(quotedConstant(nativeHost, "CONNECTOR_PROTOCOL_VERSION"), quotedConstant(bridge, "PROTOCOL_VERSION"));
 assert.equal(manifest.version, versionConfig.chromeVersion);
 assert.equal(manifest.version_name, versionConfig.versionName);
-assert.equal(versionConfig.productVersion, "0.9.0");
+assert.equal(versionConfig.productVersion, "0.10.0");
 assert.equal(versionConfig.repository, "zer0-lyz/tianyuan-browser-workbench-releases");
 
 const installerPluginVersion = quotedConstant(installer, "CONNECTOR_VERSION");
@@ -97,8 +100,18 @@ assert.equal(installer.includes('copyFileAtomic(path.join(repoRoot, "native-help
 assert.equal(installer.includes('entry.name === ".DS_Store"'), true);
 assert.equal(nativeInstaller.includes("update_checker.js"), true);
 assert.equal(nativeInstaller.includes("connector_bridge.js"), true);
+assert.equal(nativeInstaller.includes('cp -R "$ROOT_DIR/native-helper/platform"'), true);
 assert.equal(bridge.includes("EXTENSION_RUNTIME_BUILD_MISMATCH"), true);
 assert.equal(nativeHost.includes("return connectorBridge.start({"), true);
+assert.equal(nativeHost.includes("platformAdapter.chooseDirectory"), true);
+assert.equal(nativeHost.includes("platformAdapter.listenerPids"), true);
+assert.equal(nativeHost.includes("powershell.exe"), false);
+assert.equal(nativeHost.includes("/usr/bin/osascript"), false);
+assert.equal(bridge.includes("platformAdapter.createCredentialReference"), true);
+assert.equal(platformIndex.includes('platform === "win32"'), true);
+assert.equal(platformIndex.includes('platform === "darwin"'), true);
+assert.equal(windowsPlatform.includes("windows-dpapi"), true);
+assert.equal(macosPlatform.includes("macos-keychain"), true);
 assert.equal(/\bconnectorHandle\s*\(/.test(nativeHost.slice(nativeHost.indexOf("function startConnectorBridge()"))), false);
 
 let activeContentListener = null;

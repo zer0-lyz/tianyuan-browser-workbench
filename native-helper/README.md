@@ -2,6 +2,22 @@
 
 本地 Helper 负责把浏览器插件和天源 MCP、天源 CLI 隔开：MCP token 只放在本机运行态里，插件只访问 `127.0.0.1` 或 Chrome Native Messaging。
 
+Helper 采用共享核心与平台适配层：
+
+```text
+native_host.js / connector_bridge.js
+└── platform/
+    ├── common.js
+    ├── windows.js
+    ├── macos.js
+    └── unsupported.js
+```
+
+- 业务任务、Native Messaging 协议、日志和更新检查共用一套代码。
+- Windows 适配层负责 PowerShell/WinForms、DPAPI、`netstat` 和 `taskkill`。
+- macOS 适配层负责 AppleScript、钥匙串、`lsof` 和 `SIGTERM`。
+- 安装后统一执行 `native_host --self-test`，确认平台适配层和运行依赖完整。
+
 项目目录只保留源码和说明；实际运行副本、日志、缓存和后续依赖统一放在：
 
 ```text
@@ -39,7 +55,7 @@ export VALUATION_MCP_TOKEN="你的 MCP token"
 
 Native Messaging 额外支持：
 
-- `select_export_directory`：调用 macOS 文件夹选择器，由用户明确授权导出目录。
+- `select_export_directory`：调用当前系统文件夹选择器，由用户明确授权导出目录。
 - `run_cli_export`：仅允许执行资产基础法明细表或申报表导出，并持续返回阶段进度。
 - `select_print_workbook_files`：选择一个或多个待处理工作簿。
 - `select_print_workbook_directory`：选择文件夹并递归发现 `.xlsx`、`.xlsm` 工作簿。

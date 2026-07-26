@@ -16,9 +16,11 @@ const PROJECT_NAME = "天源评估系统";
 const CONNECTOR_VERSION = "0.4.1";
 const require = createRequire(import.meta.url);
 const connectorBridge = require("../native-helper/connector_bridge.js");
+const { createPlatformAdapter } = require("../native-helper/platform/index.js");
+const platformAdapter = createPlatformAdapter();
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const isWindows = process.platform === "win32";
+const isWindows = platformAdapter.isWindows;
 const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
 const runtimeProjectRoot = process.env.TIANYUAN_PROJECT_RUNTIME_ROOT || (isWindows
   ? path.join(localAppData, "TianyuanWorkbench", "projects", PROJECT_NAME)
@@ -146,33 +148,17 @@ function ensureCodexAgentSource() {
   if (existing) return { source: existing, sourcesPath };
 
   const installationId = `codex-${randomUUID()}`;
-  let credentialRef = "";
-  if (!isWindows) {
-    const service = `com.tianyuan.workbench.agent.codex.${installationId}`;
-    const account = "connector-bridge";
-    const secret = randomBytes(32).toString("base64url");
-    try {
-      execFileSync("security", [
-        "add-generic-password",
-        "-U",
-        "-s", service,
-        "-a", account,
-        "-w", secret,
-      ], { stdio: ["ignore", "ignore", "ignore"] });
-      credentialRef = `keychain:${service}:${account}`;
-    } catch {
-      // Use the restricted local runtime only if Keychain is unavailable.
-    }
-  }
-  if (!credentialRef) {
-    const credentialPath = path.join(nativeRuntimeRoot, "agent-credentials.json");
-    const credentialKey = `codex-${installationId}`;
-    const credentials = readJson(credentialPath, { secrets: {} });
-    credentials.secrets = credentials.secrets || {};
-    credentials.secrets[credentialKey] = randomBytes(32).toString("base64url");
-    writePrivateJson(credentialPath, credentials);
-    credentialRef = `file:${credentialPath}#${credentialKey}`;
-  }
+  const service = `com.tianyuan.workbench.agent.codex.${installationId}`;
+  const account = "connector-bridge";
+  const credentialPath = path.join(nativeRuntimeRoot, "agent-credentials.json");
+  const credentialKey = `codex-${installationId}`;
+  const credentialRef = platformAdapter.createCredentialReference({
+    service,
+    account,
+    fallbackPath: credentialPath,
+    key: credentialKey,
+    secret: randomBytes(32).toString("base64url"),
+  });
   const timestamp = new Date().toISOString();
   const source = {
     agentId: "codex",
@@ -389,6 +375,11 @@ function main() {
   copyFileAtomic(path.join(repoRoot, "native-helper", "native_host.js"), path.join(nativeRuntimeRoot, "native_host.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "connector_bridge.js"), path.join(nativeRuntimeRoot, "connector_bridge.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "update_checker.js"), path.join(nativeRuntimeRoot, "update_checker.js"));
+  copyDir(
+    path.join(repoRoot, "native-helper", "platform"),
+    path.join(nativeRuntimeRoot, "platform"),
+    ["index.js", "common.js", "windows.js", "macos.js", "unsupported.js"],
+  );
   if (fs.existsSync(path.join(repoRoot, "native-helper", "server.js"))) {
     copyFileAtomic(path.join(repoRoot, "native-helper", "server.js"), path.join(nativeRuntimeRoot, "server.js"));
   }
@@ -410,6 +401,24 @@ function main() {
   const nativeManifest = isWindows
     ? writeWindowsNativeHost(nodeBin, printPython.path)
     : writeMacNativeHost(nodeBin, printPython.path);
+  const selfTestOutput = execFileSync(
+    nodeBin,
+    [path.join(nativeRuntimeRoot, "native_host.js"), "--self-test"],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        TIANYUAN_PYTHON_BIN: printPython.path,
+        TIANYUAN_RUNTIME_CONFIG_PATH: path.join(nativeRuntimeRoot, "runtime-config.json"),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 15000,
+    },
+  ).trim();
+  const selfTest = JSON.parse(selfTestOutput);
+  if (!selfTest.ok || !selfTest.platformAdapter?.supported) {
+    throw new Error(`NATIVE_HOST_SELF_TEST_FAILED: ${selfTestOutput}`);
+  }
 
   const summary = {
     ok: true,
@@ -418,6 +427,7 @@ function main() {
     extensionPath: path.join(runtimeProjectRoot, "extension"),
     nativeRuntimeRoot,
     nativeManifest,
+    selfTest,
     printSkillsRoot,
     printFormat: {
       ready: true,
