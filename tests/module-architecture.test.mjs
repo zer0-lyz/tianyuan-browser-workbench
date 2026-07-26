@@ -8,9 +8,10 @@ import { ModuleRegistry } from "../extension/src/core/module-registry.js";
 import { ModuleScope } from "../extension/src/core/module-scope.js";
 import { ModuleStorage } from "../extension/src/core/module-storage.js";
 import { updatesModule } from "../extension/src/modules/updates/module.js";
+import { feedbackModule } from "../extension/src/modules/feedback/module.js";
 
-const definitions = [...legacyFeatureModules, updatesModule];
-assert.equal(definitions.length, 9);
+const definitions = [...legacyFeatureModules, updatesModule, feedbackModule];
+assert.equal(definitions.length, 10);
 assert.equal(new Set(definitions.map((item) => item.manifest.id)).size, definitions.length);
 assert.equal(new Set(definitions.map((item) => item.manifest.route)).size, definitions.length);
 for (const definition of definitions) {

@@ -4,6 +4,7 @@ import { FeatureFlagService } from "../core/feature-flags.js";
 import { ModuleRegistry } from "../core/module-registry.js";
 import { createModuleStorageFactory } from "../core/module-storage.js";
 import { updatesModule } from "../modules/updates/module.js";
+import { feedbackModule } from "../modules/feedback/module.js";
 
 const REQUEST_TYPE = "TIANYUAN_WORKBENCH_GET_CONTEXT_V2";
 const ACTION_REQUEST_TYPE = "TIANYUAN_WORKBENCH_RUN_ACTION_V2";
@@ -369,6 +370,11 @@ const CORE_ROUTE_LABELS = {
 
 const extensionManifest = chrome.runtime.getManifest();
 const extensionRuntimeVersion = extensionManifest.version;
+const extensionVersionConfigPromise = fetch(chrome.runtime.getURL("version.json"), {
+  cache: "no-store",
+})
+  .then((response) => response.ok ? response.json() : null)
+  .catch(() => null);
 const extensionRuntimeContractPromise = fetch(chrome.runtime.getURL("runtime-compat.json"), {
   cache: "no-store",
 })
@@ -383,6 +389,7 @@ const moduleRegistry = new ModuleRegistry({
 });
 for (const module of legacyFeatureModules) moduleRegistry.register(module);
 moduleRegistry.register(updatesModule);
+moduleRegistry.register(feedbackModule);
 elements.extensionId.textContent = chrome.runtime.id;
 
 function on(element, eventName, handler) {
@@ -3450,6 +3457,39 @@ function setConnection(element, text, kind = "idle") {
   element.textContent = text;
 }
 
+function connectionSummary(element) {
+  const kind = String(element?.dataset?.kind || "");
+  if (kind === "ok") return "connected";
+  if (kind === "error") return "error";
+  if (kind === "warn") return "warning";
+  return "unknown";
+}
+
+async function getSafeDiagnostics() {
+  const [platformInfo, versionConfig, runtimeContract] = await Promise.all([
+    new Promise((resolve) => {
+      chrome.runtime.getPlatformInfo((info) => resolve(info || {}));
+    }),
+    extensionVersionConfigPromise,
+    extensionRuntimeContractPromise,
+  ]);
+  return {
+    version: extensionRuntimeVersion,
+    buildNumber: Number(versionConfig?.buildNumber || 0),
+    runtimeBuildId: String(runtimeContract?.runtimeBuildId || ""),
+    platform: String(platformInfo.os || "unknown"),
+    architecture: String(platformInfo.arch || "unknown"),
+    connectorConnected: connectionSummary(elements.connectorStatus) === "connected",
+    connectorProtocol: connectorProtocol?.protocolVersion === EXPECTED_CONNECTOR_PROTOCOL_VERSION
+      ? EXPECTED_CONNECTOR_PROTOCOL_VERSION
+      : "unknown",
+    mcpStatus: connectionSummary(elements.mcpStatus),
+    cliStatus: connectionSummary(elements.cliStatus),
+    moduleRoute: String(currentRoute || "home"),
+    collectedAt: new Date().toISOString(),
+  };
+}
+
 function connectorLevelLabel(level) {
   return {
     read: "可读取",
@@ -5660,6 +5700,8 @@ async function bootstrapApplication() {
     connectorProtocolVersion: EXPECTED_CONNECTOR_PROTOCOL_VERSION,
     isBusy: () => busy,
     navigate: navigateToRoute,
+    getSafeDiagnostics,
+    copyText: (text) => navigator.clipboard.writeText(text),
     sendNativeMessage,
     setConnection,
     setStatus,

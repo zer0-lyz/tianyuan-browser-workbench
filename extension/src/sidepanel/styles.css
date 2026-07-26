@@ -543,7 +543,8 @@ details.status-card,
 .module-icon-declare,
 .module-icon-print-detail,
 .module-icon-print-declare,
-.module-icon-update {
+.module-icon-update,
+.module-icon-feedback {
   background:
     radial-gradient(circle at 30% 18%, rgb(255 255 255 / 0.96), transparent 38%),
     linear-gradient(180deg, #ffffff 0%, #f3f6f9 100%);

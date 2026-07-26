@@ -52,18 +52,20 @@ function runtimeBuildId() {
   return hash.digest("hex");
 }
 
-function findPackage(patterns) {
+function findPackage(patterns, targetFileName) {
   if (!fs.existsSync(distRoot)) return null;
-  const candidates = fs.readdirSync(distRoot)
+  const allCandidates = fs.readdirSync(distRoot)
     .filter((name) =>
       name.endsWith(".zip")
       && name.includes(`v${versionConfig.productVersion}`)
       && patterns.some((pattern) => name.toLowerCase().includes(pattern))
-    )
+    );
+  const sourceCandidates = allCandidates.filter((name) => name !== targetFileName);
+  const candidates = (sourceCandidates.length ? sourceCandidates : allCandidates)
     .sort((left, right) => {
-      const leftReleaseName = left.startsWith("tianyuan-workbench-") ? 1 : 0;
-      const rightReleaseName = right.startsWith("tianyuan-workbench-") ? 1 : 0;
-      if (leftReleaseName !== rightReleaseName) return rightReleaseName - leftReleaseName;
+      const leftMtime = fs.statSync(path.join(distRoot, left)).mtimeMs;
+      const rightMtime = fs.statSync(path.join(distRoot, right)).mtimeMs;
+      if (leftMtime !== rightMtime) return rightMtime - leftMtime;
       return right.localeCompare(left);
     });
   if (!candidates.length) return null;
@@ -76,9 +78,10 @@ function findPackage(patterns) {
   };
 }
 
-function releaseAsset(source, key) {
-  if (!source) return null;
+function releaseAsset(patterns, key) {
   const fileName = `tianyuan-workbench-v${versionConfig.productVersion}-${key}.zip`;
+  const source = findPackage(patterns, fileName);
+  if (!source) return null;
   const targetPath = path.join(distRoot, fileName);
   const sourcePath = path.join(distRoot, source.fileName);
   if (path.resolve(sourcePath) !== path.resolve(targetPath)) {
@@ -94,8 +97,8 @@ function releaseAsset(source, key) {
 }
 
 const assets = {};
-const windows = releaseAsset(findPackage(["windows-x64"]), "windows-x64");
-const macos = releaseAsset(findPackage(["macos-arm64", "macos-apple"]), "macos-arm64");
+const windows = releaseAsset(["windows-x64"], "windows-x64");
+const macos = releaseAsset(["macos-arm64", "macos-apple"], "macos-arm64");
 if (windows) assets["windows-x64"] = windows;
 if (macos) assets["macos-arm64"] = macos;
 

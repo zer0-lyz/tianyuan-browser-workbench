@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "deliveryMode": "copy",
+  "endpoint": "",
+  "githubRepository": "zer0-lyz/tianyuan-browser-workbench-feedback",
+  "githubIssuesEnabled": false,
+  "publicChannel": false
+}

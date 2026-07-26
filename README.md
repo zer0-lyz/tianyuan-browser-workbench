@@ -38,6 +38,8 @@ node scripts/install-local-runtime.mjs
 
 版本更新模块通过公开发行仓库 `zer0-lyz/tianyuan-browser-workbench-releases` 的 GitHub Releases 检查新版本，不使用 MCP token。私有源码仓库不作为匿名更新源；更新检查只提供版本、说明、安装包和校验信息，下载安装后仍由本机安装程序更新运行目录，不会静默覆盖当前版本。
 
+反馈模块支持功能建议、配置问题、故障反馈和使用体验。草稿只保存在扩展本机存储；自动提交服务未配置时，可以复制整理后的反馈内容。自动同步采用私有反馈服务和 GitHub App，浏览器扩展中不保存 GitHub token 或私钥。服务端源码和部署说明见 `feedback-service/README.md`。
+
 ## 运行目录
 
 - macOS：`~/.tianyuan-workbench/projects/天源评估系统/extension`

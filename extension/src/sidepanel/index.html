@@ -47,7 +47,7 @@
             <h2>功能模块</h2>
             <p>选择一个功能开始处理</p>
           </div>
-          <span id="moduleCountBadge" class="badge">9 个模块</span>
+          <span id="moduleCountBadge" class="badge">10 个模块</span>
         </div>
         <div class="module-grid">
           <button id="openBatchSave" type="button" class="module-card">
@@ -141,6 +141,16 @@
             <strong>版本更新</strong>
             <small>通过 GitHub 检查新版本和下载安装包</small>
           </button>
+          <button id="openFeedback" type="button" class="module-card">
+            <span class="module-icon module-icon-feedback" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path class="ph-duotone" d="M5.25 4.5h13.5A2.25 2.25 0 0 1 21 6.75v8.5a2.25 2.25 0 0 1-2.25 2.25H11l-4.5 3v-3H5.25A2.25 2.25 0 0 1 3 15.25v-8.5A2.25 2.25 0 0 1 5.25 4.5"></path>
+                <path d="M7.5 8.25h9a.75.75 0 0 1 0 1.5h-9a.75.75 0 0 1 0-1.5m0 3h6a.75.75 0 0 1 0 1.5h-6a.75.75 0 0 1 0-1.5"></path>
+              </svg>
+            </span>
+            <strong>反馈</strong>
+            <small>提交功能建议、配置问题和使用体验</small>
+          </button>
         </div>
         <div class="home-note">
           <span>当前页面</span>
@@ -149,6 +159,7 @@
       </section>
 
       <section id="page-updates" class="route-page hidden" data-route="updates"></section>
+      <section id="page-feedback" class="route-page hidden" data-route="feedback"></section>
 
       <section id="page-connections" class="route-page hidden" data-route="connections">
         <div class="page-heading">

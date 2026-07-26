@@ -5,6 +5,12 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="$(node -p "require(process.argv[1]).productVersion" "$ROOT_DIR/extension/version.json")"
 CHROME_VERSION="$(node -p "require(process.argv[1]).chromeVersion" "$ROOT_DIR/extension/version.json")"
 BUILD_NUMBER="$(node -p "require(process.argv[1]).buildNumber" "$ROOT_DIR/extension/version.json")"
+RELEASE_CHANNEL="$(node -p "require(process.argv[1]).channel" "$ROOT_DIR/extension/version.json")"
+SOURCE_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+SOURCE_DIRTY=false
+if [[ -n "$(git -C "$ROOT_DIR" status --porcelain)" ]]; then
+  SOURCE_DIRTY=true
+fi
 RELEASE_DATE="${RELEASE_DATE:-$(TZ=Asia/Shanghai date +%Y%m%d)}"
 PACKAGE_NAME="天源浏览器工作台-v${VERSION}-macOS-Apple芯片"
 WORKBENCH_ROOT="${TIANYUAN_WORKBENCH_ROOT:-$HOME/.tianyuan-workbench}"
@@ -103,9 +109,11 @@ cat > "$STAGE/VERSION.txt" <<EOF
 name=天源浏览器工作台
 version=$VERSION
 platform=macOS-arm64
+release_channel=$RELEASE_CHANNEL
 build_date=$RELEASE_DATE
 build_number=$BUILD_NUMBER
-git_commit=$(git -C "$ROOT_DIR" rev-parse HEAD)
+git_commit=$SOURCE_COMMIT
+source_dirty=$SOURCE_DIRTY
 runtime_build_id=$RUNTIME_BUILD_ID
 extension_id=lkflndcnklpeaejohaacoaolnmhgigoc
 EOF

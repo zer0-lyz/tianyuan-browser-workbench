@@ -1,5 +1,53 @@
 # 天源浏览器工作台项目状态
 
+## 2026-07-26 Windows Connector 复测
+
+### 已完成
+
+- 读取并归档 Windows 用户修复报告。
+- 修复 Connector Node 脚本启动参数。
+- 增加 SEA EXE / Node 脚本双模式识别。
+- 增加 Windows `.cmd/.bat` CLI 安全包装。
+- 加固 Windows 原子升级、状态保留、契约校验和失败回滚。
+- 本机 Node 脚本模式 Connector 回归通过。
+- 重新构建 Windows x64 `0.12.1` 测试包并放入下载目录。
+
+### 待验证
+
+- Windows 10/11 x64 运行新版 `安装.cmd`。
+- 核对安装报告中的版本 `0.12.1`、构建编号 `2026072605` 和运行指纹。
+- 核对 Connector 自动启动不再出现版本不一致或超时。
+- Chrome 和 Edge 分别重新加载扩展并检查连接状态。
+- 验证 CLI 为 EXE 和 `.cmd` 包装器两种环境时的版本检查、授权和导出。
+
+### 发布门禁
+
+- Windows 实机复测通过前不提交、不推送、不发布 Release。
+
+## 2026-07-26 反馈模块
+
+### 已完成
+
+- 新增独立反馈模块和首页入口。
+- 新增本机草稿、隐私确认、安全诊断、复制反馈和敏感内容拦截。
+- 新增反馈服务源码和测试。
+- 创建私有 GitHub 反馈仓库并启用 Issues、配置分类标签。
+- 正式版本统一为 `0.12.1` / `2026072605`。
+- 本机运行副本已同步，运行指纹为 `e54f3743a5865da20252d7a6c71db262bc07fca1f817203d0b6073852b69dfc6`。
+
+### 待完成
+
+- 选定 HTTPS 托管平台并部署 `feedback-service/`。
+- 创建 GitHub App，只授权私有反馈仓库 `Issues: write`、`Metadata: read`。
+- 在部署环境配置 App ID、Installation ID、私钥、仓库和允许的扩展 ID。
+- 把正式 HTTPS 地址加入 `manifest.json` 的 `host_permissions` 和 `feedback.json`。
+- 完成一次真实反馈提交、GitHub Issue 回读和隐私字段复核。
+
+### 当前门禁
+
+- 自动提交按钮保持禁用。
+- 本地源码暂不推送 GitHub，等待真实侧栏验收。
+
 更新时间：2026-07-26 CST
 
 ## 当前阶段

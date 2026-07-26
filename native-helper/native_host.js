@@ -8,6 +8,17 @@ const path = require("node:path");
 const { createRequire } = require("node:module");
 const readline = require("node:readline");
 const { randomUUID } = require("node:crypto");
+const processLauncher = (() => {
+  try {
+    return require("./process_launcher.js");
+  } catch (cause) {
+    try {
+      return createRequire(path.join(path.dirname(process.execPath), "native_host.js"))("./process_launcher.js");
+    } catch {
+      throw cause;
+    }
+  }
+})();
 const connectorBridge = (() => {
   try {
     return require("./connector_bridge.js");
@@ -69,12 +80,14 @@ const CONNECTOR_ALLOWED_EXTENSION_ORIGINS = new Set([
 ]);
 const IS_WINDOWS = platformAdapter.isWindows;
 const RUNTIME_CONFIG_PATH = process.env.TIANYUAN_RUNTIME_CONFIG_PATH
-  || path.join(path.dirname(process.execPath), "runtime-config.json");
+  || path.join(processLauncher.runtimeDirectory(), "runtime-config.json");
 
 function loadRuntimeConfig() {
   try {
     const parsed = JSON.parse(fs.readFileSync(RUNTIME_CONFIG_PATH, "utf8"));
-    return parsed && typeof parsed === "object" ? parsed : {};
+    return parsed && typeof parsed === "object"
+      ? processLauncher.normalizeRuntimeConfig(parsed)
+      : {};
   } catch {
     return {};
   }
@@ -1134,15 +1147,14 @@ async function startConnectorBridgeAction({ forceRestart = false } = {}) {
     restart = await stopConnectorBridgeAction();
     if (!restart.ok) return restart;
   }
-  const childArgs = IS_WINDOWS
-    ? ["--connector-bridge"]
-    : [process.argv[1], "--connector-bridge"];
-  const child = spawn(process.execPath, childArgs, {
+  const launch = processLauncher.selfLaunchSpec(["--connector-bridge"]);
+  const child = spawn(launch.command, launch.args, {
     detached: true,
     stdio: "ignore",
     env: {
-      ...process.env,
+      ...launch.env,
       TIANYUAN_CONNECTOR_PORT: String(DEFAULT_CONNECTOR_PORT),
+      TIANYUAN_RUNTIME_CONFIG_PATH: RUNTIME_CONFIG_PATH,
     },
   });
   child.unref();
@@ -1180,7 +1192,12 @@ function withTimeout(promise, ms, timeoutReason) {
 
 function checkCli() {
   return new Promise((resolve) => {
-    execFile(CLI_BIN, ["--version"], { timeout: 3000 }, (error, stdout, stderr) => {
+    const launch = processLauncher.commandLaunchSpec(CLI_BIN, ["--version"]);
+    execFile(launch.command, launch.args, {
+      timeout: 3000,
+      env: launch.env,
+      windowsHide: true,
+    }, (error, stdout, stderr) => {
       if (error) {
         resolve({
           ok: false,
@@ -1198,9 +1215,12 @@ function checkCli() {
 
 function startCliLogin() {
   return new Promise((resolve) => {
-    const child = spawn(CLI_BIN, ["login"], {
+    const launch = processLauncher.commandLaunchSpec(CLI_BIN, ["login"]);
+    const child = spawn(launch.command, launch.args, {
       detached: true,
       stdio: "ignore",
+      env: launch.env,
+      windowsHide: true,
     });
 
     child.on("error", (error) => {
@@ -1715,10 +1735,12 @@ function runCliExport(message, emit) {
       outDir,
     });
 
-    const child = spawn(CLI_BIN, args, {
+    const launch = processLauncher.commandLaunchSpec(CLI_BIN, args);
+    const child = spawn(launch.command, launch.args, {
       cwd: outDir,
-      env: process.env,
+      env: launch.env,
       stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
     });
 
     function consumeLine(line, stream) {
