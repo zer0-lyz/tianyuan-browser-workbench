@@ -30,8 +30,13 @@
 
 - 用户进一步要求公开安装版同步到 `0.12.2`。
 - 版本通道由 `development` 切换为 `stable`。
-- 将重新构建 Windows、macOS 正式包并创建公开 `v0.12.2` Release。
+- 已重新构建 Windows、macOS 正式包并创建公开 `v0.12.2` Release。
 - 用户指定发布日期为未来日期 `2026-07-27`，构建日期固定为 `20260727`。
+- 发布源码提交：`f6f766e4f6863e5eae0eea138ca4aa1ceb3e2179`。
+- Windows SHA-256：`fb5893d621b59137bcc9cddeb974a00695f09d814e8ffa35b4693336139eb23e`。
+- macOS SHA-256：`5bcacefd1eb0d3667c0ee833e28d8f1b6cd189d1c583a467008dee88c71ea651`。
+- 运行指纹：`d2691fc4ad6c2009664e0cefbadbc6cd38a8746c4289c5b79fd33458f06bc4ae`。
+- 在线更新检查确认当前 `0.12.2` 无更新，旧版 `0.12.1` 可发现新版本。
 
 ## 2026-07-26 Windows Connector 安装问题修复
 
