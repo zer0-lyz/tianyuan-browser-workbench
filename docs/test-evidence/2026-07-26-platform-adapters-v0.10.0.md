@@ -39,7 +39,7 @@
 
 构建编号：`2026072602`
 
-初次测试包已验证：
+最终测试包已验证：
 
 - Windows Native Host 为 PE32+ x86-64。
 - Windows 和 macOS 包均包含五个 `platform/*.js` 文件。
@@ -47,7 +47,27 @@
 - macOS 包内 Native Host 自检通过。
 - 未发现 `.DS_Store`、`._*` 或 `__MACOSX`。
 
-最终包必须在源码提交后重新构建，确保 `VERSION.txt` 的 `git_commit` 与实际源码提交一致。本记录中的最终 SHA-256 和运行指纹在重新构建后补充。
+源码提交：
+
+`57c3df7bd96a4b154db353efb5f0573c2f08905c`
+
+运行指纹：
+
+`4451baa70fff759c1eb8691a634ba7b5a7b1a7765ec102f880b7f04d4190e8ee`
+
+Windows：
+
+- 路径：`~/.tianyuan-workbench/releases/天源浏览器工作台-v0.10.0-Windows-x64-测试版-20260726.zip`
+- 大小：`76556813` 字节
+- SHA-256：`8363b0ac6c82529792e2974bbd7c97809cceaa31751cefaffc30493a959e0b59`
+
+macOS：
+
+- 路径：`~/.tianyuan-workbench/releases/天源浏览器工作台-v0.10.0-macOS-Apple芯片-20260726.zip`
+- 大小：`127371194` 字节
+- SHA-256：`5d447b883756270644f7697285acce66d025a159a0fcce875070474129ba52b0`
+
+两个包内 `git_commit`、`build_date=20260726`、版本、构建编号和运行指纹一致。
 
 ## 未验证边界
 
