@@ -15,7 +15,7 @@ test("validates the bounded allow-listed payload", () => {
     steps: "打开工作台后点击加载",
     diagnostics: {
       version: "0.12.2",
-      buildNumber: 2026072606,
+      buildNumber: 2026072701,
       platform: "mac",
       architecture: "arm64",
       connectorConnected: true,
