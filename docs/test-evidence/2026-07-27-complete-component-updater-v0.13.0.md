@@ -47,5 +47,12 @@
 
 ## 发布状态
 
-- 本地开发、安装同步和自动测试完成。
-- 用户已确认正式发布，当前进入干净提交、重建包和公开 Release 流程。
+- 源码提交：`a9a222783350bad98fc758869fe57a11d35f3e2b`
+- 源码标签：`v0.13.0`
+- 公开发行：`zer0-lyz/tianyuan-browser-workbench-releases` 的 `v0.13.0`
+- 发布状态：Latest，五个发行资产均为 `uploaded`
+- Windows 包 SHA-256：`f49777a1e7f59496ca924d071bc601dc25eb721119f5dbaed9a996e0ece03b8e`
+- macOS ARM64 包 SHA-256：`d59d35d53eb27eb901abf58ebca69cec2d8663fab66bbb0cc6748dad5c018d69`
+- 更新清单 SHA-256：`14fc7f33acc93dbefcba50583e9b826cde5027191c131d0ae2ce93b4a6cbee0e`
+- 在线匿名检查：`0.12.2` 返回 `updateAvailable=true`，`0.13.0` 返回 `updateAvailable=false`
+- Windows 截图中的乱码与 `'exe' 不是内部或外部命令` 来自旧 `0.12.2` 包；`0.13.0` 包内中英文 CMD 均已验证为 ASCII/CRLF。

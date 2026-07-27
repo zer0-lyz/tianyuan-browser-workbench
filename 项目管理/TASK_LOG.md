@@ -9,7 +9,11 @@
 - macOS、Windows 安装器统一调用 `scripts/install-local-runtime.mjs` 同步完整运行组件。
 - 修复 Windows `安装.cmd` 的 UTF-8 中文和 LF 换行解析故障，新增中英文 ASCII/CRLF 启动器与 BOM PowerShell 主脚本。
 - 版本升级为工作台 `0.13.0`、Connector `0.4.2`。
-- 本轮未执行天源线上写入；用户已确认正式发布，进入提交和 Release 流程。
+- 本轮未执行天源线上写入。
+- 源码提交 `a9a222783350bad98fc758869fe57a11d35f3e2b` 和标签 `v0.13.0` 已推送。
+- 公开 `v0.13.0` Release 已发布并标记为 Latest，五个发行资产均为 `uploaded`。
+- Windows 正式包 SHA-256：`f49777a1e7f59496ca924d071bc601dc25eb721119f5dbaed9a996e0ece03b8e`。
+- 在线更新检查确认：`0.12.2` 可发现 `0.13.0`，`0.13.0` 无更新。
 
 ## 2026-07-26 侧栏状态区压缩与工具入口调整
 
