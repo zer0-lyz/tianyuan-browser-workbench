@@ -8,7 +8,7 @@
 - 新增 `tests/windows-agent-install-prompt.test.cjs`，并扩展 Windows 编码测试验证提示词 BOM。
 - 功能源码提交为 `73f91a9ec23d66e40581a629f72f6022370b0d1b`。
 - 从干净提交重建的 Windows `0.13.1` 测试包为 `source_dirty=false`，ZIP 完整性、哈希和内容校验通过，SHA-256 为 `733612dc1737a9ba85bd1005d05fa4c3b45953f446fb5712764a68d25d46e243`。
-- 未执行天源线上写入；本轮完成本地提交，未推送或发布。
+- 未执行天源线上写入；功能与打包证据已推送源码仓库 `main`，尚未发布 `v0.13.1` Release。
 
 ## 2026-07-27 完整组件一键更新
 

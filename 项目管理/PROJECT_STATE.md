@@ -10,7 +10,7 @@
 - 本地测试包为 `source_dirty=false`，运行指纹为 `2c1b0e89b01acbfe72a6ec2927b5c4c4a93bc56b416f82071dd67f4260ed1a32`。
 - 本地测试包 SHA-256：`733612dc1737a9ba85bd1005d05fa4c3b45953f446fb5712764a68d25d46e243`。
 - 已完成提示词、编码、静态契约、ZIP 完整性和提示词 BOM 校验；尚未在真实 Windows 机器执行。
-- 用户已确认提交，本轮完成本地 Git 提交；仍未推送或发布 GitHub Release。
+- 功能提交 `73f91a9` 和打包证据提交 `bc496fb` 已推送源码仓库 `main`；尚未发布 `v0.13.1` GitHub Release。
 
 ## 2026-07-27 完整更新正式发布
 
