@@ -226,27 +226,43 @@ function Refresh-ProcessPath {
   $env:Path = "$MachinePath;$UserPath"
 }
 
+function Add-TycpvPathCandidates($Candidates, [string]$Directory) {
+  if (-not $Directory) {
+    return
+  }
+  $Candidates.Add((Join-Path $Directory "tycpv.exe"))
+  $Candidates.Add((Join-Path $Directory "bin\tycpv.exe"))
+  $Candidates.Add((Join-Path $Directory "tycpv.cmd"))
+  $Candidates.Add((Join-Path $Directory "bin\tycpv.cmd"))
+}
+
+function Test-TycpvExecutableCandidate([string]$Candidate) {
+  if (-not $Candidate) {
+    return $false
+  }
+  if (-not (Test-Path -LiteralPath $Candidate -PathType Leaf)) {
+    return $false
+  }
+  return $Candidate -match "\.(exe|cmd)$"
+}
+
 function Find-Tycpv {
   Refresh-ProcessPath
   $Command = Get-Command "tycpv.exe" -ErrorAction SilentlyContinue
-  if ($Command -and (Test-Path -LiteralPath $Command.Source)) {
+  if ($Command -and (Test-TycpvExecutableCandidate $Command.Source)) {
+    return $Command.Source
+  }
+  $Command = Get-Command "tycpv.cmd" -ErrorAction SilentlyContinue
+  if ($Command -and (Test-TycpvExecutableCandidate $Command.Source)) {
     return $Command.Source
   }
 
   $Candidates = New-Object System.Collections.Generic.List[string]
-  $Candidates.Add((Join-Path $env:LOCALAPPDATA "Programs\tycpv\tycpv.exe"))
-  $Candidates.Add((Join-Path $env:LOCALAPPDATA "Programs\tycpv\bin\tycpv.exe"))
-  $Candidates.Add((Join-Path $env:LOCALAPPDATA "tycpv\tycpv.exe"))
-  $Candidates.Add((Join-Path $env:LOCALAPPDATA "tycpv\bin\tycpv.exe"))
-  $Candidates.Add((Join-Path $env:USERPROFILE ".tycpv\bin\tycpv.exe"))
-  if ($env:ProgramFiles) {
-    $Candidates.Add((Join-Path $env:ProgramFiles "tycpv\tycpv.exe"))
-    $Candidates.Add((Join-Path $env:ProgramFiles "tycpv\bin\tycpv.exe"))
-  }
-  if (${env:ProgramFiles(x86)}) {
-    $Candidates.Add((Join-Path ${env:ProgramFiles(x86)} "tycpv\tycpv.exe"))
-    $Candidates.Add((Join-Path ${env:ProgramFiles(x86)} "tycpv\bin\tycpv.exe"))
-  }
+  Add-TycpvPathCandidates $Candidates (Join-Path $env:LOCALAPPDATA "Programs\tycpv")
+  Add-TycpvPathCandidates $Candidates (Join-Path $env:LOCALAPPDATA "tycpv")
+  Add-TycpvPathCandidates $Candidates (Join-Path $env:USERPROFILE ".tycpv")
+  if ($env:ProgramFiles) { Add-TycpvPathCandidates $Candidates (Join-Path $env:ProgramFiles "tycpv") }
+  if (${env:ProgramFiles(x86)}) { Add-TycpvPathCandidates $Candidates (Join-Path ${env:ProgramFiles(x86)} "tycpv") }
 
   foreach ($RegistryRoot in @(
     "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
@@ -256,19 +272,18 @@ function Find-Tycpv {
     Get-ItemProperty $RegistryRoot -ErrorAction SilentlyContinue |
       Where-Object { $_.DisplayName -match "tycpv" } |
       ForEach-Object {
-        if ($_.InstallLocation) {
-          $Candidates.Add((Join-Path $_.InstallLocation "tycpv.exe"))
-          $Candidates.Add((Join-Path $_.InstallLocation "bin\tycpv.exe"))
-        }
+        if ($_.InstallLocation) { Add-TycpvPathCandidates $Candidates $_.InstallLocation }
         if ($_.DisplayIcon) {
           $IconPath = ([string]$_.DisplayIcon).Split(",")[0].Trim('"')
-          $Candidates.Add($IconPath)
+          if ($IconPath -match "\.(exe|cmd)$") {
+            $Candidates.Add($IconPath)
+          }
         }
       }
   }
 
   foreach ($Candidate in $Candidates) {
-    if ($Candidate -and (Test-Path -LiteralPath $Candidate)) {
+    if (Test-TycpvExecutableCandidate $Candidate) {
       return (Resolve-Path -LiteralPath $Candidate).Path
     }
   }
@@ -281,7 +296,7 @@ function Find-Tycpv {
     if (-not $SearchRoot -or -not (Test-Path -LiteralPath $SearchRoot)) {
       continue
     }
-    $Match = Get-ChildItem -LiteralPath $SearchRoot -Filter "tycpv.exe" -File -Recurse -ErrorAction SilentlyContinue |
+    $Match = Get-ChildItem -LiteralPath $SearchRoot -Include "tycpv.exe", "tycpv.cmd" -File -Recurse -ErrorAction SilentlyContinue |
       Select-Object -First 1
     if ($Match) {
       return $Match.FullName
@@ -466,7 +481,7 @@ try {
     Write-Host "检测到已有天源 CLI，跳过安装。"
   }
   if (-not $TycpvExe) {
-    throw "天源 CLI 已运行安装程序，但没有找到 tycpv.exe。"
+    throw "天源 CLI 已运行安装程序，但没有找到可运行的 tycpv.exe 或 tycpv.cmd。"
   }
   $TycpvVersion = (& $TycpvExe --version 2>&1 | Select-Object -First 1)
   if ($LASTEXITCODE -ne 0) {
