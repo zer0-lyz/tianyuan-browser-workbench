@@ -10,7 +10,7 @@ export const updatesTemplate = `
     <div class="section-title-row">
       <div>
         <h2 id="updateHeadline">正在读取当前版本</h2>
-        <p id="updateDescription" class="section-description">更新检查不使用 MCP token，也不会修改当前安装。</p>
+        <p id="updateDescription" class="section-description">检查不使用 MCP token；安装前会再次确认。</p>
       </div>
       <span id="updateBadge" class="badge">未检查</span>
     </div>
@@ -23,9 +23,14 @@ export const updatesTemplate = `
       <div><dt>最后检查</dt><dd id="updateCheckedAt">-</dd></div>
     </dl>
     <div id="updateFeedback" class="inline-feedback">尚未检查 GitHub Release</div>
+    <div id="updateProgressPanel" class="update-progress hidden">
+      <progress id="updateProgressBar" max="100" value="0"></progress>
+      <span id="updateProgressText">等待开始</span>
+    </div>
     <div class="button-row">
       <button id="checkForUpdates" type="button">检查更新</button>
-      <button id="downloadUpdate" type="button" disabled>下载更新</button>
+      <button id="installUpdate" type="button" disabled>更新全部组件</button>
+      <button id="downloadUpdate" type="button" class="secondary" disabled>手动下载安装包</button>
       <button id="openReleasePage" type="button" class="secondary" disabled>查看发布页</button>
     </div>
   </section>
@@ -33,7 +38,7 @@ export const updatesTemplate = `
     <div class="section-title-row">
       <div>
         <h2>更新内容</h2>
-        <p class="section-description">下载安装包后仍由本机安装程序完成更新，当前版本不会被静默覆盖。</p>
+        <p class="section-description">完整更新会同步扩展、Native Helper、Bridge、Connector 和 Agent 插件缓存。</p>
       </div>
     </div>
     <ul id="updateNotes" class="update-notes">

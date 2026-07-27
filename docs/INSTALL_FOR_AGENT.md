@@ -14,6 +14,18 @@ The script copies runtime files locally, registers the Chrome Native Messaging h
 
 It also writes `runtime-compat.json` next to the Native Helper and verifies that the installed extension version and browser identity contract match the Bridge runtime.
 
+## Updates
+
+Version `0.13.0` adds a full component updater:
+
+1. Check the fixed public GitHub Releases repository.
+2. Ask the user to confirm the update.
+3. Download the platform package and verify SHA-256.
+4. Update extension, Native Helper, Bridge, Connector, `~/plugins/`, and the Codex plugin cache.
+5. Restart Connector and reload the unpacked extension.
+
+Machines running `0.12.2` or earlier must manually install `0.13.0` once because their old Native Helper does not know the install action. Later releases can use **更新全部组件**.
+
 If Python print dependencies are unavailable, installation stops with `PRINT_PYTHON_OPENPYXL_NOT_FOUND` before registering a partial runtime.
 
 ## Browser Setup

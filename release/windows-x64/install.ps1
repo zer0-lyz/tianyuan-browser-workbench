@@ -10,6 +10,7 @@ $NativeHelperDir = Join-Path $InstallRoot "native-helper"
 $NativeHostExe = Join-Path $NativeHelperDir "native_host.exe"
 $PythonDir = Join-Path $InstallRoot "python"
 $BundledPythonExe = Join-Path $PythonDir "python.exe"
+$BundledNodeExe = Join-Path $RootDir "runtime\node\node.exe"
 $PythonExe = $null
 $PrintSkillsDir = Join-Path $InstallRoot "print-format-skills"
 $ManifestPath = Join-Path $NativeHelperDir "com.tianyuan.workbench.helper.json"
@@ -28,6 +29,37 @@ $ExtensionBackupPath = $null
 $NativeHelperBackupPath = $null
 $PackageVersion = "未知"
 $PackageBuildNumber = "未知"
+$UpdateMode = $env:TIANYUAN_UPDATE_MODE -eq "1"
+$UpdateStatusPath = [string]$env:TIANYUAN_UPDATE_STATUS_PATH
+
+function Write-UpdateStatus(
+  [string]$Phase,
+  [int]$Percent,
+  [string]$Message,
+  [string]$Reason = ""
+) {
+  if (-not $UpdateStatusPath) {
+    return
+  }
+  $Payload = [ordered]@{
+    ok = $Phase -ne "failed"
+    action = "workbench_update"
+    phase = $Phase
+    percent = $Percent
+    message = $Message
+    updatedAt = [DateTime]::UtcNow.ToString("o")
+    security = @{ credentialsReturned = $false; tokenUsed = $false }
+  }
+  if ($Reason) {
+    $Payload.reason = Protect-Message $Reason
+  }
+  New-Item -ItemType Directory -Path (Split-Path -Parent $UpdateStatusPath) -Force | Out-Null
+  [IO.File]::WriteAllText(
+    $UpdateStatusPath,
+    ($Payload | ConvertTo-Json -Depth 5),
+    [Text.UTF8Encoding]::new($false)
+  )
+}
 
 function Write-Step([string]$Message) {
   $script:CurrentStep = $Message
@@ -402,6 +434,9 @@ try {
   Test-PackagePrefix "extension/"
   Test-PackagePrefix "native-helper/"
   Test-PackagePrefix "skills/"
+  Test-PackagePrefix "plugins/tianyuan-browser-connector/"
+  Test-PackagePrefix "runtime/node/"
+  Test-PackageFile "scripts/install-local-runtime.mjs"
   $PackageVersionConfig = Get-Content -LiteralPath (Join-Path $RootDir "extension\version.json") -Raw -Encoding UTF8 | ConvertFrom-Json
   $PackageVersion = [string]$PackageVersionConfig.productVersion
   $PackageBuildNumber = [string]$PackageVersionConfig.buildNumber
@@ -485,103 +520,48 @@ try {
     throw "最终 Python 环境或 openpyxl 无法运行。"
   }
 
-  Write-Step "5/7 安装扩展、Native Host 和打印格式脚本"
-  Stop-ExistingConnector
-  $ExtensionBackupPath = Install-DirectoryAtomic (Join-Path $RootDir "extension") $ExtensionDir
-  $NativeHelperBackupPath = Install-DirectoryAtomic `
-    (Join-Path $RootDir "native-helper") `
-    $NativeHelperDir `
-    @(
-      "agent-sources.json",
-      "agent-credentials.json",
-      "connector-bindings.json",
-      "native_host.log"
-    )
-  Copy-DirectoryContents (Join-Path $RootDir "skills\appraisal-detail-print-format") (Join-Path $PrintSkillsDir "appraisal-detail-print-format")
-  Copy-DirectoryContents (Join-Path $RootDir "skills\appraisal-declaration-print-format") (Join-Path $PrintSkillsDir "appraisal-declaration-print-format")
-
-  if (-not (Test-Path -LiteralPath $NativeHostExe)) {
-    throw "Native Host 可执行文件没有安装成功。"
+  Write-Step "5/7 同步扩展、Native Helper、Bridge 和 Connector"
+  Write-UpdateStatus "installing" 88 "正在同步全部工作台组件"
+  if (-not (Test-Path -LiteralPath $BundledNodeExe)) {
+    throw "安装包缺少 Node.js 运行时。"
   }
-  if (Test-Path -LiteralPath (Join-Path $NativeHelperDir "native-helper")) {
-    throw "Native Helper 目录发生异常嵌套。"
+  $env:TIANYUAN_PYTHON_BIN = $PythonExe
+  $env:TIANYUAN_BUNDLED_NODE_SOURCE = $BundledNodeExe
+  $env:TIANYUAN_NODE_BIN = $BundledNodeExe
+  $env:TYCPV_BIN = $TycpvExe
+  $env:TIANYUAN_UPDATE_DEFER_COMPLETE = "1"
+  $InstallJson = (& $BundledNodeExe (Join-Path $RootDir "scripts\install-local-runtime.mjs") 2>&1 | Out-String).Trim()
+  if ($LASTEXITCODE -ne 0) {
+    throw "本机运行组件同步失败：$InstallJson"
+  }
+  $InstallResult = $InstallJson | ConvertFrom-Json
+  if (-not $InstallResult.ok) {
+    throw "本机运行组件同步未通过：$InstallJson"
   }
 
-  $RuntimeConfig = [ordered]@{
-    version = 1
-    tycpvBin = $TycpvExe
-    pythonBin = $PythonExe
-    printSkillsDir = $PrintSkillsDir
+  Write-Step "6/7 检查 Native Messaging 和 Agent 插件"
+  $ExtensionDir = [string]$InstallResult.extensionPath
+  $ManifestPath = [string]$InstallResult.nativeManifest
+  $NativeHostLauncher = Join-Path $NativeHelperDir "native_host_launcher.cmd"
+  $ManagedNodeExe = [string]$InstallResult.nodeRuntimePath
+  if (-not (Test-Path -LiteralPath $ExtensionDir)) {
+    throw "浏览器扩展运行目录没有安装成功。"
   }
-  [IO.File]::WriteAllText(
-    $RuntimeConfigPath,
-    ($RuntimeConfig | ConvertTo-Json -Depth 3),
-    [Text.UTF8Encoding]::new($false)
-  )
-  $AgentSourcesPath = Join-Path $NativeHelperDir "agent-sources.json"
-  if (-not (Test-Path -LiteralPath $AgentSourcesPath)) {
-    [IO.File]::WriteAllText(
-      $AgentSourcesPath,
-      (@{ version = 1; sources = @() } | ConvertTo-Json -Depth 3),
-      [Text.UTF8Encoding]::new($false)
-    )
+  if (-not (Test-Path -LiteralPath $NativeHostLauncher)) {
+    throw "Native Host 启动器没有安装成功。"
   }
-
-  Write-Step "6/7 注册 Chrome Native Messaging"
-  $Manifest = [ordered]@{
-    name = "com.tianyuan.workbench.helper"
-    description = "Tianyuan Browser Workbench native helper"
-    path = $NativeHostExe
-    type = "stdio"
-    allowed_origins = @(
-      "chrome-extension://$ExtensionId/",
-      "chrome-extension://$LegacyExtensionId/"
-    )
+  if (-not (Test-Path -LiteralPath $InstallResult.connectorPath)) {
+    throw "Connector 插件没有安装成功。"
   }
-  $ManifestJson = $Manifest | ConvertTo-Json -Depth 4
-  [IO.File]::WriteAllText($ManifestPath, $ManifestJson, [Text.UTF8Encoding]::new($false))
-  foreach ($RegistryPath in @($ChromeRegistryPath, $EdgeRegistryPath)) {
-    New-Item -Path $RegistryPath -Force | Out-Null
-    Set-Item -Path $RegistryPath -Value $ManifestPath
+  if (-not (Test-Path -LiteralPath $InstallResult.codexConnectorCachePath)) {
+    throw "Codex Connector 缓存没有安装成功。"
   }
 
   Write-Step "7/7 执行环境检查"
-  $InstalledManifest = Get-Content -LiteralPath (Join-Path $ExtensionDir "manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
-  $ExtensionContract = Get-Content -LiteralPath (Join-Path $ExtensionDir "runtime-compat.json") -Raw -Encoding UTF8 | ConvertFrom-Json
-  $NativeContract = Get-Content -LiteralPath (Join-Path $NativeHelperDir "runtime-compat.json") -Raw -Encoding UTF8 | ConvertFrom-Json
-  if ($InstalledManifest.version -ne $ExtensionContract.extensionVersion) {
-    throw "扩展版本与扩展运行契约不一致。"
-  }
-  if ($ExtensionContract.extensionVersion -ne $NativeContract.extensionVersion) {
-    throw "扩展与 Native Helper 版本不一致。"
-  }
-  if (-not $ExtensionContract.runtimeBuildId -or $ExtensionContract.runtimeBuildId -ne $NativeContract.runtimeBuildId) {
-    throw "扩展与 Native Helper 运行指纹不一致。"
-  }
+  $ExtensionContract = $InstallResult.runtimeCompatibility
   $OpenpyxlVersion = (& $PythonExe -c "import openpyxl; print(openpyxl.__version__)").Trim()
-  $env:TIANYUAN_RUNTIME_CONFIG_PATH = $RuntimeConfigPath
-  $SelfTestJson = (& $NativeHostExe --self-test 2>&1 | Out-String).Trim()
-  if ($LASTEXITCODE -ne 0) {
-    throw "Native Host 自检失败：$SelfTestJson"
-  }
-  $SelfTest = $SelfTestJson | ConvertFrom-Json
-  if (-not $SelfTest.ok -or -not $SelfTest.pythonAvailable) {
-    throw "Native Host 自检未通过：$SelfTestJson"
-  }
-  $ConnectorJson = (& $NativeHostExe --start-connector --force-restart 2>&1 | Out-String).Trim()
-  if ($LASTEXITCODE -ne 0) {
-    throw "Connector 自动启动失败：$ConnectorJson"
-  }
-  $Connector = $ConnectorJson | ConvertFrom-Json
-  if (-not $Connector.ok -or -not $Connector.connector.ok) {
-    throw "Connector 自动启动未通过：$ConnectorJson"
-  }
-  if ($Connector.connector.runtimeCompatibility.extensionVersion -ne $InstalledManifest.version) {
-    throw "Connector 启动版本与已安装扩展不一致。"
-  }
-  if ($Connector.connector.runtimeCompatibility.runtimeBuildId -ne $ExtensionContract.runtimeBuildId) {
-    throw "Connector 启动指纹与已安装扩展不一致。"
-  }
+  $SelfTestJson = $InstallResult.selfTest | ConvertTo-Json -Depth 8 -Compress
+  $ConnectorJson = $InstallResult.connector | ConvertTo-Json -Depth 8 -Compress
 
   $InstallMode = if (-not $UsedBundledCli -and -not $UsedBundledPython -and -not $InstalledPrintDependencies) {
     "快速安装（复用已有 CLI、Python 和打印依赖）"
@@ -602,7 +582,8 @@ try {
     "运行指纹：$($ExtensionContract.runtimeBuildId)"
     "扩展目录：$ExtensionDir"
     "扩展 ID：$ExtensionId"
-    "Native Host：$NativeHostExe"
+    "Native Host：$NativeHostLauncher"
+    "Node 运行时：$ManagedNodeExe"
     "Chrome Native Host 注册：$ChromeRegistryPath -> $ManifestPath"
     "Edge Native Host 注册：$EdgeRegistryPath -> $ManifestPath"
     "运行配置：$RuntimeConfigPath"
@@ -612,6 +593,8 @@ try {
     "天源 CLI 版本：$TycpvVersion"
     "自检：$SelfTestJson"
     "Connector：$ConnectorJson"
+    "Connector 插件：$($InstallResult.connectorPath)"
+    "Codex Connector 缓存：$($InstallResult.codexConnectorCachePath)"
     "安全：安装程序未写入 MCP token、Cookie、Authorization、密码或验证码。"
   ) | Set-Content -LiteralPath $ReportPath -Encoding UTF8
 
@@ -626,19 +609,22 @@ try {
   Write-Host "安装完成。" -ForegroundColor Green
   Write-Host "安装模式：$InstallMode"
   Write-Host "耗时：$ElapsedSeconds 秒"
-  Write-Host "请完全退出所有 Chrome 或 Edge 窗口后重新打开浏览器。"
-  Write-Host "然后在扩展管理页加载以下文件夹："
+  Write-Host "扩展管理页应加载以下固定本机目录："
   Write-Host $ExtensionDir -ForegroundColor Yellow
   Write-Host ""
   Write-Host "安装检查结果：$ReportPath"
 
-  Start-Process "explorer.exe" -ArgumentList "`"$ExtensionDir`""
-  $ExtensionPage = if ($BrowserExe -match '(?i)msedge\.exe$') { "edge://extensions/" } else { "chrome://extensions/" }
-  Start-Process $BrowserExe -ArgumentList $ExtensionPage
+  Write-UpdateStatus "complete" 100 "全部组件更新完成，浏览器扩展可重新加载"
+  if (-not $UpdateMode) {
+    Start-Process "explorer.exe" -ArgumentList "`"$ExtensionDir`""
+    $ExtensionPage = if ($BrowserExe -match '(?i)msedge\.exe$') { "edge://extensions/" } else { "chrome://extensions/" }
+    Start-Process $BrowserExe -ArgumentList $ExtensionPage
+  }
   exit 0
 }
 catch {
   $OriginalError = $_
+  Write-UpdateStatus "failed" 0 "完整更新失败" $OriginalError.Exception.Message
   if ($NativeHelperBackupPath -or $ExtensionBackupPath) {
     try { Stop-ExistingConnector } catch {}
     Restore-PreviousDirectory $NativeHelperDir $NativeHelperBackupPath

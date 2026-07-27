@@ -1,5 +1,16 @@
 # 天源浏览器工作台任务日志
 
+## 2026-07-27 完整组件一键更新
+
+- 确认旧“自动更新 Connector”实际只重启旧 Bridge，没有复制新 Connector 或 Codex 缓存。
+- 新增 `native-helper/update_installer.js`，固定公开发行仓库，下载平台包、校验 SHA-256、解压并启动独立安装程序。
+- 新增更新状态文件与侧栏轮询，显示检查、下载、校验、解压、安装和完成阶段。
+- 更新完成后调用 `chrome.runtime.reload()`；Agent MCP 进程仍为旧版本时提示重启 Codex 或 WorkBuddy。
+- macOS、Windows 安装器统一调用 `scripts/install-local-runtime.mjs` 同步完整运行组件。
+- 修复 Windows `安装.cmd` 的 UTF-8 中文和 LF 换行解析故障，新增中英文 ASCII/CRLF 启动器与 BOM PowerShell 主脚本。
+- 版本升级为工作台 `0.13.0`、Connector `0.4.2`。
+- 本轮未执行天源线上写入；用户已确认正式发布，进入提交和 Release 流程。
+
 ## 2026-07-26 侧栏状态区压缩与工具入口调整
 
 ### 任务目标

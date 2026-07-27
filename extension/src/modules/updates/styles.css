@@ -20,3 +20,18 @@
 [data-module-id="updates"] .update-notes li {
   line-height: 1.45;
 }
+
+[data-module-id="updates"] .update-progress {
+  display: grid;
+  gap: 6px;
+}
+
+[data-module-id="updates"] .update-progress progress {
+  width: 100%;
+  height: 12px;
+}
+
+[data-module-id="updates"] .update-progress span {
+  color: var(--muted);
+  font-size: 12px;
+}

@@ -41,6 +41,17 @@ const updateChecker = (() => {
     }
   }
 })();
+const updateInstallerFactory = (() => {
+  try {
+    return require("./update_installer.js");
+  } catch (cause) {
+    try {
+      return createRequire(path.join(path.dirname(process.execPath), "native_host.js"))("./update_installer.js");
+    } catch {
+      throw cause;
+    }
+  }
+})();
 const platformAdapter = (() => {
   try {
     return require("./platform/index.js");
@@ -94,6 +105,11 @@ function loadRuntimeConfig() {
 }
 
 const runtimeConfig = loadRuntimeConfig();
+const workbenchUpdater = updateInstallerFactory.createWorkbenchUpdater({
+  updateChecker,
+  platformAdapter,
+  runtimeDirectory: processLauncher.runtimeDirectory(),
+});
 
 function firstExistingPath(values, fallback) {
   for (const value of values) {
@@ -2163,6 +2179,16 @@ async function handle(message) {
       platform: process.platform,
       architecture: process.arch,
     });
+  }
+  if (message?.action === "install_workbench_update") {
+    return await workbenchUpdater.install({
+      currentVersion: message.currentVersion,
+      currentBuildNumber: message.currentBuildNumber,
+      currentRuntimeBuildId: message.currentRuntimeBuildId,
+    });
+  }
+  if (message?.action === "get_workbench_update_status") {
+    return workbenchUpdater.getStatus();
   }
   if (message?.action === "cli_login") {
     return await startCliLogin();

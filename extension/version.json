@@ -1,17 +1,18 @@
 {
   "schemaVersion": 1,
-  "productVersion": "0.12.2",
-  "chromeVersion": "0.12.2",
-  "versionName": "0.12.2",
+  "productVersion": "0.13.0",
+  "chromeVersion": "0.13.0",
+  "versionName": "0.13.0",
   "channel": "stable",
-  "buildNumber": 2026072701,
+  "buildNumber": 2026072703,
   "repository": "zer0-lyz/tianyuan-browser-workbench-releases",
   "bridgeProtocol": "connector-agent-binding-v3",
   "minimumSupportedVersion": "0.8.3",
   "mandatory": false,
   "releaseNotes": [
-    "顶部连接状态改为紧凑状态栏，显著减少首屏占用",
-    "版本更新和反馈调整为顶部工具入口，不再计入功能模块",
-    "首页只展示八个实际业务功能"
+    "新增更新全部组件，一次同步扩展、Native Helper、Bridge、Connector 和 Agent 插件缓存",
+    "更新包下载后执行 SHA-256 校验，失败时停止安装并显示明确原因",
+    "更新完成后自动重新加载浏览器扩展，旧版 Native Helper 保留手动安装兜底",
+    "修复 Windows 双击安装入口的编码与换行兼容问题，无需 Agent 配置运行组件"
   ]
 }

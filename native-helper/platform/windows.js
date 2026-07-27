@@ -1,6 +1,6 @@
 "use strict";
 
-const { execFile, execFileSync } = require("node:child_process");
+const { execFile, execFileSync, spawn } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -96,6 +96,60 @@ function createWindowsAdapter(options = {}) {
         windowsHide: true,
       }, (error) => resolve(!error));
     });
+  }
+
+  async function extractZip(zipPath, destination) {
+    fs.mkdirSync(destination, { recursive: true });
+    const script = [
+      "$ErrorActionPreference = 'Stop'",
+      `Expand-Archive -LiteralPath '${String(zipPath).replace(/'/g, "''")}' -DestinationPath '${String(destination).replace(/'/g, "''")}' -Force`,
+    ].join("\n");
+    await new Promise((resolve, reject) => {
+      const encoded = Buffer.from(script, "utf16le").toString("base64");
+      runFile("powershell.exe", [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-EncodedCommand",
+        encoded,
+      ], { timeout: 180000, windowsHide: true }, (error) =>
+        error ? reject(error) : resolve()
+      );
+    });
+  }
+
+  function launchWorkbenchInstaller({
+    installerPath,
+    statusPath,
+    logPath,
+    parentPid,
+  }) {
+    const runnerPath = path.join(path.dirname(statusPath), "run-update.ps1");
+    const quote = (value) => String(value).replace(/'/g, "''");
+    fs.writeFileSync(runnerPath, [
+      "$ErrorActionPreference = 'Continue'",
+      `while (Get-Process -Id ${Number(parentPid)} -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 200 }`,
+      "$env:TIANYUAN_UPDATE_MODE = '1'",
+      `$env:TIANYUAN_UPDATE_STATUS_PATH = '${quote(statusPath)}'`,
+      `& '${quote(installerPath)}' *>> '${quote(logPath)}'`,
+      "exit $LASTEXITCODE",
+      "",
+    ].join("\r\n"), "utf8");
+    const child = spawn("powershell.exe", [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      runnerPath,
+    ], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+      env: { ...env },
+    });
+    child.unref();
+    return { pid: child.pid, runnerPath };
   }
 
   function createCredentialReference({ fallbackPath, key, secret }) {
@@ -216,6 +270,8 @@ function createWindowsAdapter(options = {}) {
     createCredentialReference,
     diagnostics,
     listenerPids,
+    extractZip,
+    launchWorkbenchInstaller,
     resolveCredentialReference,
     terminateProcess,
   };

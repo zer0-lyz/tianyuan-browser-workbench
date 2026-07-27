@@ -13,13 +13,16 @@ const EXTENSION_IDS = [
   "fdbllnmaaklkcmoacoapbibiggnndkfpa",
 ];
 const PROJECT_NAME = "天源评估系统";
-const CONNECTOR_VERSION = "0.4.1";
 const require = createRequire(import.meta.url);
 const connectorBridge = require("../native-helper/connector_bridge.js");
 const { createPlatformAdapter } = require("../native-helper/platform/index.js");
 const platformAdapter = createPlatformAdapter();
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const CONNECTOR_VERSION = JSON.parse(fs.readFileSync(
+  path.join(repoRoot, "plugins", "tianyuan-browser-connector", ".codex-plugin", "plugin.json"),
+  "utf8",
+)).version;
 const isWindows = platformAdapter.isWindows;
 const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
 const runtimeProjectRoot = process.env.TIANYUAN_PROJECT_RUNTIME_ROOT || (isWindows
@@ -41,6 +44,7 @@ const codexPluginRoot = path.join(
   "tianyuan-browser-connector",
   CONNECTOR_VERSION,
 );
+const updateStatusPath = String(process.env.TIANYUAN_UPDATE_STATUS_PATH || "").trim();
 
 function mustExist(targetPath, label) {
   if (!fs.existsSync(targetPath)) throw new Error(`${label} not found: ${targetPath}`);
@@ -138,6 +142,19 @@ function writePrivateJson(targetPath, value) {
   fs.mkdirSync(path.dirname(targetPath), { recursive: true, mode: 0o700 });
   fs.writeFileSync(targetPath, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   if (!isWindows) fs.chmodSync(targetPath, 0o600);
+}
+
+function writeUpdateStatus(phase, percent, extra = {}) {
+  if (!updateStatusPath) return;
+  writePrivateJson(updateStatusPath, {
+    ok: phase !== "failed",
+    action: "workbench_update",
+    phase,
+    percent,
+    updatedAt: new Date().toISOString(),
+    ...extra,
+    security: { credentialsReturned: false, tokenUsed: false },
+  });
 }
 
 function ensureCodexAgentSource() {
@@ -336,12 +353,28 @@ function writeWindowsNativeHost(nodeBin, pythonBin) {
       "/d",
       manifestPath,
       "/f",
-    ], { stdio: "inherit" });
+    ], { stdio: "ignore" });
   }
   return manifestPath;
 }
 
+function ensureNodeRuntime() {
+  if (!isWindows) {
+    return process.env.TIANYUAN_NODE_BIN || findExecutable(["node"]);
+  }
+  const source = process.env.TIANYUAN_BUNDLED_NODE_SOURCE
+    || (path.basename(process.execPath).toLowerCase() === "node.exe" ? process.execPath : "")
+    || findExecutable(["node.exe", "node"]);
+  mustExist(source, "Windows Node.js runtime");
+  const managedNode = path.join(nativeRuntimeRoot, "node", "node.exe");
+  if (path.resolve(source) !== path.resolve(managedNode)) {
+    copyFileAtomic(source, managedNode);
+  }
+  return managedNode;
+}
+
 function main() {
+  writeUpdateStatus("installing", 84, { message: "正在校验并同步本机运行文件" });
   mustExist(path.join(repoRoot, "extension", "manifest.json"), "extension manifest");
   mustExist(path.join(repoRoot, "native-helper", "native_host.js"), "native host");
   mustExist(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), "connector plugin");
@@ -381,7 +414,7 @@ function main() {
   copyDir(
     path.join(repoRoot, "native-helper"),
     path.join(runtimeProjectRoot, "native-helper"),
-    ["native_host.js", "connector_bridge.js", "process_launcher.js", "update_checker.js"],
+    ["native_host.js", "connector_bridge.js", "process_launcher.js", "update_checker.js", "update_installer.js"],
   );
   copyDir(path.join(repoRoot, "skills"), path.join(runtimeProjectRoot, "skills"));
   copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), path.join(runtimeProjectRoot, "plugins", "tianyuan-browser-connector"));
@@ -395,6 +428,7 @@ function main() {
   copyFileAtomic(path.join(repoRoot, "native-helper", "connector_bridge.js"), path.join(nativeRuntimeRoot, "connector_bridge.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "process_launcher.js"), path.join(nativeRuntimeRoot, "process_launcher.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "update_checker.js"), path.join(nativeRuntimeRoot, "update_checker.js"));
+  copyFileAtomic(path.join(repoRoot, "native-helper", "update_installer.js"), path.join(nativeRuntimeRoot, "update_installer.js"));
   copyDir(
     path.join(repoRoot, "native-helper", "platform"),
     path.join(nativeRuntimeRoot, "platform"),
@@ -417,7 +451,8 @@ function main() {
     writeAgentConfig(pluginRoot, codexAgentSource);
   }
 
-  const nodeBin = process.env.TIANYUAN_NODE_BIN || findExecutable(isWindows ? ["node.exe", "node"] : ["node"]);
+  const nodeBin = ensureNodeRuntime();
+  writeUpdateStatus("installing", 92, { message: "正在注册 Native Host 并重启 Connector" });
   const nativeManifest = isWindows
     ? writeWindowsNativeHost(nodeBin, printPython.path)
     : writeMacNativeHost(nodeBin, printPython.path);
@@ -475,6 +510,7 @@ function main() {
     },
     connectorPath: userPluginRoot,
     codexConnectorCachePath: codexPluginRoot,
+    nodeRuntimePath: nodeBin,
     runtimeCompatibility,
     agentSourceRegistryPath: sourcesPath,
     codexAgentSource: {
@@ -491,7 +527,27 @@ function main() {
       "Open the Tianyuan Workbench side panel and configure MCP token in the panel if needed.",
     ],
   };
+  const deferUpdateComplete = process.env.TIANYUAN_UPDATE_DEFER_COMPLETE === "1";
+  writeUpdateStatus(deferUpdateComplete ? "installing" : "complete", deferUpdateComplete ? 98 : 100, {
+    message: deferUpdateComplete ? "核心组件已更新，正在生成安装报告" : "全部组件已更新，正在重新加载浏览器扩展",
+    productVersion: versionConfig.productVersion,
+    buildNumber: versionConfig.buildNumber,
+    runtimeBuildId,
+    extensionPath: summary.extensionPath,
+    connectorPath: summary.connectorPath,
+    codexConnectorCachePath: summary.codexConnectorCachePath,
+  });
   console.log(JSON.stringify(summary, null, 2));
 }
 
-main();
+try {
+  main();
+} catch (error) {
+  writeUpdateStatus("failed", 0, {
+    reason: String(error?.message || error || "LOCAL_RUNTIME_INSTALL_FAILED")
+      .replace(/bearer\s+\S+/gi, "Bearer [REDACTED]")
+      .replace(/zhmcp_[A-Za-z0-9._-]+/gi, "[REDACTED]")
+      .slice(0, 500),
+  });
+  throw error;
+}

@@ -48,6 +48,12 @@ function createUnsupportedAdapter(options = {}) {
     async listenerPids() {
       return [];
     },
+    async extractZip() {
+      throw new Error("PLATFORM_UPDATE_UNSUPPORTED");
+    },
+    launchWorkbenchInstaller() {
+      throw new Error("PLATFORM_UPDATE_UNSUPPORTED");
+    },
     resolveCredentialReference(reference) {
       return common.resolveFileCredentialReference(reference);
     },

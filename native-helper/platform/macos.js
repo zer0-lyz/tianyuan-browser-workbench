@@ -1,6 +1,6 @@
 "use strict";
 
-const { execFile, execFileSync } = require("node:child_process");
+const { execFile, execFileSync, spawn } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -69,6 +69,41 @@ function createMacOSAdapter(options = {}) {
     } catch {
       return false;
     }
+  }
+
+  async function extractZip(zipPath, destination) {
+    fs.mkdirSync(destination, { recursive: true, mode: 0o700 });
+    await new Promise((resolve, reject) => {
+      runFile("/usr/bin/ditto", ["-x", "-k", zipPath, destination], {
+        timeout: 180000,
+      }, (error) => error ? reject(error) : resolve());
+    });
+  }
+
+  function launchWorkbenchInstaller({
+    installerPath,
+    statusPath,
+    logPath,
+    parentPid,
+  }) {
+    const runnerPath = path.join(path.dirname(statusPath), "run-update.sh");
+    fs.writeFileSync(runnerPath, [
+      "#!/bin/bash",
+      "set +e",
+      `while /bin/kill -0 ${Number(parentPid)} 2>/dev/null; do /bin/sleep 0.2; done`,
+      `export TIANYUAN_UPDATE_MODE=1`,
+      `export TIANYUAN_UPDATE_STATUS_PATH=${JSON.stringify(statusPath)}`,
+      `/bin/bash ${JSON.stringify(installerPath)} >> ${JSON.stringify(logPath)} 2>&1`,
+      "exit $?",
+      "",
+    ].join("\n"), { mode: 0o700 });
+    const child = spawn("/bin/bash", [runnerPath], {
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env },
+    });
+    child.unref();
+    return { pid: child.pid, runnerPath };
   }
 
   function createCredentialReference({ service, account, fallbackPath, key, secret }) {
@@ -151,6 +186,8 @@ function createMacOSAdapter(options = {}) {
     createCredentialReference,
     diagnostics,
     listenerPids,
+    extractZip,
+    launchWorkbenchInstaller,
     resolveCredentialReference,
     terminateProcess,
   };
