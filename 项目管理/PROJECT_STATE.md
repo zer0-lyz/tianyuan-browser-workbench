@@ -1,5 +1,15 @@
 # 天源浏览器工作台项目状态
 
+## 2026-07-27 Windows Agent 一键安装提示词包
+
+- 当前本地测试版本：工作台 `0.13.1` / 构建 `2026072704`，Connector 保持 `0.4.2`。
+- Windows 包根目录新增 `START_WITH_AGENT.txt` 和 `AGENT_INSTALL_PROMPT.md`，前者带 UTF-8 BOM，避免部分 Windows 记事本显示中文乱码。
+- 提示词支持两种入口：已解压包直接安装；无本地包时查询公开 Latest Release、下载、SHA-256 校验、安装并执行只读验收。
+- 本地测试包：`~/.tianyuan-workbench/releases/天源浏览器工作台-v0.13.1-Windows-x64-20260727.zip`。
+- 本地测试包 SHA-256：`bf3851549e774f9b4a7137f5dcb9d42d08a4122b79116c03869a9b781022fd88`。
+- 已完成提示词、编码、静态契约、ZIP 完整性和提示词 BOM 校验；尚未在真实 Windows 机器执行。
+- 用户要求稳定后再推送，本轮未提交、未推送或发布 GitHub Release。
+
 ## 2026-07-27 完整更新正式发布
 
 - 当前本地开发版本：工作台 `0.13.0` / 构建 `2026072703`，Connector `0.4.2`。

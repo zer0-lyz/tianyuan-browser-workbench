@@ -23,6 +23,10 @@ for (const name of ["install.ps1", "安装.ps1", "uninstall.ps1", "卸载.ps1"])
   assert.equal(payload.subarray(0, 3).equals(bom), true, `${name} must have UTF-8 BOM`);
 }
 
+const agentPrompt = fs.readFileSync(path.join(stageDir, "START_WITH_AGENT.txt"));
+assert.equal(agentPrompt.subarray(0, 3).equals(bom), true, "Agent prompt must have UTF-8 BOM");
+assert.equal(agentPrompt.toString("utf8").includes("不要只提供说明，请实际执行"), true);
+
 for (const name of ["install.cmd", "安装.cmd", "uninstall.cmd", "卸载.cmd"]) {
   const payload = fs.readFileSync(path.join(stageDir, name));
   assert.equal([...payload].every((value) => value < 128), true, `${name} must be ASCII only`);

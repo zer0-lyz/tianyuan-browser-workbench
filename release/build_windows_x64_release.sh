@@ -202,7 +202,7 @@ node "$ROOT_DIR/scripts/prepare-windows-launchers.mjs" \
   "$ROOT_DIR/release/windows-x64" \
   "$STAGE" >/dev/null
 cp "$ROOT_DIR/release/windows-x64/安装使用说明.md" "$STAGE/安装使用说明.md"
-cp "$ROOT_DIR/release/windows-x64/交给Agent安装.md" "$STAGE/交给Agent安装.md"
+cp "$ROOT_DIR/release/windows-x64/交给Agent安装.md" "$STAGE/AGENT_INSTALL_PROMPT.md"
 
 find "$STAGE" -type f \( -name ".DS_Store" -o -name "._*" \) -delete
 find "$STAGE" -type d -name "__MACOSX" -prune -exec rm -rf {} +
