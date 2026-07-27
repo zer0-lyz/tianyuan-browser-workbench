@@ -4384,7 +4384,7 @@ async function checkConnectorConnection({ silent = false } = {}) {
       reason: runtimeContractMissing
         ? "当前 Chrome 加载的不是安装器生成的本机运行扩展。请从本机运行目录重新加载扩展。"
         : mismatch
-        ? "Connector 运行副本与扩展不一致，请到“版本更新”执行完整更新。"
+        ? "Connector 运行副本与扩展不一致。请先完全退出 Chrome 或 Edge，再运行最新安装包内的 install.cmd 完成升级。"
         : (error?.message || String(error)),
     };
   }

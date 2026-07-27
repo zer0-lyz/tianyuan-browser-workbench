@@ -46,3 +46,9 @@
 
 - 当前仅完成 macOS 静态打包、ZIP 元数据和内容验证。
 - 仍需真实 Windows x64 环境执行 `install.cmd` 完成首次实机回归。
+
+## 后续故障
+
+- Windows 用户在 `0.13.1` 安装时反馈：Step `2/7 安装或检查天源 CLI` 检测到已有 CLI 后失败，错误为“无法在管道中间运行文档：D:\tycpv\tycpv.ico”。
+- 该问题已确认为安装器 `Find-Tycpv` 误把注册表 `DisplayIcon` 的 `.ico` 当作 CLI 候选，且旧逻辑只识别 `tycpv.exe`、不识别 Node 封装形式 `tycpv.cmd`。
+- 修复进入后续 `0.13.2`。

@@ -69,7 +69,7 @@ assert.equal(quotedConstant(sidepanel, "EXPECTED_CONNECTOR_PROTOCOL_VERSION"), q
 assert.equal(quotedConstant(nativeHost, "CONNECTOR_PROTOCOL_VERSION"), quotedConstant(bridge, "PROTOCOL_VERSION"));
 assert.equal(manifest.version, versionConfig.chromeVersion);
 assert.equal(manifest.version_name, versionConfig.versionName);
-assert.equal(versionConfig.productVersion, "0.13.1");
+assert.equal(versionConfig.productVersion, "0.13.2");
 assert.equal(versionConfig.repository, "zer0-lyz/tianyuan-browser-workbench-releases");
 
 assert.equal(pluginServer.includes(`version: "${pluginManifest.version}"`), true);
@@ -163,6 +163,9 @@ assert.equal(windowsInstaller.includes("function Stop-ExistingConnector"), true)
 assert.equal(windowsInstaller.includes("install-local-runtime.mjs"), true);
 assert.equal(windowsInstaller.includes("Restore-PreviousDirectory"), true);
 assert.equal(windowsInstaller.includes("codexConnectorCachePath"), true);
+assert.equal(windowsInstaller.includes("function Test-TycpvExecutableCandidate"), true);
+assert.equal(windowsInstaller.includes('"tycpv.cmd"'), true);
+assert.equal(windowsInstaller.includes('$IconPath -match "\\.(exe|cmd)$"'), true);
 assert.equal(bridge.includes("EXTENSION_RUNTIME_BUILD_MISMATCH"), true);
 assert.equal(nativeHost.includes("return connectorBridge.start({"), true);
 assert.equal(nativeHost.includes("platformAdapter.chooseDirectory"), true);
@@ -180,6 +183,7 @@ assert.equal(bridge.includes("platformAdapter.createCredentialReference"), true)
 assert.equal(platformIndex.includes('platform === "win32"'), true);
 assert.equal(platformIndex.includes('platform === "darwin"'), true);
 assert.equal(windowsPlatform.includes("windows-dpapi"), true);
+assert.equal(windowsPlatform.includes('"tycpv.cmd"'), true);
 assert.equal(macosPlatform.includes("macos-keychain"), true);
 assert.equal(installer.includes('"--start-connector", "--force-restart"'), true);
 assert.equal(/\bconnectorHandle\s*\(/.test(nativeHost.slice(nativeHost.indexOf("function startConnectorBridge()"))), false);
