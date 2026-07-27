@@ -16,7 +16,6 @@ for (const requiredText of [
   "tianyuan-workbench-v*-windows-x64.zip",
   "update-manifest.json",
   "SHA-256",
-  "安装.cmd",
   "install.cmd",
   "%LOCALAPPDATA%\\TianyuanWorkbench\\安装检查结果.txt",
   "%LOCALAPPDATA%\\TianyuanWorkbench\\projects\\天源评估系统\\extension",
@@ -34,6 +33,16 @@ assert.equal(
   launcherScript.includes('"START_WITH_AGENT.txt"'),
   true,
   "Windows package must include a copyable plain-text Agent prompt",
+);
+assert.equal(
+  launcherScript.includes('"AGENT_INSTALL_PROMPT.md"'),
+  true,
+  "Windows package must include a Markdown Agent prompt",
+);
+assert.equal(
+  launcherScript.includes('"INSTALL_README.md"'),
+  true,
+  "Windows package must include an ASCII-named install README",
 );
 
 console.log("Windows Agent install prompt tests passed.");
