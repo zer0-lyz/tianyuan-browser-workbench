@@ -21,6 +21,15 @@ function writeBomPowerShell(sourceName, outputNames) {
   }
 }
 
+function writeBomUtf8Text(sourceName, outputNames) {
+  const source = fs.readFileSync(path.join(sourceDir, sourceName));
+  const body = source.subarray(0, 3).equals(bom) ? source.subarray(3) : source;
+  const payload = Buffer.concat([bom, body]);
+  for (const outputName of outputNames) {
+    fs.writeFileSync(path.join(stageDir, outputName), payload);
+  }
+}
+
 function writeAsciiCmd(outputNames, powerShellName, successText, failureText) {
   const lines = [
     "@echo off",
@@ -44,6 +53,7 @@ function writeAsciiCmd(outputNames, powerShellName, successText, failureText) {
 fs.mkdirSync(stageDir, { recursive: true });
 writeBomPowerShell("install.ps1", ["install.ps1", "安装.ps1"]);
 writeBomPowerShell("uninstall.ps1", ["uninstall.ps1", "卸载.ps1"]);
+writeBomUtf8Text("交给Agent安装.md", ["START_WITH_AGENT.txt"]);
 writeAsciiCmd(
   ["install.cmd", "安装.cmd"],
   "install.ps1",
