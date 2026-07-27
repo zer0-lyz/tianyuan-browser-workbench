@@ -1,5 +1,15 @@
 # 天源浏览器工作台任务日志
 
+## 2026-07-27 Windows tycpv CLI 识别修复
+
+- 读取 Windows Agent 安装反馈文档和用户截图，确认安装停在 Step `2/7 安装或检查天源 CLI`。
+- 根因是安装器 `Find-Tycpv` 将注册表 `DisplayIcon` 中的 `.ico` 文件纳入候选，并且只识别 `tycpv.exe`，不识别 Node 封装的 `tycpv.cmd`。
+- 安装器新增 `Test-TycpvExecutableCandidate`，只接受 `.exe` 和 `.cmd`，并把 `tycpv.cmd` 加入 PATH、固定目录、注册表 `InstallLocation` 和递归搜索候选。
+- Native Helper Windows 平台适配同步加入 `tycpv.cmd` 候选，默认 fallback 改为 `tycpv.cmd`。
+- 侧栏 Connector 版本不一致文案改为提示退出浏览器并运行最新 `install.cmd`，不再暗示“启动 Connector”能更新本机运行副本。
+- 自动测试 6 项通过；正式 Windows `0.13.2` 包 SHA-256 为 `9a0ba31fe1bd85098b78ec5f1ec968a731ba25a40c5937255227a3473dbe5b43`。
+- 源码和标签已推送，公开 `v0.13.2` Release 已发布为 Latest；未执行天源线上写入。
+
 ## 2026-07-27 Windows Agent 一键安装提示词包
 
 - 将包内原有的“已解压目录交给 Agent”说明扩展为全流程自动安装提示词。

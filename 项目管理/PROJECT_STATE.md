@@ -1,5 +1,18 @@
 # 天源浏览器工作台项目状态
 
+## 2026-07-27 Windows tycpv CLI 识别修复
+
+- 当前发布版本：工作台 `0.13.2` / 构建 `2026072706`，Connector 保持 `0.4.2`。
+- 修复 Windows 安装器误把注册表 `DisplayIcon` 的 `D:\tycpv\tycpv.ico` 当作 CLI 执行的问题。
+- Windows 安装器现在只接受 `tycpv.exe` 和 `tycpv.cmd`，并支持 Node 封装形式的 `D:\tycpv\tycpv.cmd`。
+- Native Helper 的 Windows CLI 候选同步加入 `tycpv.cmd`，运行阶段不再只找 `tycpv.exe`。
+- Connector 版本不一致提示改为引导用户完全退出 Chrome/Edge 后运行最新 `install.cmd`。
+- 正式 Windows 包：`tianyuan-workbench-v0.13.2-windows-x64.zip`，SHA-256 为 `9a0ba31fe1bd85098b78ec5f1ec968a731ba25a40c5937255227a3473dbe5b43`。
+- 源码提交和标签：`2d8bf7cfea2d8ecae5d3168317f883905becd3e2` / `v0.13.2`。
+- 正式包为 `source_dirty=false`，运行指纹为 `bc67fa74717cfaff4930006e43cd1c878283f5922a22f4f8062377d5e9ff0b2a`。
+- Windows ZIP 内部条目数 `365`，非 ASCII 文件名数量 `0`；公开发行仓库 `v0.13.2` 已发布并标记为 Latest。
+- 在线检查已确认 `0.13.1` 可发现 `0.13.2`，`0.13.2` 不会重复提示更新。
+
 ## 2026-07-27 Windows Agent 一键安装提示词包
 
 - 当前发布版本：工作台 `0.13.1` / 构建 `2026072705`，Connector 保持 `0.4.2`。
