@@ -7,7 +7,10 @@
 - 发行包构建脚本已包含 Connector、统一安装脚本、完整 skills；Windows 包包含受控 Node 运行时。
 - 自动测试已覆盖更新成功、SHA 不一致拒绝、旧 Connector 行为修正和既有 Agent 绑定回归。
 - Windows 实机截图暴露的 CMD 编码故障已修复；包内中英文 `.cmd` 均为 ASCII/CRLF，`.ps1` 均带 UTF-8 BOM。
-- 用户已确认正式发布 `v0.13.0`，当前正在执行干净提交、重建安装包和公开 Release。
+- `v0.13.0` 已在公开发行仓库发布并标记为 Latest，五个发行资产均为 `uploaded`。
+- Windows 正式包 SHA-256：`f49777a1e7f59496ca924d071bc601dc25eb721119f5dbaed9a996e0ece03b8e`。
+- macOS ARM64 正式包 SHA-256：`d59d35d53eb27eb901abf58ebca69cec2d8663fab66bbb0cc6748dad5c018d69`。
+- 在线检查已确认 `0.12.2` 能发现 `0.13.0`，当前 `0.13.0` 不会重复更新。
 - `0.12.2` 及更早版本首次升级仍需手动安装 `0.13.0`；之后可在侧栏使用“更新全部组件”。
 
 ## 2026-07-26 侧栏紧凑布局
