@@ -6,8 +6,9 @@
 - 提示词要求 Agent 优先使用当前完整解压包；无本地包时查询公开 Latest Release、下载 Windows x64 ZIP、校验 SHA-256、安装和只读验收。
 - 为规避 ZIP 中文文件名编码差异，包内使用 ASCII 文件名 `START_WITH_AGENT.txt` 和 `AGENT_INSTALL_PROMPT.md`；文本文件带 UTF-8 BOM。
 - 新增 `tests/windows-agent-install-prompt.test.cjs`，并扩展 Windows 编码测试验证提示词 BOM。
-- 本地 Windows `0.13.1` 测试包 ZIP 完整性、哈希和内容校验通过，SHA-256 为 `bf3851549e774f9b4a7137f5dcb9d42d08a4122b79116c03869a9b781022fd88`。
-- 未执行天源线上写入；按用户要求未提交、未推送或发布。
+- 功能源码提交为 `73f91a9ec23d66e40581a629f72f6022370b0d1b`。
+- 从干净提交重建的 Windows `0.13.1` 测试包为 `source_dirty=false`，ZIP 完整性、哈希和内容校验通过，SHA-256 为 `733612dc1737a9ba85bd1005d05fa4c3b45953f446fb5712764a68d25d46e243`。
+- 未执行天源线上写入；本轮完成本地提交，未推送或发布。
 
 ## 2026-07-27 完整组件一键更新
 
