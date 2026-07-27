@@ -4,11 +4,11 @@
 
 - 将包内原有的“已解压目录交给 Agent”说明扩展为全流程自动安装提示词。
 - 提示词要求 Agent 优先使用当前完整解压包；无本地包时查询公开 Latest Release、下载 Windows x64 ZIP、校验 SHA-256、安装和只读验收。
-- 为规避 ZIP 中文文件名编码差异，包内使用 ASCII 文件名 `START_WITH_AGENT.txt` 和 `AGENT_INSTALL_PROMPT.md`；文本文件带 UTF-8 BOM。
+- 为规避 ZIP 中文文件名编码差异，包内根目录和入口文件均使用 ASCII 名称；`START_WITH_AGENT.txt`、`AGENT_INSTALL_PROMPT.md` 和 `INSTALL_README.md` 带 UTF-8 BOM。
 - 新增 `tests/windows-agent-install-prompt.test.cjs`，并扩展 Windows 编码测试验证提示词 BOM。
-- 功能源码提交为 `73f91a9ec23d66e40581a629f72f6022370b0d1b`。
-- 从干净提交重建的 Windows `0.13.1` 测试包为 `source_dirty=false`，ZIP 完整性、哈希和内容校验通过，SHA-256 为 `733612dc1737a9ba85bd1005d05fa4c3b45953f446fb5712764a68d25d46e243`。
-- 未执行天源线上写入；功能与打包证据已推送源码仓库 `main`，尚未发布 `v0.13.1` Release。
+- 最终源码提交为 `7aa2c7e2bb7d86fbd5feac2484ceb76b107588ed`，标签为 `v0.13.1`。
+- 正式 Windows `0.13.1` 包为 `source_dirty=false`，ZIP 内部非 ASCII 文件名数量为 `0`，SHA-256 为 `4ff45d6b5a947bd5aff8235c042d221de7eda90c8b8a35649219dcdb28db5b3f`。
+- 未执行天源线上写入；源码和标签已推送，公开 `v0.13.1` Release 已发布为 Latest。
 
 ## 2026-07-27 完整组件一键更新
 

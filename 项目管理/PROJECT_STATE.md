@@ -2,15 +2,14 @@
 
 ## 2026-07-27 Windows Agent 一键安装提示词包
 
-- 当前本地测试版本：工作台 `0.13.1` / 构建 `2026072704`，Connector 保持 `0.4.2`。
-- Windows 包根目录新增 `START_WITH_AGENT.txt` 和 `AGENT_INSTALL_PROMPT.md`，前者带 UTF-8 BOM，避免部分 Windows 记事本显示中文乱码。
+- 当前发布版本：工作台 `0.13.1` / 构建 `2026072705`，Connector 保持 `0.4.2`。
+- Windows 包根目录、入口文件和说明文件均改为 ASCII 名称；`START_WITH_AGENT.txt`、`AGENT_INSTALL_PROMPT.md` 和 `INSTALL_README.md` 带 UTF-8 BOM。
 - 提示词支持两种入口：已解压包直接安装；无本地包时查询公开 Latest Release、下载、SHA-256 校验、安装并执行只读验收。
-- 本地测试包：`~/.tianyuan-workbench/releases/天源浏览器工作台-v0.13.1-Windows-x64-20260727.zip`。
-- 功能源码提交：`73f91a9ec23d66e40581a629f72f6022370b0d1b`。
-- 本地测试包为 `source_dirty=false`，运行指纹为 `2c1b0e89b01acbfe72a6ec2927b5c4c4a93bc56b416f82071dd67f4260ed1a32`。
-- 本地测试包 SHA-256：`733612dc1737a9ba85bd1005d05fa4c3b45953f446fb5712764a68d25d46e243`。
-- 已完成提示词、编码、静态契约、ZIP 完整性和提示词 BOM 校验；尚未在真实 Windows 机器执行。
-- 功能提交 `73f91a9` 和打包证据提交 `bc496fb` 已推送源码仓库 `main`；尚未发布 `v0.13.1` GitHub Release。
+- 正式 Windows 包：`tianyuan-workbench-v0.13.1-windows-x64.zip`，SHA-256 为 `4ff45d6b5a947bd5aff8235c042d221de7eda90c8b8a35649219dcdb28db5b3f`。
+- 源码提交和标签：`7aa2c7e2bb7d86fbd5feac2484ceb76b107588ed` / `v0.13.1`。
+- 正式包为 `source_dirty=false`，运行指纹为 `96c2cfe8cb07643469c476a39e5ebcb2cfabab987e0f2cfe4ec9eed8a2488eb4`。
+- ZIP 内部条目数 `365`，非 ASCII 文件名数量 `0`；已完成提示词、编码、静态契约、ZIP 完整性和更新检查验证。
+- 公开发行仓库 `v0.13.1` 已发布并标记为 Latest；`0.13.0` 可发现 `0.13.1`，`0.13.1` 不会重复提示更新。
 
 ## 2026-07-27 完整更新正式发布
 
