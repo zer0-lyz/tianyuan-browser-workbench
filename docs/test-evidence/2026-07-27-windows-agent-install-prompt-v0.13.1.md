@@ -10,7 +10,8 @@
 - 功能源码提交：`73f91a9ec23d66e40581a629f72f6022370b0d1b`
 - `source_dirty=false`
 - 运行指纹：`2c1b0e89b01acbfe72a6ec2927b5c4c4a93bc56b416f82071dd67f4260ed1a32`
-- 未发布 GitHub Release
+- 源码与测试证据已推送源码仓库 `main`
+- 未发布 `v0.13.1` GitHub Release
 
 ## 包内入口
 
