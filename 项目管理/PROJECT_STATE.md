@@ -6,9 +6,11 @@
 - Windows 包根目录新增 `START_WITH_AGENT.txt` 和 `AGENT_INSTALL_PROMPT.md`，前者带 UTF-8 BOM，避免部分 Windows 记事本显示中文乱码。
 - 提示词支持两种入口：已解压包直接安装；无本地包时查询公开 Latest Release、下载、SHA-256 校验、安装并执行只读验收。
 - 本地测试包：`~/.tianyuan-workbench/releases/天源浏览器工作台-v0.13.1-Windows-x64-20260727.zip`。
-- 本地测试包 SHA-256：`bf3851549e774f9b4a7137f5dcb9d42d08a4122b79116c03869a9b781022fd88`。
+- 功能源码提交：`73f91a9ec23d66e40581a629f72f6022370b0d1b`。
+- 本地测试包为 `source_dirty=false`，运行指纹为 `2c1b0e89b01acbfe72a6ec2927b5c4c4a93bc56b416f82071dd67f4260ed1a32`。
+- 本地测试包 SHA-256：`733612dc1737a9ba85bd1005d05fa4c3b45953f446fb5712764a68d25d46e243`。
 - 已完成提示词、编码、静态契约、ZIP 完整性和提示词 BOM 校验；尚未在真实 Windows 机器执行。
-- 用户要求稳定后再推送，本轮未提交、未推送或发布 GitHub Release。
+- 用户已确认提交，本轮完成本地 Git 提交；仍未推送或发布 GitHub Release。
 
 ## 2026-07-27 完整更新正式发布
 
