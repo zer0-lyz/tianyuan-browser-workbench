@@ -4151,13 +4151,17 @@ function setConnectorBindingFeedback(text, kind = "idle") {
 async function ensureCurrentPageConnectorSession() {
   let connection = await checkConnectorConnection();
   if (!connection.ok) {
+    if (connection.mismatch) {
+      setConnectorBindingFeedback("Connector 与扩展版本不一致，请先到“版本更新”执行完整更新。", "error");
+      throw new Error("CONNECTOR_FULL_UPDATE_REQUIRED");
+    }
     setConnectorBindingFeedback(
-      connection.mismatch ? "Connector 版本不一致，正在自动更新..." : "Connector 未运行，正在自动启动...",
+      "Connector 未运行，正在自动启动...",
       "idle",
     );
     const startResult = await sendNativeMessage({
       action: "start_connector_bridge",
-      forceRestart: Boolean(connection.mismatch),
+      forceRestart: false,
     });
     if (!startResult?.ok) throw new Error(startResult?.reason || "CONNECTOR_START_FAILED");
     connection = await checkConnectorConnection();
@@ -4380,7 +4384,7 @@ async function checkConnectorConnection({ silent = false } = {}) {
       reason: runtimeContractMissing
         ? "当前 Chrome 加载的不是安装器生成的本机运行扩展。请从本机运行目录重新加载扩展。"
         : mismatch
-        ? "Connector 运行副本与扩展不一致，点击启动 Connector 可自动更新。"
+        ? "Connector 运行副本与扩展不一致，请到“版本更新”执行完整更新。"
         : (error?.message || String(error)),
     };
   }
@@ -4400,18 +4404,20 @@ async function startConnector() {
       setStatus("当前扩展加载路径不正确，请从本机运行目录重新加载扩展", "error");
       return null;
     }
-    if (current.mismatch) setStatus("检测到旧版 Connector，正在自动更新...", "idle");
+    if (current.mismatch) {
+      setStatus("Connector 与扩展版本不一致，请先执行完整更新", "error");
+      navigateToRoute("updates");
+      return null;
+    }
     const result = await sendNativeMessage({
       action: "start_connector_bridge",
-      forceRestart: Boolean(current.mismatch),
+      forceRestart: false,
     });
     if (!result?.ok) throw new Error(result?.reason || "CONNECTOR_START_FAILED");
     const connection = await checkConnectorConnection();
     if (!connection.ok) throw new Error(connection.reason || "CONNECTOR_HEALTH_FAILED");
     setStatus(
-      result.restarted
-        ? "Connector 已更新并启动，可以继续执行"
-        : (result.started ? "Connector 已启动，可以绑定当前页面" : "Connector 已在运行，可以绑定当前页面"),
+      result.started ? "Connector 已启动，可以绑定当前页面" : "Connector 已在运行，可以绑定当前页面",
       "ok",
     );
     return connection;

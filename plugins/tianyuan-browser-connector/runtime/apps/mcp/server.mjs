@@ -42,7 +42,7 @@ async function handleRequest(request) {
       result: {
         protocolVersion: "2024-11-05",
         capabilities: { tools: { listChanged: true } },
-        serverInfo: { name: "tianyuan-browser-connector", version: "0.4.1" }
+        serverInfo: { name: "tianyuan-browser-connector", version: "0.4.2" }
       }
     };
   }

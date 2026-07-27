@@ -1,6 +1,18 @@
 # 天源浏览器工作台项目长期记忆
 
-更新时间：2026-07-26 CST
+更新时间：2026-07-27 CST
+
+## 2026-07-27 v0.13.0 完整组件更新正式发布
+
+- 开发版本升级为 `0.13.0`，构建编号 `2026072703`；Connector 升级为 `0.4.2`。
+- 侧栏“版本更新”新增“更新全部组件”，开始前必须由用户明确确认。
+- Native Helper 从固定公开发行仓库下载当前平台 ZIP，并校验 Release manifest 或同名校验文件提供的 SHA-256。
+- 完整安装统一同步浏览器扩展、Native Helper、Bridge、Connector、`~/plugins/` 和 Codex 插件缓存，更新成功后扩展自动 reload。
+- macOS 和 Windows 发行包均加入 `plugins/tianyuan-browser-connector/`、`scripts/install-local-runtime.mjs` 和完整 skills；Windows 包额外携带受控 Node 运行时。
+- Connector 版本不一致时不再误报“点击启动即可自动更新”，而是引导到版本更新页执行完整更新。
+- `0.12.2` 及更早版本缺少新 Native Host 安装动作，首次升级到 `0.13.0` 必须手动安装一次；此后才能一键更新。
+- Windows 双击安装入口改为 ASCII/CRLF 批处理，PowerShell 主脚本使用 UTF-8 BOM；不再依赖 `chcp 65001` 或 Agent 代为配置。
+- 本机与安装包验证已完成，进入正式提交、打标签和公开 Release 流程。
 
 ## 2026-07-26 v0.12.2 公开发布
 

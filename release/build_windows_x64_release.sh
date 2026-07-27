@@ -87,8 +87,10 @@ NODE
 
 mkdir -p "$STAGE/runtime/python-portable/Lib/site-packages" \
   "$STAGE/runtime/python-wheels" \
+  "$STAGE/runtime/node" \
   "$STAGE/native-helper/platform" \
   "$STAGE/skills" \
+  "$STAGE/scripts" \
   "$DIST_DIR" \
   "$WINDOWS_CACHE" \
   "$WHEEL_CACHE"
@@ -154,6 +156,7 @@ EOF
 
 node --experimental-sea-config "$SEA_CONFIG"
 cp "$WINDOWS_NODE" "$STAGE/native-helper/native_host.exe"
+cp "$WINDOWS_NODE" "$STAGE/runtime/node/node.exe"
 "$POSTJECT_BIN" \
   "$STAGE/native-helper/native_host.exe" \
   NODE_SEA_BLOB \
@@ -163,6 +166,7 @@ cp "$ROOT_DIR/native-helper/native_host.js" "$STAGE/native-helper/native_host.js
 cp "$ROOT_DIR/native-helper/connector_bridge.js" "$STAGE/native-helper/connector_bridge.js"
 cp "$ROOT_DIR/native-helper/process_launcher.js" "$STAGE/native-helper/process_launcher.js"
 cp "$ROOT_DIR/native-helper/update_checker.js" "$STAGE/native-helper/update_checker.js"
+cp "$ROOT_DIR/native-helper/update_installer.js" "$STAGE/native-helper/update_installer.js"
 cp "$ROOT_DIR/native-helper/platform/"*.js "$STAGE/native-helper/platform/"
 cat > "$STAGE/native-helper/runtime-compat.json" <<EOF
 {
@@ -189,14 +193,14 @@ EOF
 
 /usr/bin/ditto "$ROOT_DIR/extension" "$STAGE/extension"
 cp "$STAGE/native-helper/runtime-compat.json" "$STAGE/extension/runtime-compat.json"
-/usr/bin/ditto "$ROOT_DIR/skills/appraisal-detail-print-format" "$STAGE/skills/appraisal-detail-print-format"
-/usr/bin/ditto "$ROOT_DIR/skills/appraisal-declaration-print-format" "$STAGE/skills/appraisal-declaration-print-format"
+/usr/bin/ditto "$ROOT_DIR/skills" "$STAGE/skills"
+/usr/bin/ditto "$ROOT_DIR/plugins" "$STAGE/plugins"
+cp "$ROOT_DIR/scripts/install-local-runtime.mjs" "$STAGE/scripts/install-local-runtime.mjs"
 cp "$TYCPV_SOURCE" "$STAGE/runtime/tycpv-setup-0.1.0-win-x64.exe"
 
-cp "$ROOT_DIR/release/windows-x64/安装.cmd" "$STAGE/安装.cmd"
-cp "$ROOT_DIR/release/windows-x64/安装.ps1" "$STAGE/安装.ps1"
-cp "$ROOT_DIR/release/windows-x64/卸载.cmd" "$STAGE/卸载.cmd"
-cp "$ROOT_DIR/release/windows-x64/卸载.ps1" "$STAGE/卸载.ps1"
+node "$ROOT_DIR/scripts/prepare-windows-launchers.mjs" \
+  "$ROOT_DIR/release/windows-x64" \
+  "$STAGE" >/dev/null
 cp "$ROOT_DIR/release/windows-x64/安装使用说明.md" "$STAGE/安装使用说明.md"
 cp "$ROOT_DIR/release/windows-x64/交给Agent安装.md" "$STAGE/交给Agent安装.md"
 

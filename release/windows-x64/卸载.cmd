@@ -1,8 +1,10 @@
 @echo off
-chcp 65001 >nul
+setlocal
 set "SCRIPT_DIR=%~dp0"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%卸载.ps1"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%uninstall.ps1"
 set "EXIT_CODE=%ERRORLEVEL%"
 echo.
+if "%EXIT_CODE%"=="0" echo Uninstallation completed.
+if not "%EXIT_CODE%"=="0" echo Uninstallation failed. See the PowerShell window for details.
 pause
 exit /b %EXIT_CODE%

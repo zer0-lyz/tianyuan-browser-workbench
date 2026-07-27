@@ -18,6 +18,7 @@ class FakeElement extends EventTarget {
     this.rel = "";
     this.textContent = "";
     this.children = [];
+    this.value = 0;
   }
 
   appendChild(child) {
@@ -54,8 +55,12 @@ const elementIds = [
   "updateCheckedAt",
   "updateFeedback",
   "checkForUpdates",
+  "installUpdate",
   "downloadUpdate",
   "openReleasePage",
+  "updateProgressPanel",
+  "updateProgressBar",
+  "updateProgressText",
   "updateNotes",
   "updateAssetName",
   "updateAssetSize",
@@ -105,6 +110,7 @@ await moduleInstance.initialize({
       getURL(relativePath) {
         return `chrome-extension://test/${relativePath}`;
       },
+      reload() {},
     },
     tabs: {
       async create() {},

@@ -23,15 +23,17 @@ const bridge = fs.readFileSync(path.join(repoRoot, "native-helper", "connector_b
 const nativeHost = fs.readFileSync(path.join(repoRoot, "native-helper", "native_host.js"), "utf8");
 const processLauncher = fs.readFileSync(path.join(repoRoot, "native-helper", "process_launcher.js"), "utf8");
 const updateChecker = fs.readFileSync(path.join(repoRoot, "native-helper", "update_checker.js"), "utf8");
+const updateInstaller = fs.readFileSync(path.join(repoRoot, "native-helper", "update_installer.js"), "utf8");
 const platformIndex = fs.readFileSync(path.join(repoRoot, "native-helper", "platform", "index.js"), "utf8");
 const windowsPlatform = fs.readFileSync(path.join(repoRoot, "native-helper", "platform", "windows.js"), "utf8");
 const macosPlatform = fs.readFileSync(path.join(repoRoot, "native-helper", "platform", "macos.js"), "utf8");
 const installer = fs.readFileSync(path.join(repoRoot, "scripts", "install-local-runtime.mjs"), "utf8");
 const nativeInstaller = fs.readFileSync(path.join(repoRoot, "native-helper", "install_native_host.sh"), "utf8");
-const windowsInstaller = fs.readFileSync(path.join(repoRoot, "release", "windows-x64", "安装.ps1"), "utf8");
+const windowsInstaller = fs.readFileSync(path.join(repoRoot, "release", "windows-x64", "install.ps1"), "utf8");
 const versionConfig = JSON.parse(fs.readFileSync(path.join(extensionRoot, "version.json"), "utf8"));
 const pluginServer = fs.readFileSync(path.join(repoRoot, "plugins", "tianyuan-browser-connector", "runtime", "apps", "mcp", "server.mjs"), "utf8");
 const pluginReadme = fs.readFileSync(path.join(repoRoot, "plugins", "tianyuan-browser-connector", "README.md"), "utf8");
+const pluginManifest = JSON.parse(fs.readFileSync(path.join(repoRoot, "plugins", "tianyuan-browser-connector", ".codex-plugin", "plugin.json"), "utf8"));
 
 function quotedConstant(source, name) {
   return source.match(new RegExp(`const ${name} = "([^"]+)"`))?.[1] || "";
@@ -67,13 +69,12 @@ assert.equal(quotedConstant(sidepanel, "EXPECTED_CONNECTOR_PROTOCOL_VERSION"), q
 assert.equal(quotedConstant(nativeHost, "CONNECTOR_PROTOCOL_VERSION"), quotedConstant(bridge, "PROTOCOL_VERSION"));
 assert.equal(manifest.version, versionConfig.chromeVersion);
 assert.equal(manifest.version_name, versionConfig.versionName);
-assert.equal(versionConfig.productVersion, "0.12.2");
+assert.equal(versionConfig.productVersion, "0.13.0");
 assert.equal(versionConfig.repository, "zer0-lyz/tianyuan-browser-workbench-releases");
 
-const installerPluginVersion = quotedConstant(installer, "CONNECTOR_VERSION");
-assert.ok(installerPluginVersion);
-assert.equal(pluginServer.includes(`version: "${installerPluginVersion}"`), true);
-assert.equal(pluginReadme.includes(`版本 \`${installerPluginVersion}\``), true);
+assert.equal(pluginServer.includes(`version: "${pluginManifest.version}"`), true);
+assert.equal(pluginReadme.includes(`版本 \`${pluginManifest.version}\``), true);
+assert.equal(installer.includes('".codex-plugin", "plugin.json"'), true);
 
 for (const resource of manifest.web_accessible_resources || []) {
   for (const match of resource.matches || []) {
@@ -102,6 +103,7 @@ assert.equal(adapter.includes("rowsWithCleanupData"), true);
 assert.equal(sidepanel.includes("expectedCleanupValues"), true);
 assert.equal(html.includes('id="page-updates"'), true);
 assert.equal(updatesTemplate.includes('id="checkForUpdates"'), true);
+assert.equal(updatesTemplate.includes('id="installUpdate"'), true);
 assert.equal(html.includes('<span id="moduleCountBadge" class="badge">8 个模块</span>'), true);
 assert.equal(html.includes('id="openFeedbackTop"'), true);
 assert.equal(html.includes('id="openUpdatesTop"'), true);
@@ -109,6 +111,9 @@ assert.equal(html.includes('id="openFeedback"'), false);
 assert.equal(html.includes('id="openUpdates"'), false);
 assert.equal(html.includes('<script type="module" src="./sidepanel.js"></script>'), true);
 assert.equal(updatesModule.includes("check_github_update"), true);
+assert.equal(updatesModule.includes("install_workbench_update"), true);
+assert.equal(updatesModule.includes("get_workbench_update_status"), true);
+assert.equal(updatesModule.includes("runtime.reload"), true);
 assert.equal(updatesModule.includes("maybeAutoCheck"), true);
 assert.equal(updatesModule.includes("cacheMatchesRuntime"), true);
 assert.equal(sidepanel.includes("check_github_update"), false);
@@ -132,11 +137,16 @@ assert.equal(moduleRegistry.includes("module.activated"), true);
 assert.equal(legacyFeatureModules.includes('id: "batch-save"'), true);
 assert.equal(legacyFeatureModules.includes('id: "batch-cleanup"'), true);
 assert.equal(nativeHost.includes('message?.action === "check_github_update"'), true);
+assert.equal(nativeHost.includes('message?.action === "install_workbench_update"'), true);
+assert.equal(nativeHost.includes('message?.action === "get_workbench_update_status"'), true);
 assert.equal(updateChecker.includes("api.github.com"), true);
 assert.equal(updateChecker.includes("DEFAULT_REPOSITORY"), true);
 assert.equal(updateChecker.includes("tianyuan-browser-workbench-releases"), true);
 assert.equal(updateChecker.includes("tokenUsed: false"), true);
+assert.equal(updateInstaller.includes("UPDATE_SHA256_MISMATCH"), true);
+assert.equal(updateInstaller.includes("tianyuan-browser-connector"), true);
 assert.equal(installer.includes('copyFileAtomic(path.join(repoRoot, "native-helper", "update_checker.js")'), true);
+assert.equal(installer.includes('copyFileAtomic(path.join(repoRoot, "native-helper", "update_installer.js")'), true);
 assert.equal(installer.includes('copyFileAtomic(path.join(repoRoot, "native-helper", "process_launcher.js")'), true);
 assert.equal(installer.includes('"src/core/module-registry.js"'), true);
 assert.equal(installer.includes('"src/modules/updates/template.js"'), true);
@@ -144,14 +154,15 @@ assert.equal(installer.includes('"feedback.json"'), true);
 assert.equal(installer.includes('"src/modules/feedback/template.js"'), true);
 assert.equal(installer.includes('entry.name === ".DS_Store"'), true);
 assert.equal(nativeInstaller.includes("update_checker.js"), true);
+assert.equal(nativeInstaller.includes("update_installer.js"), true);
 assert.equal(nativeInstaller.includes("connector_bridge.js"), true);
 assert.equal(nativeInstaller.includes("process_launcher.js"), true);
 assert.equal(nativeInstaller.includes('cp -R "$ROOT_DIR/native-helper/platform"'), true);
 assert.equal(windowsInstaller.includes("function Install-DirectoryAtomic"), true);
 assert.equal(windowsInstaller.includes("function Stop-ExistingConnector"), true);
-assert.equal(windowsInstaller.includes("runtimeBuildId -ne $NativeContract.runtimeBuildId"), true);
+assert.equal(windowsInstaller.includes("install-local-runtime.mjs"), true);
 assert.equal(windowsInstaller.includes("Restore-PreviousDirectory"), true);
-assert.equal(windowsInstaller.includes('"connector-bindings.json"'), true);
+assert.equal(windowsInstaller.includes("codexConnectorCachePath"), true);
 assert.equal(bridge.includes("EXTENSION_RUNTIME_BUILD_MISMATCH"), true);
 assert.equal(nativeHost.includes("return connectorBridge.start({"), true);
 assert.equal(nativeHost.includes("platformAdapter.chooseDirectory"), true);
@@ -210,6 +221,7 @@ for (const source of [
   bridge,
   nativeHost,
   processLauncher,
+  updateInstaller,
   installer,
   windowsInstaller,
 ]) {

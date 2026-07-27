@@ -148,8 +148,8 @@ async function main() {
   assert.equal(sidepanelSource.includes('action: "batch_upload_audit_attachments"'), true);
   assert.equal(sidepanelSource.includes("BATCH_UPLOAD_CLASSIFICATION_VALUE_MISSING"), true);
   assert.equal(sidepanelSource.includes("batchUploadFailureDetail"), true);
-  assert.equal(sidepanelSource.includes("forceRestart: Boolean(current.mismatch)"), true);
-  assert.equal(sidepanelSource.includes("Connector 已更新并启动，可以继续执行"), true);
+  assert.equal(sidepanelSource.includes("forceRestart: false"), true);
+  assert.equal(sidepanelSource.includes("Connector 与扩展版本不一致，请先执行完整更新"), true);
   assert.equal(sidepanelSource.includes("resetBatchUploadStateForTargetChange"), true);
   assert.equal(sidepanelSource.includes("preserveSheet ? (batchUploadState.sheetName || undefined) : undefined"), true);
   assert.equal(sidepanelSource.includes("inspectBatchUploadTarget({ preserveSheet: true })"), true);

@@ -1,6 +1,6 @@
 # 天源浏览器连接器
 
-版本 `0.4.1`。此插件把已注册的本机 Agent 路由到其有权访问的天源浏览器页面。
+版本 `0.4.2`。此插件把已注册的本机 Agent 路由到其有权访问的天源浏览器页面。
 
 ## 来源与绑定
 
@@ -49,3 +49,7 @@ Connector 启动时从本机 `runtime/agent-config.json` 或 `TIANYUAN_CONNECTOR
 ## 固定能力
 
 Connector 不提供任意浏览器点击、任意 URL、任意 JavaScript 或绕过编辑锁。受控上传、清理和核对动作仍使用原有的确认、编辑锁、保存及回读门禁。
+
+## 更新
+
+工作台 `0.13.0` 起，“更新全部组件”会把 Connector 同步到 `~/plugins/tianyuan-browser-connector` 和 `~/.codex/plugins/cache/personal/tianyuan-browser-connector/0.4.2`。已启动的 Codex 或 WorkBuddy MCP 进程不会热替换；更新后仍显示旧版本时，需要重启对应 Agent。

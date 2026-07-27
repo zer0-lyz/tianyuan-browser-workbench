@@ -53,8 +53,12 @@ function elementMap(documentRef) {
     "updateCheckedAt",
     "updateFeedback",
     "checkForUpdates",
+    "installUpdate",
     "downloadUpdate",
     "openReleasePage",
+    "updateProgressPanel",
+    "updateProgressBar",
+    "updateProgressText",
     "updateNotes",
     "updateAssetName",
     "updateAssetSize",
@@ -82,9 +86,39 @@ export const updatesModule = {
     let context;
     let elements;
     let checking = false;
+    let installing = false;
     let latestResult = null;
     let versionConfig = null;
     let runtimeContract = null;
+
+    function sleep(delay) {
+      return new Promise((resolve) => window.setTimeout(resolve, delay));
+    }
+
+    function updateFailureText(reason) {
+      const messages = {
+        UPDATE_NOT_REQUIRED: "当前已经是最新完整版本。",
+        UPDATE_ASSET_NOT_FOUND: "未找到适用于当前系统的完整安装包。",
+        UPDATE_SHA256_MISSING: "官方发布包缺少 SHA-256，已停止安装。",
+        UPDATE_SHA256_INVALID: "官方校验文件格式无效，已停止安装。",
+        UPDATE_SHA256_MISMATCH: "安装包校验失败，文件可能损坏，已停止安装。",
+        UPDATE_INSTALLER_NOT_FOUND: "安装包中缺少安装程序，已停止安装。",
+        PLATFORM_UPDATE_UNSUPPORTED: "当前系统暂不支持一键更新。",
+        UNKNOWN_ACTION: "当前 Native Helper 版本较旧，需要手动安装一次新版。",
+      };
+      return messages[reason] || reason || "完整更新失败";
+    }
+
+    function renderProgress(status = null) {
+      const active = installing || (
+        status
+        && !["idle", "complete", "failed"].includes(status.phase)
+      );
+      elements.updateProgressPanel.classList.toggle("hidden", !active && !status);
+      elements.updateProgressBar.value = Math.max(0, Math.min(100, Number(status?.percent || 0)));
+      elements.updateProgressText.textContent = status?.message
+        || (status?.phase === "failed" ? updateFailureText(status.reason) : "等待开始");
+    }
 
     function setTopStatus(text, kind = "idle") {
       context.setConnection(elements.updateTopStatus, text, kind);
@@ -155,10 +189,14 @@ export const updatesModule = {
       elements.downloadUpdate.dataset.url = assetUrl;
       elements.openReleasePage.disabled = !releaseUrl;
       elements.openReleasePage.dataset.url = releaseUrl;
+      elements.installUpdate.disabled = installing
+        || !assetUrl
+        || !result?.ok
+        || (!result?.updateAvailable && !result?.repairRequired);
 
       if (!result) {
         elements.updateHeadline.textContent = `天源浏览器工作台 v${currentVersion}`;
-        elements.updateDescription.textContent = "更新检查不使用 MCP token，也不会修改当前安装。";
+        elements.updateDescription.textContent = "检查不使用 MCP token；安装前会再次确认。";
         elements.updateBadge.textContent = "未检查";
         elements.updateFeedback.textContent = "尚未检查 GitHub Release";
         elements.updateFeedback.dataset.kind = "";
@@ -188,7 +226,7 @@ export const updatesModule = {
         elements.updateDescription.textContent = "产品版本相同，但运行指纹不同，需要重新下载安装当前版本。";
         elements.updateBadge.textContent = "需要修复";
         elements.updateFeedback.textContent = assetUrl
-          ? "请下载并重新安装当前正式版本"
+          ? "可点击“更新全部组件”自动修复，或手动下载安装包"
           : "请打开发布页重新下载安装";
         elements.updateFeedback.dataset.kind = "error";
         setTopStatus("需修复", "error");
@@ -198,7 +236,7 @@ export const updatesModule = {
         elements.updateHeadline.textContent = `发现新版本 v${result.latestVersion}`;
         elements.updateDescription.textContent = result.mandatory
           ? "当前版本低于最低支持版本，需要更新后再继续正式操作。"
-          : "可下载安装包更新；当前版本不会被静默覆盖。";
+          : "可一次更新扩展、Helper、Bridge、Connector 和 Agent 插件缓存。";
         elements.updateBadge.textContent = result.mandatory ? "必须更新" : "有新版本";
         elements.updateFeedback.textContent = assetUrl
           ? `已找到适用于 ${result.platform} 的安装包`
@@ -216,6 +254,7 @@ export const updatesModule = {
       elements.updateFeedback.textContent = "无需更新";
       elements.updateFeedback.dataset.kind = "ok";
       setTopStatus(`v${currentVersion}`, "ok");
+      renderProgress(null);
     }
 
     async function check({ automatic = false } = {}) {
@@ -280,6 +319,102 @@ export const updatesModule = {
       await check({ automatic: true });
     }
 
+    async function readInstallStatus() {
+      return await context.sendNativeMessage({
+        action: "get_workbench_update_status",
+      }, 15000);
+    }
+
+    async function waitForInstallComplete() {
+      const deadline = Date.now() + 15 * 60 * 1000;
+      let lastStatus = null;
+      while (Date.now() < deadline) {
+        try {
+          lastStatus = await readInstallStatus();
+          renderProgress(lastStatus);
+          if (lastStatus?.phase === "complete") return lastStatus;
+          if (lastStatus?.phase === "failed") {
+            throw new Error(lastStatus.reason || "WORKBENCH_UPDATE_FAILED");
+          }
+        } catch (error) {
+          if (String(error?.message || "").includes("WORKBENCH_UPDATE_FAILED")) throw error;
+        }
+        await sleep(1200);
+      }
+      throw new Error(lastStatus?.reason || "WORKBENCH_UPDATE_TIMEOUT");
+    }
+
+    async function installCompleteUpdate() {
+      if (installing || !latestResult?.asset?.url) return;
+      const confirmed = window.confirm([
+        `确认将天源浏览器工作台更新到 v${latestResult.latestVersion}？`,
+        "",
+        "将同步更新：浏览器扩展、Native Helper、Bridge、Connector 和 Agent 插件缓存。",
+        "不会保存或输出 MCP token、Cookie、Authorization、密码或验证码。",
+        "更新完成后浏览器扩展会自动重新加载；Codex 或 WorkBuddy 可能需要重启。",
+      ].join("\n"));
+      if (!confirmed) return;
+
+      installing = true;
+      elements.installUpdate.disabled = true;
+      elements.checkForUpdates.disabled = true;
+      elements.installUpdate.textContent = "更新中...";
+      setTopStatus("更新中", "idle");
+      renderProgress({ phase: "checking", percent: 3, message: "正在准备完整更新" });
+      context.setStatus("正在下载并安装全部工作台组件...", "idle");
+      try {
+        const { config, contract } = await loadVersionContext();
+        let requestFinished = false;
+        const request = context.sendNativeMessage({
+          action: "install_workbench_update",
+          currentVersion: config.productVersion
+            || context.extensionManifest.version_name
+            || context.extensionManifest.version,
+          currentBuildNumber: Number(config.buildNumber || 0),
+          currentRuntimeBuildId: String(contract?.runtimeBuildId || ""),
+        }, 10 * 60 * 1000).finally(() => {
+          requestFinished = true;
+        });
+
+        while (!requestFinished) {
+          await sleep(1000);
+          try {
+            renderProgress(await readInstallStatus());
+          } catch {
+          }
+        }
+
+        const started = await request;
+        if (!started?.ok) {
+          if (started?.reason === "UNKNOWN_ACTION") {
+            await openUrl(elements.downloadUpdate);
+          }
+          throw new Error(started?.reason || "WORKBENCH_UPDATE_START_FAILED");
+        }
+        const completed = await waitForInstallComplete();
+        renderProgress(completed);
+        elements.updateFeedback.textContent = "全部组件更新完成，正在重新加载扩展";
+        elements.updateFeedback.dataset.kind = "ok";
+        setTopStatus("已更新", "ok");
+        context.setStatus("全部组件更新完成；Codex 或 WorkBuddy 如仍显示旧工具，请重启。", "ok");
+        await sleep(1200);
+        context.chrome.runtime.reload();
+      } catch (error) {
+        const reason = String(error?.message || error);
+        const friendly = updateFailureText(reason);
+        renderProgress({ phase: "failed", percent: 0, reason, message: friendly });
+        elements.updateFeedback.textContent = friendly;
+        elements.updateFeedback.dataset.kind = "error";
+        setTopStatus("更新失败", "error");
+        context.setStatus(`完整更新失败：${friendly}`, "error");
+      } finally {
+        installing = false;
+        elements.installUpdate.textContent = "更新全部组件";
+        elements.checkForUpdates.disabled = false;
+        render(latestResult);
+      }
+    }
+
     async function openUrl(element) {
       const url = safeGithubUrl(element?.dataset?.url);
       if (!url) {
@@ -323,6 +458,7 @@ export const updatesModule = {
         context.scope.on(elements.checkForUpdates, "click", () =>
           check({ automatic: false })
         );
+        context.scope.on(elements.installUpdate, "click", installCompleteUpdate);
         context.scope.on(elements.downloadUpdate, "click", () =>
           openUrl(elements.downloadUpdate)
         );

@@ -66,7 +66,7 @@ NODE
 [[ "$(uname -m)" == "arm64" ]] || { echo "arm64 required" >&2; exit 1; }
 [[ -f "$TYCPV_SOURCE" ]] || { echo "Missing tycpv pkg: $TYCPV_SOURCE" >&2; exit 1; }
 
-mkdir -p "$STAGE/runtime/python-wheels" "$DIST_DIR" "$CACHE_DIR" "$WHEEL_CACHE"
+mkdir -p "$STAGE/runtime/python-wheels" "$STAGE/scripts" "$DIST_DIR" "$CACHE_DIR" "$WHEEL_CACHE"
 
 if [[ ! -f "$PYTHON_PKG" ]]; then
   curl -L --fail --output "$PYTHON_PKG" "$PYTHON_URL"
@@ -92,9 +92,9 @@ cat > "$STAGE/native-helper/runtime-compat.json" <<EOF
 }
 EOF
 cp "$STAGE/native-helper/runtime-compat.json" "$STAGE/extension/runtime-compat.json"
-mkdir -p "$STAGE/skills"
-/usr/bin/ditto "$ROOT_DIR/skills/appraisal-detail-print-format" "$STAGE/skills/appraisal-detail-print-format"
-/usr/bin/ditto "$ROOT_DIR/skills/appraisal-declaration-print-format" "$STAGE/skills/appraisal-declaration-print-format"
+/usr/bin/ditto "$ROOT_DIR/skills" "$STAGE/skills"
+/usr/bin/ditto "$ROOT_DIR/plugins" "$STAGE/plugins"
+cp "$ROOT_DIR/scripts/install-local-runtime.mjs" "$STAGE/scripts/install-local-runtime.mjs"
 cp "$TYCPV_SOURCE" "$STAGE/runtime/tycpv-setup-0.1.0-macos-arm64.pkg"
 cp "$PYTHON_PKG" "$STAGE/runtime/python-3.14.6-macos11.pkg"
 cp "$WHEEL_CACHE"/*.whl "$STAGE/runtime/python-wheels/"
