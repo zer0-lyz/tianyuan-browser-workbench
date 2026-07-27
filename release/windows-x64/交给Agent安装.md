@@ -17,7 +17,7 @@
 
 ### 2. 取得安装包
 
-1. 如果当前文件所在目录存在 `安装.cmd`、`install.cmd`、`VERSION.txt` 和 `SHA256SUMS`，优先使用当前完整解压目录。
+1. 如果当前文件所在目录存在 `install.cmd`、`VERSION.txt` 和 `SHA256SUMS`，优先使用当前完整解压目录。
 2. 如果没有本地完整安装包，从公开仓库查询 Latest Release：
    `https://github.com/zer0-lyz/tianyuan-browser-workbench-releases`
 3. 下载最新版：
@@ -31,7 +31,7 @@
 
 ### 3. 自动安装
 
-1. 执行完整解压目录中的 `安装.cmd`；如中文文件名无法调用，执行同目录 `install.cmd`。
+1. 执行完整解压目录中的 `install.cmd`。
 2. 等待安装程序全部步骤完成，不要手工重复安装 Node.js、Python、Native Helper、Connector 或 Codex 插件缓存。
 3. 安装失败时保留错误窗口，并读取：
    `%LOCALAPPDATA%\TianyuanWorkbench\安装检查结果.txt`

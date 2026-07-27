@@ -51,17 +51,18 @@ function writeAsciiCmd(outputNames, powerShellName, successText, failureText) {
 }
 
 fs.mkdirSync(stageDir, { recursive: true });
-writeBomPowerShell("install.ps1", ["install.ps1", "安装.ps1"]);
-writeBomPowerShell("uninstall.ps1", ["uninstall.ps1", "卸载.ps1"]);
-writeBomUtf8Text("交给Agent安装.md", ["START_WITH_AGENT.txt"]);
+writeBomPowerShell("install.ps1", ["install.ps1"]);
+writeBomPowerShell("uninstall.ps1", ["uninstall.ps1"]);
+writeBomUtf8Text("安装使用说明.md", ["INSTALL_README.md"]);
+writeBomUtf8Text("交给Agent安装.md", ["START_WITH_AGENT.txt", "AGENT_INSTALL_PROMPT.md"]);
 writeAsciiCmd(
-  ["install.cmd", "安装.cmd"],
+  ["install.cmd"],
   "install.ps1",
   "Installation completed.",
   "Installation failed. See the PowerShell window and installation report.",
 );
 writeAsciiCmd(
-  ["uninstall.cmd", "卸载.cmd"],
+  ["uninstall.cmd"],
   "uninstall.ps1",
   "Uninstallation completed.",
   "Uninstallation failed. See the PowerShell window for details.",

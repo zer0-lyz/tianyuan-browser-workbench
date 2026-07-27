@@ -9,9 +9,9 @@ RELEASE_CHANNEL="$(node -p "require(process.argv[1]).channel" "$ROOT_DIR/extensi
 RELEASE_DATE="${RELEASE_DATE:-$(TZ=Asia/Shanghai date +%Y%m%d)}"
 PACKAGE_SUFFIX=""
 if [[ "$RELEASE_CHANNEL" != "stable" ]]; then
-  PACKAGE_SUFFIX="-测试版"
+  PACKAGE_SUFFIX="-beta"
 fi
-PACKAGE_NAME="天源浏览器工作台-v${VERSION}-Windows-x64${PACKAGE_SUFFIX}"
+PACKAGE_NAME="tianyuan-workbench-v${VERSION}-windows-x64${PACKAGE_SUFFIX}"
 WORKBENCH_ROOT="${TIANYUAN_WORKBENCH_ROOT:-$HOME/.tianyuan-workbench}"
 BUILD_BASE="${TIANYUAN_RELEASE_BUILD_ROOT:-$WORKBENCH_ROOT/release-builds}"
 BUILD_ROOT="$BUILD_BASE/${PACKAGE_NAME}-$(date +%s)"
@@ -201,8 +201,6 @@ cp "$TYCPV_SOURCE" "$STAGE/runtime/tycpv-setup-0.1.0-win-x64.exe"
 node "$ROOT_DIR/scripts/prepare-windows-launchers.mjs" \
   "$ROOT_DIR/release/windows-x64" \
   "$STAGE" >/dev/null
-cp "$ROOT_DIR/release/windows-x64/安装使用说明.md" "$STAGE/安装使用说明.md"
-cp "$ROOT_DIR/release/windows-x64/交给Agent安装.md" "$STAGE/AGENT_INSTALL_PROMPT.md"
 
 find "$STAGE" -type f \( -name ".DS_Store" -o -name "._*" \) -delete
 find "$STAGE" -type d -name "__MACOSX" -prune -exec rm -rf {} +

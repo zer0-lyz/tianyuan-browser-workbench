@@ -18,16 +18,21 @@ execFileSync(process.execPath, [
 ], { stdio: "pipe" });
 
 const bom = Buffer.from([0xef, 0xbb, 0xbf]);
-for (const name of ["install.ps1", "安装.ps1", "uninstall.ps1", "卸载.ps1"]) {
+for (const name of ["install.ps1", "uninstall.ps1"]) {
   const payload = fs.readFileSync(path.join(stageDir, name));
   assert.equal(payload.subarray(0, 3).equals(bom), true, `${name} must have UTF-8 BOM`);
 }
 
-const agentPrompt = fs.readFileSync(path.join(stageDir, "START_WITH_AGENT.txt"));
-assert.equal(agentPrompt.subarray(0, 3).equals(bom), true, "Agent prompt must have UTF-8 BOM");
-assert.equal(agentPrompt.toString("utf8").includes("不要只提供说明，请实际执行"), true);
+for (const name of ["START_WITH_AGENT.txt", "AGENT_INSTALL_PROMPT.md", "INSTALL_README.md"]) {
+  const payload = fs.readFileSync(path.join(stageDir, name));
+  assert.equal(payload.subarray(0, 3).equals(bom), true, `${name} must have UTF-8 BOM`);
+}
+assert.equal(
+  fs.readFileSync(path.join(stageDir, "START_WITH_AGENT.txt")).toString("utf8").includes("不要只提供说明，请实际执行"),
+  true,
+);
 
-for (const name of ["install.cmd", "安装.cmd", "uninstall.cmd", "卸载.cmd"]) {
+for (const name of ["install.cmd", "uninstall.cmd"]) {
   const payload = fs.readFileSync(path.join(stageDir, name));
   assert.equal([...payload].every((value) => value < 128), true, `${name} must be ASCII only`);
   const text = payload.toString("ascii");
@@ -36,18 +41,9 @@ for (const name of ["install.cmd", "安装.cmd", "uninstall.cmd", "卸载.cmd"])
   assert.equal(text.includes("powershell.exe -NoLogo -NoProfile"), true);
 }
 
-assert.equal(
-  fs.readFileSync(path.join(stageDir, "install.cmd")).equals(
-    fs.readFileSync(path.join(stageDir, "安装.cmd")),
-  ),
-  true,
-);
-assert.equal(
-  fs.readFileSync(path.join(stageDir, "install.ps1")).equals(
-    fs.readFileSync(path.join(stageDir, "安装.ps1")),
-  ),
-  true,
-);
+for (const name of fs.readdirSync(stageDir)) {
+  assert.equal([...Buffer.from(name)].every((value) => value < 128), true, `${name} must use an ASCII filename`);
+}
 
 fs.rmSync(tempRoot, { recursive: true, force: true });
 console.log("Windows package encoding tests passed.");
