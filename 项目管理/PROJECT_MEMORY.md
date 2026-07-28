@@ -11,6 +11,9 @@
 - 限流 pepper 只保存在 Worker secret；Cloudflare OAuth 只保存在本机 Wrangler 受限配置。
 - 扩展 `0.14.0` 在服务可用时显示“提交反馈”，成功返回 `TYF-YYYYMMDD-XXXXXXXX`；服务不可用时降级复制且不假报成功。
 - 端到端模拟提交、D1 回读和精确清理已通过，测试后反馈表为空。
+- 源码提交 `09f80e0c2da955f0694514d355ee1369fe16683a` 和标签 `v0.14.0` 已推送。
+- 公开 `v0.14.0` Release 已标记为 Latest；Windows SHA-256 为 `0e958366ea515df692604647b7ed93c9d2f8f986056118cacb6dcc3e36ed1487`，macOS SHA-256 为 `7a7af43f617ed04673ccde1adda7f5c0e4096c69b63aebc90b328bc4761d52b1`。
+- 在线更新检查确认 `0.13.2` 可发现 `0.14.0`，当前 `0.14.0` 不重复提示。
 
 ## 2026-07-27 v0.13.0 完整组件更新正式发布
 

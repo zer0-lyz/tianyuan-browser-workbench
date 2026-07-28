@@ -10,7 +10,12 @@
 - 全部本地测试与反馈服务 7 项测试通过。
 - 线上模拟提交、D1 回读和测试记录清理通过；未执行天源线上写入。
 - 本机运行副本已同步到 `0.14.0`，Native Host 与 Connector 自检通过。
-- 正式安装包、Git 标签和公开 Release 待发布。
+- 源码提交和标签为 `09f80e0c2da955f0694514d355ee1369fe16683a` / `v0.14.0`。
+- Windows 正式包 SHA-256 为 `0e958366ea515df692604647b7ed93c9d2f8f986056118cacb6dcc3e36ed1487`。
+- macOS 正式包 SHA-256 为 `7a7af43f617ed04673ccde1adda7f5c0e4096c69b63aebc90b328bc4761d52b1`。
+- 两个平台包均为 `source_dirty=false`，运行指纹为 `9e4300d474c0c4a5e5fe83e5c5627ff8901dad098465f7eac9aed685500406b2`。
+- 公开 `v0.14.0` Release 已发布为 Latest，5 个资产均为 `uploaded`。
+- 在线检查确认 `0.13.2` 可发现 `0.14.0`，`0.14.0` 无重复更新提示。
 
 ## 2026-07-27 Windows tycpv CLI 识别修复
 
