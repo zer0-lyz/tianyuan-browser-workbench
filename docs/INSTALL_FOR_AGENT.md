@@ -32,6 +32,8 @@ Version `0.14.4` retries Windows local component directory copies up to three ti
 
 Version `0.14.5` adds a second replacement path for Windows environments where a verified `*.staging-*` directory disappears or cannot be renamed. The installer directly recopies the verified source into the managed destination, validates it, and removes the backup only after success.
 
+Version `0.14.6` removes Node `fs.cpSync` from managed runtime directory synchronization. It creates directories and copies files deterministically, verifies every copied file size, and compares complete source and destination tree snapshots before replacement.
+
 Machines running `0.12.2` or earlier must manually install `0.13.0` once because their old Native Helper does not know the install action. Later releases can use **更新全部组件**.
 
 If Python print dependencies are unavailable, installation stops with `PRINT_PYTHON_OPENPYXL_NOT_FOUND` before registering a partial runtime.

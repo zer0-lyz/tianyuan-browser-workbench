@@ -2,6 +2,17 @@
 
 更新时间：2026-07-28 CST
 
+## 2026-07-28 v0.14.6 Windows 确定性目录复制
+
+- 工作台版本升级为 `0.14.6`，构建编号 `2026072807`；Connector 保持 `0.4.2`。
+- `0.14.5` 实机报告显示 `COPY_DIRECTORY_FAILED: installed directory not found: ...skills.staging-*`。
+- 这证明 Windows 上 Node `fs.cpSync` 返回成功后，目标 staging 目录仍可能完全不存在；重试和重命名回退无法修复复制 API 本身的静默失效。
+- 已排除 `skills` 软链接、ZIP 条目缺失、源目录缺失、CLI 和 Python 问题。
+- 本机目录同步完全移除 `fs.cpSync`，改为逐目录创建、逐文件复制并立即核对文件大小。
+- 复制完成后比较源目录和目标目录的完整树清单，包括空目录、文件相对路径和文件大小。
+- 单文件临时重命名失败时也回退为直接复制并校验，避免后续 Native Helper 文件替换遇到同类问题。
+- 实际复制扩展、Native Helper、skills 和 Connector 四棵源码目录，分别回读 `33 / 14 / 12 / 15` 个条目一致。
+
 ## 2026-07-28 v0.14.5 Windows staging 重命名回退
 
 - 工作台版本升级为 `0.14.5`，构建编号 `2026072806`；Connector 保持 `0.4.2`。
