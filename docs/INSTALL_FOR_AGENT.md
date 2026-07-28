@@ -40,6 +40,8 @@ Version `0.14.7` fixes the updater path mismatch. New runtimes locate ASCII `ins
 
 Machines running `0.12.2` or earlier must manually install `0.13.0` once because their old Native Helper does not know the install action. Later releases can use **更新全部组件**.
 
+Version `0.14.9` adds lightweight update packages and static mirror manifests. First install still uses the full package. Later updates can reuse the local Node, Python/openpyxl, and Tianyuan CLI runtime and download only the workbench files. A mirror manifest can be hosted in a Gitee repository raw path; the updater tries configured mirror manifests first and falls back to GitHub while still enforcing host allow-listing, file size checks, and SHA-256 verification.
+
 If Python print dependencies are unavailable, installation stops with `PRINT_PYTHON_OPENPYXL_NOT_FOUND` before registering a partial runtime.
 
 ## Browser Setup

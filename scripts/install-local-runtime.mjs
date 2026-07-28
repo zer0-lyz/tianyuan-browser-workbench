@@ -536,7 +536,7 @@ function main() {
   copyDir(
     path.join(repoRoot, "native-helper"),
     path.join(runtimeProjectRoot, "native-helper"),
-    ["native_host.js", "connector_bridge.js", "process_launcher.js", "update_checker.js", "update_installer.js"],
+    ["native_host.js", "connector_bridge.js", "process_launcher.js", "update_checker.js", "update_installer.js", "update-sources.json"],
   );
   copyDir(path.join(repoRoot, "skills"), path.join(runtimeProjectRoot, "skills"));
   copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), path.join(runtimeProjectRoot, "plugins", "tianyuan-browser-connector"));
@@ -551,6 +551,7 @@ function main() {
   copyFileAtomic(path.join(repoRoot, "native-helper", "process_launcher.js"), path.join(nativeRuntimeRoot, "process_launcher.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "update_checker.js"), path.join(nativeRuntimeRoot, "update_checker.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "update_installer.js"), path.join(nativeRuntimeRoot, "update_installer.js"));
+  copyFileAtomic(path.join(repoRoot, "native-helper", "update-sources.json"), path.join(nativeRuntimeRoot, "update-sources.json"));
   copyDir(
     path.join(repoRoot, "native-helper", "platform"),
     path.join(nativeRuntimeRoot, "platform"),

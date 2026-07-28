@@ -167,6 +167,7 @@ cp "$ROOT_DIR/native-helper/connector_bridge.js" "$STAGE/native-helper/connector
 cp "$ROOT_DIR/native-helper/process_launcher.js" "$STAGE/native-helper/process_launcher.js"
 cp "$ROOT_DIR/native-helper/update_checker.js" "$STAGE/native-helper/update_checker.js"
 cp "$ROOT_DIR/native-helper/update_installer.js" "$STAGE/native-helper/update_installer.js"
+cp "$ROOT_DIR/native-helper/update-sources.json" "$STAGE/native-helper/update-sources.json"
 cp "$ROOT_DIR/native-helper/platform/"*.js "$STAGE/native-helper/platform/"
 cat > "$STAGE/native-helper/runtime-compat.json" <<EOF
 {

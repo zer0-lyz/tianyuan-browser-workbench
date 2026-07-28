@@ -1,9 +1,19 @@
 "use strict";
 
+const fs = require("node:fs");
+const path = require("node:path");
+
 const DEFAULT_REPOSITORY = "zer0-lyz/tianyuan-browser-workbench-releases";
 const GITHUB_API_BASE = "https://api.github.com";
 const UPDATE_MANIFEST_NAME = "update-manifest.json";
 const DEFAULT_TIMEOUT_MS = 12000;
+const UPDATE_SOURCES_FILE = path.join(__dirname, "update-sources.json");
+const ALLOWED_MANIFEST_HOSTS = new Set([
+  "gitee.com",
+  "github.com",
+  "raw.githubusercontent.com",
+  "raw.giteeusercontent.com",
+]);
 
 function parseSemver(value) {
   const normalized = String(value || "").trim().replace(/^v/i, "");
@@ -108,6 +118,119 @@ function selectChecksumAsset(assets, packageName) {
     .find((asset) => asset?.name === checksumName) || null;
 }
 
+function configuredManifestUrls(input = {}) {
+  const urls = [];
+  if (Array.isArray(input.updateManifestUrls)) urls.push(...input.updateManifestUrls);
+  if (process.env.TIANYUAN_UPDATE_MANIFEST_URLS) {
+    urls.push(...process.env.TIANYUAN_UPDATE_MANIFEST_URLS.split(","));
+  }
+  try {
+    const config = JSON.parse(fs.readFileSync(UPDATE_SOURCES_FILE, "utf8"));
+    if (Array.isArray(config.manifestUrls)) urls.push(...config.manifestUrls);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  return [...new Set(urls
+    .map((item) => String(item || "").trim())
+    .filter(Boolean))];
+}
+
+function validateManifestUrl(value) {
+  const url = new URL(String(value || ""));
+  if (url.protocol !== "https:" || !ALLOWED_MANIFEST_HOSTS.has(url.hostname)) {
+    throw new Error("UPDATE_MANIFEST_URL_FORBIDDEN");
+  }
+  return url.href;
+}
+
+function normalizeManifestAsset(asset, manifestUrl) {
+  if (!asset || typeof asset !== "object") return null;
+  const fileName = String(asset.fileName || asset.name || "");
+  const directUrl = String(asset.url || "").trim();
+  const url = directUrl
+    ? new URL(directUrl, manifestUrl).href
+    : "";
+  return {
+    name: fileName,
+    url,
+    apiUrl: "",
+    size: Number(asset.size || 0),
+    sha256: String(asset.sha256 || "").replace(/^sha256:/i, "").toLowerCase(),
+    updatedAt: asset.updatedAt || null,
+  };
+}
+
+function resultFromManifest(manifest, manifestUrl, input) {
+  const currentVersion = String(input.currentVersion || "").trim();
+  const currentBuildNumber = Number(input.currentBuildNumber || 0);
+  const latestVersion = String(manifest?.productVersion || "").trim().replace(/^v/i, "");
+  if (!parseSemver(latestVersion)) throw new Error("LATEST_VERSION_INVALID");
+  const latestBuildNumber = Number(manifest?.buildNumber || 0);
+  const versionComparison = compareSemver(latestVersion, currentVersion);
+  const buildUpdate = versionComparison === 0
+    && latestBuildNumber > 0
+    && latestBuildNumber > currentBuildNumber;
+  const latestRuntimeBuildId = String(manifest?.runtimeBuildId || "").trim();
+  const currentRuntimeBuildId = String(input.currentRuntimeBuildId || "").trim();
+  const repairRequired = versionComparison === 0
+    && Boolean(latestRuntimeBuildId && currentRuntimeBuildId && latestRuntimeBuildId !== currentRuntimeBuildId);
+  const key = platformKey(input.platform, input.architecture);
+  const requestedAsset = manifest?.assets?.[key] || null;
+  const packageAsset = normalizeManifestAsset(requestedAsset, manifestUrl);
+  const minimumSupportedVersion = String(manifest?.minimumSupportedVersion || "").trim();
+  const mandatory = Boolean(
+    manifest?.mandatory
+    || (parseSemver(minimumSupportedVersion) && compareSemver(currentVersion, minimumSupportedVersion) < 0)
+  );
+  return {
+    ok: true,
+    action: "check_github_update",
+    repository: manifest?.repository || DEFAULT_REPOSITORY,
+    source: manifest?.source || "manifest",
+    manifestUrl,
+    currentVersion,
+    currentBuildNumber,
+    currentRuntimeBuildId,
+    latestVersion,
+    latestBuildNumber,
+    latestRuntimeBuildId,
+    releasePublished: true,
+    updateAvailable: versionComparison > 0 || buildUpdate || repairRequired,
+    repairRequired,
+    mandatory,
+    minimumSupportedVersion: minimumSupportedVersion || null,
+    channel: manifest?.channel || "stable",
+    releaseName: String(manifest?.releaseName || `v${latestVersion}`),
+    releaseUrl: String(manifest?.releaseUrl || manifestUrl),
+    publishedAt: manifest?.publishedAt || null,
+    notes: releaseNotes(manifest?.releaseNotes),
+    platform: key,
+    asset: packageAsset,
+    checksumAsset: null,
+    manifestFound: true,
+    checkedAt: new Date().toISOString(),
+    security: { credentialsReturned: false, tokenUsed: false },
+  };
+}
+
+async function checkManifestSources(input = {}, options = {}) {
+  for (const sourceUrl of configuredManifestUrls(input)) {
+    const manifestUrl = validateManifestUrl(sourceUrl);
+    try {
+      const result = await fetchJson(manifestUrl, {
+        ...options,
+        accept: "application/json",
+      });
+      if (!result.found || !result.payload) continue;
+      const update = resultFromManifest(result.payload, manifestUrl, input);
+      if (update.asset?.url || !update.updateAvailable) return update;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 async function fetchJson(url, { fetchImpl = globalThis.fetch, timeoutMs = DEFAULT_TIMEOUT_MS, accept = "application/vnd.github+json" } = {}) {
   if (typeof fetchImpl !== "function") throw new Error("UPDATE_FETCH_UNAVAILABLE");
   const controller = new AbortController();
@@ -157,6 +280,8 @@ async function checkGithubUpdate(input = {}, options = {}) {
   const currentVersion = String(input.currentVersion || "").trim();
   const currentBuildNumber = Number(input.currentBuildNumber || 0);
   if (!parseSemver(currentVersion)) throw new Error("CURRENT_VERSION_INVALID");
+  const manifestUpdate = await checkManifestSources(input, options);
+  if (manifestUpdate) return manifestUpdate;
   const endpoint = `${GITHUB_API_BASE}/repos/${repository}/releases/latest`;
   const releaseResult = await fetchJson(endpoint, options);
   if (!releaseResult.found) {
@@ -234,6 +359,7 @@ async function checkGithubUpdate(input = {}, options = {}) {
 module.exports = {
   DEFAULT_REPOSITORY,
   UPDATE_MANIFEST_NAME,
+  configuredManifestUrls,
   parseSemver,
   compareSemver,
   platformKey,

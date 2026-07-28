@@ -15,6 +15,8 @@ const ALLOWED_DOWNLOAD_HOSTS = new Set([
   "github.com",
   "objects.githubusercontent.com",
   "release-assets.githubusercontent.com",
+  "gitee.com",
+  "raw.giteeusercontent.com",
 ]);
 
 function security() {
