@@ -602,7 +602,14 @@ try {
   $env:TIANYUAN_UPDATE_DEFER_COMPLETE = "1"
   $InstallJson = (& $BundledNodeExe (Join-Path $RootDir "scripts\install-local-runtime.mjs") 2>&1 | Out-String).Trim()
   if ($LASTEXITCODE -ne 0) {
-    throw "本机运行组件同步失败：$InstallJson"
+    try {
+      $InstallFailure = $InstallJson | ConvertFrom-Json
+      $InstallFailureReason = [string]$InstallFailure.reason
+    }
+    catch {
+      $InstallFailureReason = $InstallJson
+    }
+    throw "本机运行组件同步失败：$InstallFailureReason"
   }
   $InstallResult = $InstallJson | ConvertFrom-Json
   if (-not $InstallResult.ok) {

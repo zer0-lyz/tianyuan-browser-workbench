@@ -40,6 +40,8 @@ node scripts/install-local-runtime.mjs
 
 `0.14.1` 起可先点击“测试更新模块”：它会下载当前平台完整包，验证 GitHub 下载、SHA-256、解压和安装包文件完整性，但不会安装、改变版本或重启，测试文件完成后自动删除。完整包约 100–130 MB。
 
+`0.14.4` 修复 Windows 第 `5/7` 步本机组件同步时，目标目录瞬时缺少必需文件导致的失败。目录复制增加三次重试与必需文件单独补拷；失败报告改为结构化单行原因，不再只显示 Node 堆栈第一行。
+
 `0.14.3` 修复 Windows 安装器把“CLI 文件存在”误判为“CLI 可运行”的问题。安装器会逐个执行 `--version` 验证候选；天源 CLI 修复失败时仅提示 CLI 导出暂不可用，不再阻断扩展、Native Helper、Connector 和打印组件更新。
 
 `0.14.2` 修复 Windows Excel/WPS 对申报表“一页宽”设置识别不稳定的问题，统一写入 `fitToPage`、`autoPageBreaks`、`fitToWidth` 和 `fitToHeight`。明细表仍按既定规则保持 100% 比例，不改为强制缩放。

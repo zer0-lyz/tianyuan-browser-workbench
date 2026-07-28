@@ -56,15 +56,43 @@ function validateCopiedDirectory(dest, requiredRelativePaths = []) {
   }
 }
 
+function waitBeforeRetry(milliseconds) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
 function copyDir(src, dest, requiredRelativePaths = []) {
   mustExist(src, "source directory");
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   const suffix = `${process.pid}-${randomBytes(5).toString("hex")}`;
   const staging = `${dest}.staging-${suffix}`;
   const backup = `${dest}.backup-${suffix}`;
-  fs.rmSync(staging, { recursive: true, force: true });
-  fs.cpSync(src, staging, { recursive: true, force: true });
-  validateCopiedDirectory(staging, requiredRelativePaths);
+  let copyError = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    fs.rmSync(staging, { recursive: true, force: true });
+    try {
+      fs.cpSync(src, staging, { recursive: true, force: true });
+      const missingPaths = requiredRelativePaths.filter(
+        (relativePath) => !fs.existsSync(path.join(staging, relativePath)),
+      );
+      for (const relativePath of missingPaths) {
+        const sourcePath = path.join(src, relativePath);
+        const targetPath = path.join(staging, relativePath);
+        mustExist(sourcePath, `source file ${relativePath}`);
+        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+        fs.copyFileSync(sourcePath, targetPath);
+      }
+      validateCopiedDirectory(staging, requiredRelativePaths);
+      copyError = null;
+      break;
+    } catch (error) {
+      copyError = error;
+      if (attempt < 3) waitBeforeRetry(250);
+    }
+  }
+  if (copyError) {
+    fs.rmSync(staging, { recursive: true, force: true });
+    throw new Error(`COPY_DIRECTORY_FAILED: ${copyError.message}`);
+  }
   let movedExisting = false;
   try {
     if (fs.existsSync(dest)) {
@@ -544,11 +572,18 @@ function main() {
 try {
   main();
 } catch (error) {
+  const reason = String(error?.message || error || "LOCAL_RUNTIME_INSTALL_FAILED")
+    .replace(/bearer\s+\S+/gi, "Bearer [REDACTED]")
+    .replace(/zhmcp_[A-Za-z0-9._-]+/gi, "[REDACTED]")
+    .slice(0, 500);
   writeUpdateStatus("failed", 0, {
-    reason: String(error?.message || error || "LOCAL_RUNTIME_INSTALL_FAILED")
-      .replace(/bearer\s+\S+/gi, "Bearer [REDACTED]")
-      .replace(/zhmcp_[A-Za-z0-9._-]+/gi, "[REDACTED]")
-      .slice(0, 500),
+    reason,
   });
-  throw error;
+  process.stdout.write(`${JSON.stringify({
+    ok: false,
+    action: "install_local_runtime",
+    reason,
+    security: { credentialsReturned: false, tokenUsed: false },
+  })}\n`);
+  process.exitCode = 1;
 }

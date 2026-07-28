@@ -28,6 +28,8 @@ Version `0.14.1` adds **测试更新模块**. It downloads the current platform 
 
 Version `0.14.3` treats Tianyuan CLI as an independently repairable capability on Windows. The installer validates every discovered `tycpv.exe` or `tycpv.cmd` with `--version`. If no candidate works and the bundled repair also fails, extension, Native Helper, Connector, and print components still update; the installation report records `天源 CLI 状态：待修复（未阻断工作台组件安装）`.
 
+Version `0.14.4` retries Windows local component directory copies up to three times and explicitly recopies any missing required file before validation. Runtime installation failures are returned as bounded one-line JSON, so the Windows report records the actual missing path or copy error instead of only a Node stack location.
+
 Machines running `0.12.2` or earlier must manually install `0.13.0` once because their old Native Helper does not know the install action. Later releases can use **更新全部组件**.
 
 If Python print dependencies are unavailable, installation stops with `PRINT_PYTHON_OPENPYXL_NOT_FOUND` before registering a partial runtime.
