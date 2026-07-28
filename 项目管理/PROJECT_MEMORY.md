@@ -12,6 +12,10 @@
 - 无可运行 CLI 时先尝试包内安装器修复；修复仍失败则记录警告并继续同步扩展、Native Helper、Connector 和打印组件。
 - CLI 不可用时不设置无效 `TYCPV_BIN`；安装报告单独记录 CLI 状态和修复原因。
 - 新增 Windows CLI 降级静态回归测试，确保后续版本不得恢复 CLI 硬失败门禁。
+- 源码提交和标签为 `a8c458d0755b7eb59f9f750c125ad4f32afb7e49` / `v0.14.3`。
+- Windows/macOS SHA-256 分别为 `a304c21a92d161df1cad7364b637bdb388d3a46110f442d582cf4efe87681f56` / `8bd2b782921820fbd0416b59636e79b8bcb5f0ddde985b589bd8a5c042350b74`。
+- 正式 Release 已上线，5 个资产全部上传；匿名检查确认 `0.14.2` 可发现 `0.14.3`。
+- 真实 Windows x64 仍需用户运行新版 `install.cmd` 完成 CLI 降级实机回归。
 
 ## 2026-07-28 v0.14.2 Windows 申报表一页宽修复
 
