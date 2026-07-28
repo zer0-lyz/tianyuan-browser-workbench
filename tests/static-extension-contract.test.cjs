@@ -69,7 +69,7 @@ assert.equal(quotedConstant(sidepanel, "EXPECTED_CONNECTOR_PROTOCOL_VERSION"), q
 assert.equal(quotedConstant(nativeHost, "CONNECTOR_PROTOCOL_VERSION"), quotedConstant(bridge, "PROTOCOL_VERSION"));
 assert.equal(manifest.version, versionConfig.chromeVersion);
 assert.equal(manifest.version_name, versionConfig.versionName);
-assert.equal(versionConfig.productVersion, "0.13.2");
+assert.equal(versionConfig.productVersion, "0.14.0");
 assert.equal(versionConfig.repository, "zer0-lyz/tianyuan-browser-workbench-releases");
 
 assert.equal(pluginServer.includes(`version: "${pluginManifest.version}"`), true);
@@ -129,9 +129,10 @@ assert.equal(feedbackModule.includes("privacyConfirmed: true"), true);
 assert.equal(feedbackModule.includes("projectId"), false);
 assert.equal(feedbackModule.includes("companyId"), false);
 assert.equal(feedbackModule.includes("subjectCode"), false);
-assert.equal(feedbackConfig.deliveryMode, "copy");
+assert.equal(feedbackConfig.deliveryMode, "service");
 assert.equal(feedbackConfig.publicChannel, false);
-assert.equal(feedbackConfig.endpoint, "");
+assert.equal(feedbackConfig.endpoint, "https://feedback.zer0y.com/api/feedback");
+assert.equal(manifest.host_permissions.includes("https://feedback.zer0y.com/*"), true);
 assert.equal(moduleRegistry.includes("MODULE_ALREADY_REGISTERED"), true);
 assert.equal(moduleRegistry.includes("module.activated"), true);
 assert.equal(legacyFeatureModules.includes('id: "batch-save"'), true);

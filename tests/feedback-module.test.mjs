@@ -150,7 +150,8 @@ assert.equal(
   "chrome-extension://test/src/modules/feedback/styles.css",
 );
 assert.equal(elements.get("feedbackTitle").value, "草稿标题");
-assert.equal(elements.get("submitFeedback").disabled, true);
+assert.equal(elements.get("submitFeedback").disabled, false);
+assert.equal(elements.get("submitFeedback").textContent, "复制并反馈");
 
 elements.get("openFeedbackTop").dispatchEvent(new Event("click"));
 elements.get("backFromFeedback").dispatchEvent(new Event("click"));
@@ -164,6 +165,12 @@ assert.match(copied[0], /草稿标题/);
 assert.match(copied[0], /"version": "0.12.2"/);
 assert.equal(copied[0].includes("projectId"), false);
 assert.equal(statuses.at(-1).kind, "ok");
+
+elements.get("submitFeedback").dispatchEvent(new Event("click"));
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(copied.length, 2);
+assert.equal(statuses.at(-1).text, "反馈已复制，尚未自动提交");
+assert.equal(statuses.at(-1).kind, "warn");
 
 assert.equal(
   validateFeedbackDraft({

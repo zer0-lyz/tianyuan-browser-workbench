@@ -40,7 +40,7 @@ node scripts/install-local-runtime.mjs
 
 `0.12.2` 及更早版本的 Native Helper 不包含完整安装动作，因此首次升级到 `0.13.0` 仍需手动运行一次新版安装包。完成这次引导升级后，后续版本可直接使用侧栏一键更新。更新不会静默执行，开始前必须由用户明确确认。
 
-反馈模块支持功能建议、配置问题、故障反馈和使用体验。草稿只保存在扩展本机存储；自动提交服务未配置时，可以复制整理后的反馈内容。自动同步采用私有反馈服务和 GitHub App，浏览器扩展中不保存 GitHub token 或私钥。服务端源码和部署说明见 `feedback-service/README.md`。
+反馈模块支持功能建议、配置问题、故障反馈和使用体验。草稿只保存在扩展本机存储；用户确认隐私声明后，反馈通过 `https://feedback.zer0y.com/api/feedback` 写入 Cloudflare 私有 D1 数据库并返回匿名反馈编号。浏览器扩展不保存 Cloudflare 或 GitHub token，公网不提供反馈读取接口；服务端源码和部署说明见 `feedback-service/README.md`。
 
 ## 运行目录
 

@@ -1,5 +1,17 @@
 # 天源浏览器工作台任务日志
 
+## 2026-07-28 私有反馈收集服务
+
+- 用户反馈模块原“自动提交待配置”按钮不可用，根因是 HTTPS 接收服务尚未部署。
+- 新增 Cloudflare Worker 适配和 D1 migration，生产资源均命名为 `tianyuan-workbench-feedback`。
+- 注册 `zer0y-workbench.workers.dev` 备用子域并绑定 `feedback.zer0y.com` 自定义域名。
+- Worker secret 保存匿名限流 pepper，仓库和扩展不保存 Cloudflare/GitHub token。
+- 扩展生产配置切换到 `https://feedback.zer0y.com/api/feedback`。
+- 主按钮按交付模式显示“提交反馈”“打开提交页面”或“复制并反馈”，降级时明确未自动提交。
+- 版本升级为 `0.14.0 / 2026072801`，Connector 保持 `0.4.2`。
+- 全量本地测试、反馈服务 7 项测试、生产健康检查、模拟提交、D1 回读和测试记录清理全部通过。
+- 本机运行副本安装成功，Native Host 自检和 Connector 重启成功；未写入 MCP 凭据，未执行天源线上写入。
+
 ## 2026-07-27 Windows tycpv CLI 识别修复
 
 - 读取 Windows Agent 安装反馈文档和用户截图，确认安装停在 Step `2/7 安装或检查天源 CLI`。

@@ -5,7 +5,12 @@
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
-    "test": "node --test"
+    "test": "node --test",
+    "deploy:worker": "wrangler deploy",
+    "migrate:remote": "wrangler d1 migrations apply FEEDBACK_DB --remote"
+  },
+  "devDependencies": {
+    "wrangler": "4.114.0"
   },
   "engines": {
     "node": ">=20"

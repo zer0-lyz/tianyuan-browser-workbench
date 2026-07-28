@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tianyuan-workbench-feedback",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-07-28",
+  "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "feedback.zer0y.com",
+      "custom_domain": true
+    }
+  ],
+  "observability": {
+    "enabled": false
+  },
+  "vars": {
+    "FEEDBACK_ALLOWED_EXTENSION_IDS": "lkflndcnklpeaejohaacoaolnmhgigoc,fdbllnmaaklkcmoacoapbibiggnndkfpa",
+    "FEEDBACK_MAX_BODY_BYTES": "16384",
+    "FEEDBACK_RATE_LIMIT_MAX": "10",
+    "FEEDBACK_RATE_LIMIT_WINDOW_MS": "3600000"
+  },
+  "d1_databases": [
+    {
+      "binding": "FEEDBACK_DB",
+      "database_name": "tianyuan-workbench-feedback",
+      "database_id": "efe81333-23ce-4a00-bb20-ba6519f67b4f",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

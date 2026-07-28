@@ -44,10 +44,10 @@ export const feedbackTemplate = `
       <input id="feedbackPrivacyConfirm" type="checkbox">
       <span>我已确认反馈中不包含客户名称、项目编号、文件路径、token、Cookie、密码或验证码</span>
     </label>
-    <div id="feedbackMessage" class="inline-feedback">填写后可复制反馈内容</div>
+    <div id="feedbackMessage" class="inline-feedback">填写并确认隐私声明后即可反馈</div>
     <div class="button-row">
-      <button id="submitFeedback" type="button" disabled>提交反馈</button>
-      <button id="copyFeedback" type="button">复制反馈</button>
+      <button id="submitFeedback" type="button">复制并反馈</button>
+      <button id="copyFeedback" type="button">仅复制</button>
       <button id="clearFeedback" type="button" class="secondary">清空</button>
     </div>
   </section>
