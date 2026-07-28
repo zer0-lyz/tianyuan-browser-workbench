@@ -53,6 +53,7 @@ function elementMap(documentRef) {
     "updateCheckedAt",
     "updateFeedback",
     "checkForUpdates",
+    "testUpdate",
     "installUpdate",
     "downloadUpdate",
     "openReleasePage",
@@ -86,10 +87,12 @@ export const updatesModule = {
     let context;
     let elements;
     let checking = false;
+    let testing = false;
     let installing = false;
     let latestResult = null;
     let versionConfig = null;
     let runtimeContract = null;
+    let operationStatus = null;
 
     function sleep(delay) {
       return new Promise((resolve) => window.setTimeout(resolve, delay));
@@ -103,16 +106,32 @@ export const updatesModule = {
         UPDATE_SHA256_INVALID: "官方校验文件格式无效，已停止安装。",
         UPDATE_SHA256_MISMATCH: "安装包校验失败，文件可能损坏，已停止安装。",
         UPDATE_INSTALLER_NOT_FOUND: "安装包中缺少安装程序，已停止安装。",
+        UPDATE_DOWNLOAD_NETWORK_FAILED: "安装包下载网络连接失败，请检查网络后重试。",
+        UPDATE_DOWNLOAD_TIMEOUT: "安装包下载超时，请检查网络稳定性后重试。",
+        UPDATE_DOWNLOAD_SIZE_MISMATCH: "安装包大小与发布记录不一致，已停止处理。",
+        UPDATE_FETCH_UNAVAILABLE: "本机 Node.js 运行时不支持下载，请更新本机运行组件。",
         PLATFORM_UPDATE_UNSUPPORTED: "当前系统暂不支持一键更新。",
         UNKNOWN_ACTION: "当前 Native Helper 版本较旧，需要手动安装一次新版。",
       };
+      if (String(reason || "").startsWith("UPDATE_DOWNLOAD_NETWORK_")) {
+        const code = String(reason).slice("UPDATE_DOWNLOAD_NETWORK_".length);
+        return `安装包下载网络连接失败（${code}），请检查网络后重试。`;
+      }
+      if (String(reason || "").startsWith("UPDATE_DOWNLOAD_HTTP_")) {
+        const code = String(reason).slice("UPDATE_DOWNLOAD_HTTP_".length);
+        return `GitHub 安装包下载失败（HTTP ${code}），请稍后重试。`;
+      }
+      if (String(reason || "").startsWith("UPDATE_PACKAGE_FILE_MISSING:")) {
+        return "安装包文件不完整，已停止处理。";
+      }
       return messages[reason] || reason || "完整更新失败";
     }
 
-    function renderProgress(status = null) {
-      const active = installing || (
+    function renderProgress(status = operationStatus) {
+      operationStatus = status;
+      const active = installing || testing || (
         status
-        && !["idle", "complete", "failed"].includes(status.phase)
+        && !["idle", "complete", "test_complete", "failed"].includes(status.phase)
       );
       elements.updateProgressPanel.classList.toggle("hidden", !active && !status);
       elements.updateProgressBar.value = Math.max(0, Math.min(100, Number(status?.percent || 0)));
@@ -185,11 +204,15 @@ export const updatesModule = {
 
       const assetUrl = safeGithubUrl(result?.asset?.url);
       const releaseUrl = safeGithubUrl(result?.releaseUrl);
-      elements.downloadUpdate.disabled = !assetUrl;
+      const operationBusy = checking || testing || installing;
+      elements.downloadUpdate.disabled = operationBusy || !assetUrl;
       elements.downloadUpdate.dataset.url = assetUrl;
-      elements.openReleasePage.disabled = !releaseUrl;
+      elements.openReleasePage.disabled = operationBusy || !releaseUrl;
       elements.openReleasePage.dataset.url = releaseUrl;
-      elements.installUpdate.disabled = installing
+      elements.testUpdate.disabled = operationBusy
+        || !assetUrl
+        || !result?.ok;
+      elements.installUpdate.disabled = operationBusy
         || !assetUrl
         || !result?.ok
         || (!result?.updateAvailable && !result?.repairRequired);
@@ -248,19 +271,33 @@ export const updatesModule = {
         );
         return;
       }
+      if (result.latestVersion && String(result.latestVersion) !== String(currentVersion)) {
+        elements.updateHeadline.textContent = "本机版本高于公开版本";
+        elements.updateDescription.textContent =
+          `当前为 v${currentVersion}，GitHub 最新正式版本为 v${result.latestVersion}。`;
+        elements.updateBadge.textContent = "本机较新";
+        elements.updateFeedback.textContent =
+          "可以使用“测试更新模块”验证公开安装包链路；测试不会降级或安装组件";
+        elements.updateFeedback.dataset.kind = "ok";
+        setTopStatus(`v${currentVersion}`, "ok");
+        renderProgress();
+        return;
+      }
       elements.updateHeadline.textContent = "已是最新版本";
       elements.updateDescription.textContent = `当前版本 v${currentVersion} 与 GitHub 最新正式版本一致。`;
       elements.updateBadge.textContent = "最新";
       elements.updateFeedback.textContent = "无需更新";
       elements.updateFeedback.dataset.kind = "ok";
       setTopStatus(`v${currentVersion}`, "ok");
-      renderProgress(null);
+      renderProgress();
     }
 
     async function check({ automatic = false } = {}) {
-      if (checking) return latestResult;
+      if (checking || testing || installing) return latestResult;
       checking = true;
       elements.checkForUpdates.disabled = true;
+      elements.testUpdate.disabled = true;
+      elements.installUpdate.disabled = true;
       elements.downloadUpdate.disabled = true;
       setTopStatus("检查中", "idle");
       elements.updateBadge.textContent = "检查中";
@@ -325,19 +362,116 @@ export const updatesModule = {
       }, 15000);
     }
 
+    async function testUpdateModule() {
+      if (testing || installing || checking || !latestResult?.asset?.url) return;
+      const confirmed = window.confirm([
+        "确认测试更新模块？",
+        "",
+        "将下载约 100–130 MB 的当前平台完整安装包，并测试：",
+        "1. GitHub 下载与重试通道",
+        "2. SHA-256 校验",
+        "3. 解压和安装包文件完整性",
+        "",
+        "不会安装组件、改变版本或重启；测试文件完成后自动删除。",
+      ].join("\n"));
+      if (!confirmed) return;
+
+      testing = true;
+      elements.testUpdate.textContent = "测试中...";
+      setTopStatus("测试中", "idle");
+      renderProgress({
+        mode: "test",
+        phase: "checking",
+        percent: 3,
+        message: "正在准备更新模块安全自测",
+      });
+      render(latestResult);
+      context.setStatus("正在测试完整更新链路，不会执行安装...", "idle");
+      try {
+        const { config, contract } = await loadVersionContext();
+        let requestFinished = false;
+        const request = context.sendNativeMessage({
+          action: "test_workbench_update",
+          currentVersion: config.productVersion
+            || context.extensionManifest.version_name
+            || context.extensionManifest.version,
+          currentBuildNumber: Number(config.buildNumber || 0),
+          currentRuntimeBuildId: String(contract?.runtimeBuildId || ""),
+        }, 20 * 60 * 1000).finally(() => {
+          requestFinished = true;
+        });
+
+        while (!requestFinished) {
+          await Promise.race([
+            sleep(1000),
+            request.then(() => undefined, () => undefined),
+          ]);
+          if (requestFinished) break;
+          try {
+            const status = await readInstallStatus();
+            if (status?.mode === "test") renderProgress(status);
+          } catch {
+          }
+        }
+
+        const result = await request;
+        if (!result?.ok || result?.phase !== "test_complete") {
+          throw new Error(result?.reason || "WORKBENCH_UPDATE_TEST_FAILED");
+        }
+        renderProgress(result);
+        elements.updateFeedback.textContent =
+          "测试通过：下载、SHA-256 校验、解压和文件完整性均正常；未安装任何组件";
+        elements.updateFeedback.dataset.kind = "ok";
+        setTopStatus("测试通过", "ok");
+        context.setStatus("更新模块测试通过，当前版本和已安装组件均未改变。", "ok");
+      } catch (error) {
+        const reason = String(error?.message || error);
+        const friendly = updateFailureText(reason);
+        renderProgress({
+          mode: "test",
+          phase: "failed",
+          percent: 0,
+          reason,
+          message: friendly,
+        });
+        elements.updateFeedback.textContent = `更新模块测试失败：${friendly}`;
+        elements.updateFeedback.dataset.kind = "error";
+        setTopStatus("测试失败", "error");
+        context.setStatus(`更新模块测试失败：${friendly}`, "error");
+      } finally {
+        const finalStatus = operationStatus;
+        testing = false;
+        elements.testUpdate.textContent = "测试更新模块";
+        render(latestResult);
+        renderProgress(finalStatus);
+        if (finalStatus?.phase === "test_complete") {
+          elements.updateFeedback.textContent =
+            "测试通过：下载、SHA-256 校验、解压和文件完整性均正常；未安装任何组件";
+          elements.updateFeedback.dataset.kind = "ok";
+          setTopStatus("测试通过", "ok");
+        } else if (finalStatus?.phase === "failed") {
+          const friendly = updateFailureText(finalStatus.reason);
+          elements.updateFeedback.textContent = `更新模块测试失败：${friendly}`;
+          elements.updateFeedback.dataset.kind = "error";
+          setTopStatus("测试失败", "error");
+        }
+      }
+    }
+
     async function waitForInstallComplete() {
       const deadline = Date.now() + 15 * 60 * 1000;
       let lastStatus = null;
       while (Date.now() < deadline) {
         try {
           lastStatus = await readInstallStatus();
-          renderProgress(lastStatus);
-          if (lastStatus?.phase === "complete") return lastStatus;
-          if (lastStatus?.phase === "failed") {
-            throw new Error(lastStatus.reason || "WORKBENCH_UPDATE_FAILED");
-          }
-        } catch (error) {
-          if (String(error?.message || "").includes("WORKBENCH_UPDATE_FAILED")) throw error;
+        } catch {
+          await sleep(1200);
+          continue;
+        }
+        renderProgress(lastStatus);
+        if (lastStatus?.phase === "complete") return lastStatus;
+        if (lastStatus?.phase === "failed") {
+          throw new Error(lastStatus.reason || "WORKBENCH_UPDATE_FAILED");
         }
         await sleep(1200);
       }
@@ -345,7 +479,7 @@ export const updatesModule = {
     }
 
     async function installCompleteUpdate() {
-      if (installing || !latestResult?.asset?.url) return;
+      if (installing || testing || checking || !latestResult?.asset?.url) return;
       const confirmed = window.confirm([
         `确认将天源浏览器工作台更新到 v${latestResult.latestVersion}？`,
         "",
@@ -356,8 +490,7 @@ export const updatesModule = {
       if (!confirmed) return;
 
       installing = true;
-      elements.installUpdate.disabled = true;
-      elements.checkForUpdates.disabled = true;
+      render(latestResult);
       elements.installUpdate.textContent = "更新中...";
       setTopStatus("更新中", "idle");
       renderProgress({ phase: "checking", percent: 3, message: "正在准备完整更新" });
@@ -408,10 +541,17 @@ export const updatesModule = {
         setTopStatus("更新失败", "error");
         context.setStatus(`完整更新失败：${friendly}`, "error");
       } finally {
+        const finalStatus = operationStatus;
         installing = false;
         elements.installUpdate.textContent = "更新全部组件";
-        elements.checkForUpdates.disabled = false;
         render(latestResult);
+        renderProgress(finalStatus);
+        if (finalStatus?.phase === "failed") {
+          const friendly = updateFailureText(finalStatus.reason);
+          elements.updateFeedback.textContent = friendly;
+          elements.updateFeedback.dataset.kind = "error";
+          setTopStatus("更新失败", "error");
+        }
       }
     }
 
@@ -458,6 +598,7 @@ export const updatesModule = {
         context.scope.on(elements.checkForUpdates, "click", () =>
           check({ automatic: false })
         );
+        context.scope.on(elements.testUpdate, "click", testUpdateModule);
         context.scope.on(elements.installUpdate, "click", installCompleteUpdate);
         context.scope.on(elements.downloadUpdate, "click", () =>
           openUrl(elements.downloadUpdate)

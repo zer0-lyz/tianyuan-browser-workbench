@@ -35,3 +35,7 @@
   color: var(--muted);
   font-size: 12px;
 }
+
+[data-module-id="updates"] .update-test-note {
+  margin: 0;
+}

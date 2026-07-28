@@ -37,6 +37,7 @@ fakeWindow.setTimeout = setTimeout;
 fakeWindow.clearTimeout = clearTimeout;
 fakeWindow.setInterval = setInterval;
 fakeWindow.clearInterval = clearInterval;
+fakeWindow.confirm = () => true;
 globalThis.window = fakeWindow;
 
 const elementIds = [
@@ -55,6 +56,7 @@ const elementIds = [
   "updateCheckedAt",
   "updateFeedback",
   "checkForUpdates",
+  "testUpdate",
   "installUpdate",
   "downloadUpdate",
   "openReleasePage",
@@ -88,6 +90,12 @@ const savedResult = {
   checkedAt: new Date().toISOString(),
   channel: "development",
   platform: "macos-arm64",
+  asset: {
+    name: "tianyuan-workbench-v0.11.0-macos-arm64.zip",
+    url: "https://github.com/example/update.zip",
+    size: 120 * 1024 * 1024,
+    sha256: "a".repeat(64),
+  },
   notes: ["模块化测试"],
 };
 const storage = {
@@ -102,6 +110,7 @@ const storage = {
 const navigation = [];
 const statuses = [];
 const connections = [];
+const nativeMessages = [];
 const moduleInstance = updatesModule.create();
 const updateScope = new ModuleScope();
 await moduleInstance.initialize({
@@ -130,7 +139,20 @@ await moduleInstance.initialize({
     navigation.push(route);
   },
   scope: updateScope,
-  async sendNativeMessage() {
+  async sendNativeMessage(message) {
+    nativeMessages.push(message);
+    if (message.action === "test_workbench_update") {
+      return {
+        ok: true,
+        action: "test_workbench_update",
+        mode: "test",
+        phase: "test_complete",
+        percent: 100,
+        installed: false,
+        packageValid: true,
+        message: "更新模块测试通过",
+      };
+    }
     return savedResult;
   },
   setConnection(_element, text, kind) {
@@ -143,6 +165,7 @@ await moduleInstance.initialize({
 });
 
 assert.match(elements.get("page-updates").innerHTML, /id="checkForUpdates"/);
+assert.match(elements.get("page-updates").innerHTML, /id="testUpdate"/);
 assert.equal(documentRef.head.children.length, 1);
 assert.equal(
   documentRef.head.children[0].href,
@@ -157,6 +180,16 @@ elements.get("backFromUpdates").dispatchEvent(new Event("click"));
 assert.deepEqual(navigation, ["updates", "home"]);
 assert.equal(statuses.length, 0);
 assert.equal(connections.at(-1).text, "v0.11.0");
+
+elements.get("testUpdate").dispatchEvent(new Event("click"));
+await new Promise((resolve) => setTimeout(resolve, 20));
+assert.equal(
+  nativeMessages.some((message) => message.action === "test_workbench_update"),
+  true,
+);
+assert.match(elements.get("updateFeedback").textContent, /测试通过/);
+assert.equal(elements.get("testUpdate").textContent, "测试更新模块");
+assert.equal(elements.get("testUpdate").disabled, false);
 
 updateScope.dispose();
 globalThis.window = originalWindow;

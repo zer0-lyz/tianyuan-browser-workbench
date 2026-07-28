@@ -24,6 +24,8 @@ Version `0.13.0` adds a full component updater:
 4. Update extension, Native Helper, Bridge, Connector, `~/plugins/`, and the Codex plugin cache.
 5. Restart Connector and reload the unpacked extension.
 
+Version `0.14.1` adds **测试更新模块**. It downloads the current platform package, verifies SHA-256, extracts it, and validates required files without installing, restarting, changing versions, or retaining test files. The full package is approximately 100–130 MB.
+
 Machines running `0.12.2` or earlier must manually install `0.13.0` once because their old Native Helper does not know the install action. Later releases can use **更新全部组件**.
 
 If Python print dependencies are unavailable, installation stops with `PRINT_PYTHON_OPENPYXL_NOT_FOUND` before registering a partial runtime.

@@ -38,6 +38,10 @@ node scripts/install-local-runtime.mjs
 
 版本更新模块通过公开发行仓库 `zer0-lyz/tianyuan-browser-workbench-releases` 的 GitHub Releases 检查新版本，不使用 MCP token。`0.13.0` 起可在侧栏点击“更新全部组件”，自动下载对应平台完整包、校验 SHA-256，并同步扩展、Native Helper、Bridge、Connector、`~/plugins/` 与 Codex 插件缓存；完成后自动重新加载扩展。
 
+`0.14.1` 起可先点击“测试更新模块”：它会下载当前平台完整包，验证 GitHub 下载、SHA-256、解压和安装包文件完整性，但不会安装、改变版本或重启，测试文件完成后自动删除。完整包约 100–130 MB。
+
+`0.14.2` 修复 Windows Excel/WPS 对申报表“一页宽”设置识别不稳定的问题，统一写入 `fitToPage`、`autoPageBreaks`、`fitToWidth` 和 `fitToHeight`。明细表仍按既定规则保持 100% 比例，不改为强制缩放。
+
 `0.12.2` 及更早版本的 Native Helper 不包含完整安装动作，因此首次升级到 `0.13.0` 仍需手动运行一次新版安装包。完成这次引导升级后，后续版本可直接使用侧栏一键更新。更新不会静默执行，开始前必须由用户明确确认。
 
 反馈模块支持功能建议、配置问题、故障反馈和使用体验。草稿只保存在扩展本机存储；用户确认隐私声明后，反馈通过 `https://feedback.zer0y.com/api/feedback` 写入 Cloudflare 私有 D1 数据库并返回匿名反馈编号。浏览器扩展不保存 Cloudflare 或 GitHub token，公网不提供反馈读取接口；服务端源码和部署说明见 `feedback-service/README.md`。
