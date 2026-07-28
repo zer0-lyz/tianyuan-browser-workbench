@@ -26,7 +26,20 @@
 - 根目录 `15` 个测试文件全部通过。
 - 新增动态测试构造缺少扩展清单的临时安装源，确认退出码为 `1`、stderr 为空、stdout 为可解析 JSON，并包含真实 `reason`。
 - 反馈服务 `7` 项测试全部通过。
+- Windows 和 macOS ZIP 均通过 SHA-256、压缩完整性和 `source_dirty=false` 检查。
+- Windows 启动器编码检查通过；正式包内已包含复制重试、补拷和结构化错误回传。
+- 在线检查确认 `0.14.3` 可发现 `0.14.4`；GitHub Release 资产摘要可用于 SHA-256 校验。
 - 真实 Windows x64 仍需运行新版 `install.cmd` 验收目标目录复制自愈。
+
+## 发布
+
+- 源码提交：`f6932ca798de50795783b52356f986850fa2d55f`。
+- 源码标签：`v0.14.4`。
+- Windows SHA-256：`e8beccc4e9b50f88d22a9b71f2a9ed598b88acd7fb6d659c5732c388cd811842`。
+- macOS SHA-256：`b215f623ac798f6de257f3476e28366deeb88b570f98180f4e6d2ba219fa1848`。
+- 运行指纹：`b3f42ab8fbd6438f06d82ce9038fbab695729d2d0f5aa206520e4dd47489475f`。
+- 正式 Release：`https://github.com/zer0-lyz/tianyuan-browser-workbench-releases/releases/tag/v0.14.4`。
+- 5 个资产全部为 `uploaded`。
 
 ## 安全
 
