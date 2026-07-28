@@ -221,8 +221,20 @@ export const feedbackModule = {
       const composed = await compose();
       if (!composed) return;
       const endpoint = safeFeedbackEndpoint(config.endpoint);
+      const githubUrl = issueUrl(config, draft, composed.markdown);
+      if (githubUrl) {
+        await context.chrome.tabs.create({ url: githubUrl });
+        setMessage("已打开反馈提交页，请检查内容后完成提交", "ok");
+        context.setStatus("已打开反馈提交页", "ok");
+        return;
+      }
       if (config.deliveryMode !== "service" || !endpoint) {
-        setMessage("自动提交服务尚未启用，请先使用“复制反馈”", "warn");
+        await context.copyText(composed.markdown);
+        setMessage(
+          "自动提交服务尚未启用；反馈已复制，请发送给维护人员",
+          "warn",
+        );
+        context.setStatus("反馈已复制，尚未自动提交", "warn");
         return;
       }
       elements.submitFeedback.disabled = true;
@@ -272,16 +284,25 @@ export const feedbackModule = {
     function renderDelivery() {
       const endpoint = safeFeedbackEndpoint(config.endpoint);
       const serviceReady = config.deliveryMode === "service" && endpoint;
-      elements.submitFeedback.disabled = !serviceReady;
+      const githubReady = config.deliveryMode === "github-issues"
+        && config.githubIssuesEnabled
+        && Boolean(safeGithubRepository(config.githubRepository));
+      elements.submitFeedback.disabled = false;
       elements.submitFeedback.textContent = serviceReady
         ? "提交反馈"
-        : "自动提交待配置";
+        : githubReady
+          ? "打开提交页面"
+          : "复制并反馈";
       elements.feedbackDeliveryMode.textContent = serviceReady
         ? "安全反馈服务"
-        : "本机草稿与复制";
+        : githubReady
+          ? "GitHub 提交页面"
+          : "本机草稿与复制";
       elements.feedbackChannelStatus.textContent = serviceReady
-        ? "私有 GitHub 反馈仓库"
-        : "尚未启用自动提交";
+        ? "自动提交已启用"
+        : githubReady
+          ? "提交前需要在 GitHub 确认"
+          : "自动提交未启用，点击后复制反馈";
     }
 
     return {

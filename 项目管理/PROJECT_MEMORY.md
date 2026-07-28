@@ -1,6 +1,16 @@
 # 天源浏览器工作台项目长期记忆
 
-更新时间：2026-07-27 CST
+更新时间：2026-07-28 CST
+
+## 2026-07-28 v0.14.0 私有反馈服务
+
+- 反馈生产接收端改为 Cloudflare Worker `tianyuan-workbench-feedback` 和私有 D1。
+- 生产地址为 `https://feedback.zer0y.com/api/feedback`；用户端不需要 GitHub、Agent、MCP 或 token。
+- 固定扩展来源、字段白名单、二次脱敏、16 KiB 限制和匿名限流均在服务端执行。
+- 公网没有反馈读取接口；维护人员只通过 Cloudflare D1 控制台或受控 Wrangler 查询。
+- 限流 pepper 只保存在 Worker secret；Cloudflare OAuth 只保存在本机 Wrangler 受限配置。
+- 扩展 `0.14.0` 在服务可用时显示“提交反馈”，成功返回 `TYF-YYYYMMDD-XXXXXXXX`；服务不可用时降级复制且不假报成功。
+- 端到端模拟提交、D1 回读和精确清理已通过，测试后反馈表为空。
 
 ## 2026-07-27 v0.13.0 完整组件更新正式发布
 
