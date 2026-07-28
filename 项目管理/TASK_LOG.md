@@ -1,5 +1,15 @@
 # 天源浏览器工作台任务日志
 
+## 2026-07-28 Windows CLI 独立降级 v0.14.3
+
+- 读取 Windows 失败截图，确认核心文件校验通过、已有 CLI 被跳过安装，随后报“天源 CLI 无法运行”。
+- 检查 `release/windows-x64/install.ps1`，确认 `Find-Tycpv` 返回第一个存在候选而不验证运行能力，主流程随后硬失败。
+- 新增 CLI 版本安全探测；`.cmd` 通过受控 `cmd.exe /d /s /c` 执行，所有候选均需 `--version` 成功。
+- 将已验证 CLI 路径写入 Windows 本机 `runtime-config.json`，避免 Native Helper 再次猜测候选。
+- 无可运行 CLI 时尝试包内修复；仍失败则不设置 `TYCPV_BIN`，继续安装其他工作台组件并写入可读报告。
+- 版本升级为 `0.14.3 / 2026072804`，新增 `windows-installer-cli-degrade` 回归测试。
+- 根目录 `14` 个测试文件和反馈服务 `7` 项测试全部通过。
+
 ## 2026-07-28 Windows 申报表一页宽修复
 
 - 读取反馈 `TYF-20260728-A4E64B91`，问题内容为 Windows 批量打印后未正常设置所有列一页宽。

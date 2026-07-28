@@ -246,18 +246,48 @@ function Test-TycpvExecutableCandidate([string]$Candidate) {
   return $Candidate -match "\.(exe|cmd)$"
 }
 
+function Get-TycpvVersionInfo([string]$Candidate) {
+  if (-not (Test-TycpvExecutableCandidate $Candidate)) {
+    return $null
+  }
+  try {
+    $ResolvedPath = (Resolve-Path -LiteralPath $Candidate).Path
+    if ($ResolvedPath -match "\.cmd$") {
+      $CommandLine = '""{0}" --version"' -f $ResolvedPath
+      $OutputLines = @(& $env:ComSpec /d /s /c $CommandLine 2>&1)
+    } else {
+      $OutputLines = @(& $ResolvedPath --version 2>&1)
+    }
+    $ExitCode = $LASTEXITCODE
+    $VersionLine = $OutputLines |
+      ForEach-Object { [string]$_ } |
+      Where-Object { $_.Trim() } |
+      Select-Object -First 1
+    if ($ExitCode -ne 0 -or -not $VersionLine) {
+      return $null
+    }
+    return [PSCustomObject]@{
+      Path = $ResolvedPath
+      Version = (Protect-Message $VersionLine.Trim())
+    }
+  }
+  catch {
+    return $null
+  }
+}
+
 function Find-Tycpv {
   Refresh-ProcessPath
+  $Candidates = New-Object System.Collections.Generic.List[string]
   $Command = Get-Command "tycpv.exe" -ErrorAction SilentlyContinue
   if ($Command -and (Test-TycpvExecutableCandidate $Command.Source)) {
-    return $Command.Source
+    $Candidates.Add($Command.Source)
   }
   $Command = Get-Command "tycpv.cmd" -ErrorAction SilentlyContinue
   if ($Command -and (Test-TycpvExecutableCandidate $Command.Source)) {
-    return $Command.Source
+    $Candidates.Add($Command.Source)
   }
 
-  $Candidates = New-Object System.Collections.Generic.List[string]
   Add-TycpvPathCandidates $Candidates (Join-Path $env:LOCALAPPDATA "Programs\tycpv")
   Add-TycpvPathCandidates $Candidates (Join-Path $env:LOCALAPPDATA "tycpv")
   Add-TycpvPathCandidates $Candidates (Join-Path $env:USERPROFILE ".tycpv")
@@ -282,12 +312,6 @@ function Find-Tycpv {
       }
   }
 
-  foreach ($Candidate in $Candidates) {
-    if (Test-TycpvExecutableCandidate $Candidate) {
-      return (Resolve-Path -LiteralPath $Candidate).Path
-    }
-  }
-
   foreach ($SearchRoot in @(
     (Join-Path $env:LOCALAPPDATA "Programs"),
     $env:ProgramFiles,
@@ -296,10 +320,24 @@ function Find-Tycpv {
     if (-not $SearchRoot -or -not (Test-Path -LiteralPath $SearchRoot)) {
       continue
     }
-    $Match = Get-ChildItem -LiteralPath $SearchRoot -Include "tycpv.exe", "tycpv.cmd" -File -Recurse -ErrorAction SilentlyContinue |
-      Select-Object -First 1
-    if ($Match) {
-      return $Match.FullName
+    Get-ChildItem -LiteralPath $SearchRoot -Include "tycpv.exe", "tycpv.cmd" -File -Recurse -ErrorAction SilentlyContinue |
+      ForEach-Object { $Candidates.Add($_.FullName) }
+  }
+
+  $Seen = @{}
+  foreach ($Candidate in $Candidates) {
+    if (-not (Test-TycpvExecutableCandidate $Candidate)) {
+      continue
+    }
+    $ResolvedPath = (Resolve-Path -LiteralPath $Candidate).Path
+    $CandidateKey = $ResolvedPath.ToLowerInvariant()
+    if ($Seen.ContainsKey($CandidateKey)) {
+      continue
+    }
+    $Seen[$CandidateKey] = $true
+    $VersionInfo = Get-TycpvVersionInfo $ResolvedPath
+    if ($VersionInfo) {
+      return $VersionInfo
     }
   }
   return $null
@@ -459,35 +497,48 @@ try {
 
   Write-Step "2/7 安装或检查天源 CLI"
   $UsedBundledCli = $false
-  $TycpvExe = Find-Tycpv
-  if (-not $TycpvExe) {
-    Write-Host "未检测到天源 CLI，启用包内安装程序。"
-    Test-PackageFile "runtime/tycpv-setup-0.1.0-win-x64.exe"
-    if (-not (Test-Path -LiteralPath $TycpvInstaller)) {
-      throw "缺少 Windows 版天源 CLI 安装程序。"
+  $TycpvStatus = "可用"
+  $TycpvRepairMessage = ""
+  $TycpvInfo = Find-Tycpv
+  if (-not $TycpvInfo) {
+    Write-Warning "未检测到可运行的天源 CLI，尝试使用包内安装程序修复；CLI 修复失败不会阻断工作台其他组件更新。"
+    try {
+      Test-PackageFile "runtime/tycpv-setup-0.1.0-win-x64.exe"
+      if (-not (Test-Path -LiteralPath $TycpvInstaller)) {
+        throw "缺少 Windows 版天源 CLI 安装程序。"
+      }
+      $Process = Start-Process -FilePath $TycpvInstaller -ArgumentList @(
+        "/VERYSILENT",
+        "/SUPPRESSMSGBOXES",
+        "/NORESTART",
+        "/SP-"
+      ) -Wait -PassThru
+      if ($Process.ExitCode -notin @(0, 3010)) {
+        throw "天源 CLI 安装失败，退出码：$($Process.ExitCode)"
+      }
+      $UsedBundledCli = $true
+      $TycpvInfo = Find-Tycpv
+      if (-not $TycpvInfo) {
+        throw "安装程序执行后仍未找到可运行的 tycpv.exe 或 tycpv.cmd。"
+      }
     }
-    $Process = Start-Process -FilePath $TycpvInstaller -ArgumentList @(
-      "/VERYSILENT",
-      "/SUPPRESSMSGBOXES",
-      "/NORESTART",
-      "/SP-"
-    ) -Wait -PassThru
-    if ($Process.ExitCode -notin @(0, 3010)) {
-      throw "天源 CLI 安装失败，退出码：$($Process.ExitCode)"
+    catch {
+      $TycpvRepairMessage = Protect-Message $_.Exception.Message
     }
-    $UsedBundledCli = $true
-    $TycpvExe = Find-Tycpv
   } else {
-    Write-Host "检测到已有天源 CLI，跳过安装。"
+    Write-Host "检测到可运行的天源 CLI，跳过安装。"
   }
-  if (-not $TycpvExe) {
-    throw "天源 CLI 已运行安装程序，但没有找到可运行的 tycpv.exe 或 tycpv.cmd。"
+  if ($TycpvInfo) {
+    $TycpvExe = [string]$TycpvInfo.Path
+    $TycpvVersion = [string]$TycpvInfo.Version
+    Write-Host "天源 CLI：$TycpvVersion"
+  } else {
+    $TycpvExe = $null
+    $TycpvVersion = "不可用"
+    $TycpvStatus = "待修复（未阻断工作台组件安装）"
+    Write-Warning "天源 CLI 当前不可用：$TycpvRepairMessage"
+    Write-Warning "将继续更新浏览器扩展、Native Helper、Connector 和打印组件；仅 CLI 导出功能暂不可用。"
   }
-  $TycpvVersion = (& $TycpvExe --version 2>&1 | Select-Object -First 1)
-  if ($LASTEXITCODE -ne 0) {
-    throw "天源 CLI 无法运行。"
-  }
-  Write-Host "天源 CLI：$TycpvVersion"
 
   Write-Step "3/7 检查已有 Python"
   $UsedBundledPython = $false
@@ -543,7 +594,11 @@ try {
   $env:TIANYUAN_PYTHON_BIN = $PythonExe
   $env:TIANYUAN_BUNDLED_NODE_SOURCE = $BundledNodeExe
   $env:TIANYUAN_NODE_BIN = $BundledNodeExe
-  $env:TYCPV_BIN = $TycpvExe
+  if ($TycpvExe) {
+    $env:TYCPV_BIN = $TycpvExe
+  } else {
+    Remove-Item Env:TYCPV_BIN -ErrorAction SilentlyContinue
+  }
   $env:TIANYUAN_UPDATE_DEFER_COMPLETE = "1"
   $InstallJson = (& $BundledNodeExe (Join-Path $RootDir "scripts\install-local-runtime.mjs") 2>&1 | Out-String).Trim()
   if ($LASTEXITCODE -ne 0) {
@@ -578,7 +633,9 @@ try {
   $SelfTestJson = $InstallResult.selfTest | ConvertTo-Json -Depth 8 -Compress
   $ConnectorJson = $InstallResult.connector | ConvertTo-Json -Depth 8 -Compress
 
-  $InstallMode = if (-not $UsedBundledCli -and -not $UsedBundledPython -and -not $InstalledPrintDependencies) {
+  $InstallMode = if (-not $TycpvExe) {
+    "工作台组件安装完成（天源 CLI 待修复）"
+  } elseif (-not $UsedBundledCli -and -not $UsedBundledPython -and -not $InstalledPrintDependencies) {
     "快速安装（复用已有 CLI、Python 和打印依赖）"
   } elseif (-not $UsedBundledCli -and -not $UsedBundledPython) {
     "快速安装（复用已有 CLI 和 Python，补充打印依赖）"
@@ -606,6 +663,8 @@ try {
     "openpyxl：$OpenpyxlVersion"
     "天源 CLI：$TycpvExe"
     "天源 CLI 版本：$TycpvVersion"
+    "天源 CLI 状态：$TycpvStatus"
+    "天源 CLI 修复提示：$TycpvRepairMessage"
     "自检：$SelfTestJson"
     "Connector：$ConnectorJson"
     "Connector 插件：$($InstallResult.connectorPath)"
@@ -629,7 +688,12 @@ try {
   Write-Host ""
   Write-Host "安装检查结果：$ReportPath"
 
-  Write-UpdateStatus "complete" 100 "全部组件更新完成，浏览器扩展可重新加载"
+  if ($TycpvExe) {
+    Write-UpdateStatus "complete" 100 "全部组件更新完成，浏览器扩展可重新加载"
+  } else {
+    Write-Warning "工作台组件更新完成，但天源 CLI 仍需单独修复。"
+    Write-UpdateStatus "complete" 100 "工作台组件更新完成，天源 CLI 待修复"
+  }
   if (-not $UpdateMode) {
     Start-Process "explorer.exe" -ArgumentList "`"$ExtensionDir`""
     $ExtensionPage = if ($BrowserExe -match '(?i)msedge\.exe$') { "edge://extensions/" } else { "chrome://extensions/" }

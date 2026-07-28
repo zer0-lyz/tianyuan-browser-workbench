@@ -40,6 +40,8 @@ node scripts/install-local-runtime.mjs
 
 `0.14.1` 起可先点击“测试更新模块”：它会下载当前平台完整包，验证 GitHub 下载、SHA-256、解压和安装包文件完整性，但不会安装、改变版本或重启，测试文件完成后自动删除。完整包约 100–130 MB。
 
+`0.14.3` 修复 Windows 安装器把“CLI 文件存在”误判为“CLI 可运行”的问题。安装器会逐个执行 `--version` 验证候选；天源 CLI 修复失败时仅提示 CLI 导出暂不可用，不再阻断扩展、Native Helper、Connector 和打印组件更新。
+
 `0.14.2` 修复 Windows Excel/WPS 对申报表“一页宽”设置识别不稳定的问题，统一写入 `fitToPage`、`autoPageBreaks`、`fitToWidth` 和 `fitToHeight`。明细表仍按既定规则保持 100% 比例，不改为强制缩放。
 
 `0.12.2` 及更早版本的 Native Helper 不包含完整安装动作，因此首次升级到 `0.13.0` 仍需手动运行一次新版安装包。完成这次引导升级后，后续版本可直接使用侧栏一键更新。更新不会静默执行，开始前必须由用户明确确认。
