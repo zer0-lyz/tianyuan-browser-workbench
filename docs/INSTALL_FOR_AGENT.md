@@ -30,6 +30,8 @@ Version `0.14.3` treats Tianyuan CLI as an independently repairable capability o
 
 Version `0.14.4` retries Windows local component directory copies up to three times and explicitly recopies any missing required file before validation. Runtime installation failures are returned as bounded one-line JSON, so the Windows report records the actual missing path or copy error instead of only a Node stack location.
 
+Version `0.14.5` adds a second replacement path for Windows environments where a verified `*.staging-*` directory disappears or cannot be renamed. The installer directly recopies the verified source into the managed destination, validates it, and removes the backup only after success.
+
 Machines running `0.12.2` or earlier must manually install `0.13.0` once because their old Native Helper does not know the install action. Later releases can use **更新全部组件**.
 
 If Python print dependencies are unavailable, installation stops with `PRINT_PYTHON_OPENPYXL_NOT_FOUND` before registering a partial runtime.

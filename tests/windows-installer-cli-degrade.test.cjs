@@ -28,6 +28,9 @@ assert.equal(runtimeInstaller.includes("tycpvBin: process.env.TYCPV_BIN || undef
 assert.equal(runtimeInstaller.includes("for (let attempt = 1; attempt <= 3; attempt += 1)"), true);
 assert.equal(runtimeInstaller.includes("fs.copyFileSync(sourcePath, targetPath)"), true);
 assert.equal(runtimeInstaller.includes("COPY_DIRECTORY_FAILED"), true);
+assert.equal(runtimeInstaller.includes("COPY_DIRECTORY_REPLACE_FAILED"), true);
+assert.equal(runtimeInstaller.includes("copyDirectoryDirect(src, dest, requiredRelativePaths)"), true);
+assert.equal(runtimeInstaller.includes('mustExist(dest, "installed directory")'), true);
 assert.equal(runtimeInstaller.includes('action: "install_local_runtime"'), true);
 assert.equal(installer.includes("$InstallFailure = $InstallJson | ConvertFrom-Json"), true);
 
