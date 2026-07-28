@@ -33,6 +33,7 @@ execFileSync(process.execPath, [
   env: {
     ...process.env,
     TIANYUAN_RELEASE_OUTPUT_DIR: tempRoot,
+    TIANYUAN_RELEASE_BASE_URL: "https://gitee.com/example/tianyuan/raw/main",
   },
   stdio: ["ignore", "pipe", "pipe"],
 });
@@ -45,6 +46,11 @@ assert.equal(
   manifest.assets["windows-x64"].fileName,
   `tianyuan-workbench-v${version}-windows-x64.zip`,
 );
+assert.equal(
+  manifest.assets["windows-x64"].url,
+  `https://gitee.com/example/tianyuan/raw/main/tianyuan-workbench-v${version}-windows-x64.zip`,
+);
+assert.equal(manifest.source, "static-manifest");
 assert.equal(manifest.channel, versionConfig.channel);
 
 fs.rmSync(tempRoot, { recursive: true, force: true });

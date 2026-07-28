@@ -5,6 +5,7 @@ const {
   parseSemver,
   compareSemver,
   platformKey,
+  configuredManifestUrls,
   checkGithubUpdate,
 } = require("../native-helper/update_checker.js");
 
@@ -31,6 +32,44 @@ async function run() {
   assert.equal(compareSemver("1.2.0", "1.2.0-beta.10"), 1);
   assert.equal(platformKey("win32", "x64"), "windows-x64");
   assert.equal(platformKey("darwin", "arm64"), "macos-arm64");
+  assert.equal(configuredManifestUrls({
+    updateManifestUrls: ["https://gitee.com/example/tianyuan/raw/main/update-manifest.json"],
+  }).includes("https://gitee.com/example/tianyuan/raw/main/update-manifest.json"), true);
+
+  const mirrorUpdate = await checkGithubUpdate({
+    currentVersion: "0.9.0",
+    currentBuildNumber: 2026072601,
+    platform: "win32",
+    architecture: "x64",
+    updateManifestUrls: ["https://gitee.com/example/tianyuan/raw/main/update-manifest.json"],
+  }, {
+    fetchImpl: async (url) => {
+      assert.equal(String(url), "https://gitee.com/example/tianyuan/raw/main/update-manifest.json");
+      return response(200, {
+        source: "gitee",
+        productVersion: "0.9.2",
+        buildNumber: 2026072602,
+        runtimeBuildId: "gitee-build",
+        releaseUrl: "https://gitee.com/example/tianyuan",
+        releaseNotes: ["国内镜像轻量更新"],
+        assets: {
+          "windows-x64": {
+            fileName: "tianyuan-workbench-v0.9.2-windows-x64-lite.zip",
+            url: "tianyuan-workbench-v0.9.2-windows-x64-lite.zip",
+            sha256: "c".repeat(64),
+            size: 1024,
+          },
+        },
+      });
+    },
+  });
+  assert.equal(mirrorUpdate.source, "gitee");
+  assert.equal(mirrorUpdate.latestVersion, "0.9.2");
+  assert.equal(
+    mirrorUpdate.asset.url,
+    "https://gitee.com/example/tianyuan/raw/main/tianyuan-workbench-v0.9.2-windows-x64-lite.zip",
+  );
+  assert.equal(mirrorUpdate.asset.sha256, "c".repeat(64));
 
   const noRelease = await checkGithubUpdate({
     currentVersion: "0.9.0",
@@ -96,7 +135,8 @@ async function run() {
     platform: "win32",
     architecture: "x64",
   }, {
-    fetchImpl: async () => {
+    fetchImpl: async (url) => {
+      if (String(url).includes("gitee.com")) return response(404, {});
       requestCount += 1;
       return requestCount === 1
         ? response(200, manifestRelease)

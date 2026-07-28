@@ -36,6 +36,9 @@ assert.equal(runtimeInstaller.includes("copyDirectoryDirect(src, dest, requiredR
 assert.equal(runtimeInstaller.includes('mustExist(dest, "installed directory")'), true);
 assert.equal(runtimeInstaller.includes('action: "install_local_runtime"'), true);
 assert.equal(installer.includes("$InstallFailure = $InstallJson | ConvertFrom-Json"), true);
+assert.equal(installer.includes("function Resolve-NodeForInstall"), true);
+assert.equal(installer.includes("轻量更新包需要复用已安装的 Node.js"), true);
+assert.equal(installer.includes("轻量更新包需要复用已安装的 Python/openpyxl"), true);
 
 const cliStep = installer.slice(
   installer.indexOf('Write-Step "2/7 安装或检查天源 CLI"'),

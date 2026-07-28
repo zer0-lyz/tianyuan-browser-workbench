@@ -11,6 +11,7 @@ $NativeHostExe = Join-Path $NativeHelperDir "native_host.exe"
 $PythonDir = Join-Path $InstallRoot "python"
 $BundledPythonExe = Join-Path $PythonDir "python.exe"
 $BundledNodeExe = Join-Path $RootDir "runtime\node\node.exe"
+$ExistingManagedNodeExe = Join-Path $NativeHelperDir "node\node.exe"
 $PythonExe = $null
 $PrintSkillsDir = Join-Path $InstallRoot "print-format-skills"
 $ManifestPath = Join-Path $NativeHelperDir "com.tianyuan.workbench.helper.json"
@@ -435,6 +436,9 @@ function Find-CompatiblePython {
 }
 
 function Install-PrintDependencies([string]$Candidate) {
+  if ($UpdateMode -and -not (Test-Path -LiteralPath $WheelDir)) {
+    return $false
+  }
   Test-PackagePrefix "runtime/python-wheels/"
   & $Candidate -m pip install `
     --disable-pip-version-check `
@@ -448,6 +452,25 @@ function Install-PrintDependencies([string]$Candidate) {
   }
   & $Candidate -c "import openpyxl, et_xmlfile; raise SystemExit(0 if tuple(int(x) for x in openpyxl.__version__.split('.')[:3]) >= (3, 1, 5) else 1)" *> $null
   return $LASTEXITCODE -eq 0
+}
+
+function Resolve-NodeForInstall {
+  if (Test-Path -LiteralPath $BundledNodeExe) {
+    return (Resolve-Path -LiteralPath $BundledNodeExe).Path
+  }
+  if ($UpdateMode -and (Test-Path -LiteralPath $ExistingManagedNodeExe)) {
+    return (Resolve-Path -LiteralPath $ExistingManagedNodeExe).Path
+  }
+  foreach ($CommandName in @("node.exe", "node")) {
+    $Command = Get-Command $CommandName -ErrorAction SilentlyContinue
+    if ($Command -and $Command.Source) {
+      return $Command.Source
+    }
+  }
+  if ($UpdateMode) {
+    throw "轻量更新包需要复用已安装的 Node.js；本机未找到可用 Node，请手动运行完整安装包。"
+  }
+  throw "安装包缺少 Node.js 运行时。"
 }
 
 function Find-Browser {
@@ -488,7 +511,9 @@ try {
   Test-PackagePrefix "native-helper/"
   Test-PackagePrefix "skills/"
   Test-PackagePrefix "plugins/tianyuan-browser-connector/"
-  Test-PackagePrefix "runtime/node/"
+  if (-not $UpdateMode -or (Test-Path -LiteralPath $BundledNodeExe)) {
+    Test-PackagePrefix "runtime/node/"
+  }
   Test-PackageFile "scripts/install-local-runtime.mjs"
   $PackageVersionConfig = Get-Content -LiteralPath (Join-Path $RootDir "extension\version.json") -Raw -Encoding UTF8 | ConvertFrom-Json
   $PackageVersion = [string]$PackageVersionConfig.productVersion
@@ -571,6 +596,9 @@ try {
   }
 
   if (-not $PythonExe) {
+    if ($UpdateMode -and -not (Test-Path -LiteralPath $PythonSource)) {
+      throw "轻量更新包需要复用已安装的 Python/openpyxl；本机缺少可用环境，请手动运行完整安装包。"
+    }
     Test-PackagePrefix "runtime/python-portable/"
     if (-not (Test-Path -LiteralPath $PythonSource)) {
       throw "缺少工作台便携 Python。"
@@ -588,19 +616,17 @@ try {
 
   Write-Step "5/7 同步扩展、Native Helper、Bridge 和 Connector"
   Write-UpdateStatus "installing" 88 "正在同步全部工作台组件"
-  if (-not (Test-Path -LiteralPath $BundledNodeExe)) {
-    throw "安装包缺少 Node.js 运行时。"
-  }
+  $NodeForInstall = Resolve-NodeForInstall
   $env:TIANYUAN_PYTHON_BIN = $PythonExe
-  $env:TIANYUAN_BUNDLED_NODE_SOURCE = $BundledNodeExe
-  $env:TIANYUAN_NODE_BIN = $BundledNodeExe
+  $env:TIANYUAN_BUNDLED_NODE_SOURCE = $NodeForInstall
+  $env:TIANYUAN_NODE_BIN = $NodeForInstall
   if ($TycpvExe) {
     $env:TYCPV_BIN = $TycpvExe
   } else {
     Remove-Item Env:TYCPV_BIN -ErrorAction SilentlyContinue
   }
   $env:TIANYUAN_UPDATE_DEFER_COMPLETE = "1"
-  $InstallJson = (& $BundledNodeExe (Join-Path $RootDir "scripts\install-local-runtime.mjs") 2>&1 | Out-String).Trim()
+  $InstallJson = (& $NodeForInstall (Join-Path $RootDir "scripts\install-local-runtime.mjs") 2>&1 | Out-String).Trim()
   if ($LASTEXITCODE -ne 0) {
     try {
       $InstallFailure = $InstallJson | ConvertFrom-Json

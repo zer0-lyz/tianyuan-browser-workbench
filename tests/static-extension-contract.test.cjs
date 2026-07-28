@@ -70,7 +70,7 @@ assert.equal(quotedConstant(sidepanel, "EXPECTED_CONNECTOR_PROTOCOL_VERSION"), q
 assert.equal(quotedConstant(nativeHost, "CONNECTOR_PROTOCOL_VERSION"), quotedConstant(bridge, "PROTOCOL_VERSION"));
 assert.equal(manifest.version, versionConfig.chromeVersion);
 assert.equal(manifest.version_name, versionConfig.versionName);
-assert.equal(versionConfig.productVersion, "0.14.8");
+assert.equal(versionConfig.productVersion, "0.14.9");
 assert.equal(versionConfig.repository, "zer0-lyz/tianyuan-browser-workbench-releases");
 
 assert.equal(pluginServer.includes(`version: "${pluginManifest.version}"`), true);
@@ -145,6 +145,7 @@ assert.equal(nativeHost.includes('message?.action === "test_workbench_update"'),
 assert.equal(nativeHost.includes('message?.action === "install_workbench_update"'), true);
 assert.equal(nativeHost.includes('message?.action === "get_workbench_update_status"'), true);
 assert.equal(updateChecker.includes("api.github.com"), true);
+assert.equal(updateChecker.includes("gitee.com"), true);
 assert.equal(updateChecker.includes("DEFAULT_REPOSITORY"), true);
 assert.equal(updateChecker.includes("tianyuan-browser-workbench-releases"), true);
 assert.equal(updateChecker.includes("tokenUsed: false"), true);

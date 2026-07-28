@@ -11,6 +11,7 @@ const workbenchRoot = process.env.TIANYUAN_WORKBENCH_ROOT
   || path.join(os.homedir(), ".tianyuan-workbench");
 const distRoot = process.env.TIANYUAN_RELEASE_OUTPUT_DIR
   || path.join(workbenchRoot, "releases");
+const releaseBaseUrl = String(process.env.TIANYUAN_RELEASE_BASE_URL || "").trim().replace(/\/+$/, "");
 const versionConfig = JSON.parse(fs.readFileSync(path.join(repoRoot, "extension", "version.json"), "utf8"));
 
 function sha256(targetPath) {
@@ -91,6 +92,7 @@ function releaseAsset(patterns, key) {
   fs.writeFileSync(path.join(distRoot, `${fileName}.sha256`), `${digest}  ${fileName}\n`);
   return {
     fileName,
+    ...(releaseBaseUrl ? { url: `${releaseBaseUrl}/${encodeURIComponent(fileName)}` } : {}),
     sha256: digest,
     size: fs.statSync(targetPath).size,
   };
@@ -105,6 +107,7 @@ if (macos) assets["macos-arm64"] = macos;
 const payload = {
   schemaVersion: 1,
   repository: versionConfig.repository,
+  ...(releaseBaseUrl ? { source: "static-manifest", releaseUrl: releaseBaseUrl } : {}),
   productVersion: versionConfig.productVersion,
   chromeVersion: versionConfig.chromeVersion,
   channel: versionConfig.channel,
