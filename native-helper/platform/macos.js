@@ -90,7 +90,8 @@ function createMacOSAdapter(options = {}) {
     fs.writeFileSync(runnerPath, [
       "#!/bin/bash",
       "set +e",
-      `while /bin/kill -0 ${Number(parentPid)} 2>/dev/null; do /bin/sleep 0.2; done`,
+      `deadline=$(( $(/bin/date +%s) + 5 ))`,
+      `while [ $(/bin/date +%s) -lt "$deadline" ] && /bin/kill -0 ${Number(parentPid)} 2>/dev/null; do /bin/sleep 0.2; done`,
       `export TIANYUAN_UPDATE_MODE=1`,
       `export TIANYUAN_UPDATE_STATUS_PATH=${JSON.stringify(statusPath)}`,
       `/bin/bash ${JSON.stringify(installerPath)} >> ${JSON.stringify(logPath)} 2>&1`,
