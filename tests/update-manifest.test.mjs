@@ -23,14 +23,26 @@ const liteSource = path.join(
   tempRoot,
   `tianyuan-workbench-v${version}-windows-x64-lite-20260727.zip`,
 );
+const macFullSource = path.join(
+  tempRoot,
+  `天源浏览器工作台-v${version}-macOS-Apple芯片-20260726.zip`,
+);
+const macLiteSource = path.join(
+  tempRoot,
+  `tianyuan-workbench-v${version}-macos-arm64-lite-20260727.zip`,
+);
 fs.writeFileSync(staleTarget, "stale");
 fs.writeFileSync(freshSource, "fresh");
 fs.writeFileSync(liteSource, "lite");
+fs.writeFileSync(macFullSource, "mac-full");
+fs.writeFileSync(macLiteSource, "mac-lite");
 const oldTime = new Date("2026-07-25T00:00:00Z");
 const newTime = new Date("2026-07-26T00:00:00Z");
 fs.utimesSync(staleTarget, oldTime, oldTime);
 fs.utimesSync(freshSource, newTime, newTime);
 fs.utimesSync(liteSource, new Date("2026-07-27T00:00:00Z"), new Date("2026-07-27T00:00:00Z"));
+fs.utimesSync(macFullSource, newTime, newTime);
+fs.utimesSync(macLiteSource, new Date("2026-07-27T00:00:00Z"), new Date("2026-07-27T00:00:00Z"));
 
 execFileSync(process.execPath, [
   path.join(repoRoot, "scripts", "generate-update-manifest.mjs"),
@@ -58,6 +70,7 @@ assert.equal(
 );
 assert.equal(manifest.source, "static-manifest");
 assert.equal(manifest.channel, versionConfig.channel);
+assert.equal(fs.readFileSync(path.join(tempRoot, `tianyuan-workbench-v${version}-macos-arm64.zip`), "utf8"), "mac-full");
 
 execFileSync(process.execPath, [
   path.join(repoRoot, "scripts", "generate-update-manifest.mjs"),
@@ -68,10 +81,12 @@ execFileSync(process.execPath, [
     TIANYUAN_RELEASE_OUTPUT_DIR: tempRoot,
     TIANYUAN_RELEASE_BASE_URL: "https://gitee.com/example/tianyuan/raw/main",
     TIANYUAN_WINDOWS_PACKAGE_MODE: "lite",
+    TIANYUAN_MACOS_PACKAGE_MODE: "lite",
   },
   stdio: ["ignore", "pipe", "pipe"],
 });
 assert.equal(fs.readFileSync(staleTarget, "utf8"), "lite");
+assert.equal(fs.readFileSync(path.join(tempRoot, `tianyuan-workbench-v${version}-macos-arm64.zip`), "utf8"), "mac-lite");
 
 fs.rmSync(tempRoot, { recursive: true, force: true });
 console.log("Update manifest tests passed.");

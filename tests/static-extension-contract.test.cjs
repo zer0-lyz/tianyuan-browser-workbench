@@ -31,6 +31,7 @@ const macosPlatform = fs.readFileSync(path.join(repoRoot, "native-helper", "plat
 const installer = fs.readFileSync(path.join(repoRoot, "scripts", "install-local-runtime.mjs"), "utf8");
 const nativeInstaller = fs.readFileSync(path.join(repoRoot, "native-helper", "install_native_host.sh"), "utf8");
 const windowsInstaller = fs.readFileSync(path.join(repoRoot, "release", "windows-x64", "install.ps1"), "utf8");
+const macosLiteBuilder = fs.readFileSync(path.join(repoRoot, "release", "build_macos_arm64_lite_release.sh"), "utf8");
 const declarationPrintScript = fs.readFileSync(path.join(repoRoot, "skills", "appraisal-declaration-print-format", "scripts", "adjust_appraisal_declaration_print.py"), "utf8");
 const versionConfig = JSON.parse(fs.readFileSync(path.join(extensionRoot, "version.json"), "utf8"));
 const pluginServer = fs.readFileSync(path.join(repoRoot, "plugins", "tianyuan-browser-connector", "runtime", "apps", "mcp", "server.mjs"), "utf8");
@@ -71,7 +72,7 @@ assert.equal(quotedConstant(sidepanel, "EXPECTED_CONNECTOR_PROTOCOL_VERSION"), q
 assert.equal(quotedConstant(nativeHost, "CONNECTOR_PROTOCOL_VERSION"), quotedConstant(bridge, "PROTOCOL_VERSION"));
 assert.equal(manifest.version, versionConfig.chromeVersion);
 assert.equal(manifest.version_name, versionConfig.versionName);
-assert.equal(versionConfig.productVersion, "0.14.10");
+assert.equal(versionConfig.productVersion, "0.14.11");
 assert.equal(versionConfig.repository, "zer0-lyz/tianyuan-browser-workbench-releases");
 
 assert.equal(pluginServer.includes(`version: "${pluginManifest.version}"`), true);
@@ -152,6 +153,10 @@ assert.equal(updateChecker.includes("gitee.com"), true);
 assert.equal(updateChecker.includes("DEFAULT_REPOSITORY"), true);
 assert.equal(updateChecker.includes("tianyuan-browser-workbench-releases"), true);
 assert.equal(updateChecker.includes("tokenUsed: false"), true);
+assert.equal(macosLiteBuilder.includes("package_type=lite-update"), true);
+assert.equal(macosLiteBuilder.includes("runtime/python-wheels"), true);
+assert.equal(macosLiteBuilder.includes("tycpv-setup-0.1.0-macos-arm64.pkg"), false);
+assert.equal(macosLiteBuilder.includes("python-3.14.6-macos11.pkg"), false);
 assert.equal(updateInstaller.includes("UPDATE_SHA256_MISMATCH"), true);
 assert.equal(updateInstaller.includes('phase: "test_complete"'), true);
 assert.equal(updateInstaller.includes("UPDATE_DOWNLOAD_SIZE_MISMATCH"), true);
