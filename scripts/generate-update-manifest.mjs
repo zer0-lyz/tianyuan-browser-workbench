@@ -107,7 +107,10 @@ const windowsPackageMode = String(process.env.TIANYUAN_WINDOWS_PACKAGE_MODE || "
 const windows = releaseAsset(["windows-x64"], "windows-x64", {
   includeLite: windowsPackageMode === "lite" ? true : false,
 });
-const macos = releaseAsset(["macos-arm64", "macos-apple"], "macos-arm64");
+const macosPackageMode = String(process.env.TIANYUAN_MACOS_PACKAGE_MODE || "full").trim().toLowerCase();
+const macos = releaseAsset(["macos-arm64", "macos-apple"], "macos-arm64", {
+  includeLite: macosPackageMode === "lite" ? true : false,
+});
 if (windows) assets["windows-x64"] = windows;
 if (macos) assets["macos-arm64"] = macos;
 
