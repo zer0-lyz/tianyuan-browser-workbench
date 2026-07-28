@@ -319,6 +319,7 @@ function writeWindowsNativeHost(nodeBin, pythonBin) {
   const runtimeConfigPath = path.join(nativeRuntimeRoot, "runtime-config.json");
   fs.writeFileSync(runtimeConfigPath, JSON.stringify({
     version: 1,
+    tycpvBin: process.env.TYCPV_BIN || undefined,
     pythonBin,
     printSkillsDir: printSkillsRoot,
   }, null, 2) + "\n");

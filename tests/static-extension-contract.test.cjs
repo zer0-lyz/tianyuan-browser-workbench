@@ -70,7 +70,7 @@ assert.equal(quotedConstant(sidepanel, "EXPECTED_CONNECTOR_PROTOCOL_VERSION"), q
 assert.equal(quotedConstant(nativeHost, "CONNECTOR_PROTOCOL_VERSION"), quotedConstant(bridge, "PROTOCOL_VERSION"));
 assert.equal(manifest.version, versionConfig.chromeVersion);
 assert.equal(manifest.version_name, versionConfig.versionName);
-assert.equal(versionConfig.productVersion, "0.14.2");
+assert.equal(versionConfig.productVersion, "0.14.3");
 assert.equal(versionConfig.repository, "zer0-lyz/tianyuan-browser-workbench-releases");
 
 assert.equal(pluginServer.includes(`version: "${pluginManifest.version}"`), true);
@@ -174,6 +174,7 @@ assert.equal(windowsInstaller.includes("install-local-runtime.mjs"), true);
 assert.equal(windowsInstaller.includes("Restore-PreviousDirectory"), true);
 assert.equal(windowsInstaller.includes("codexConnectorCachePath"), true);
 assert.equal(windowsInstaller.includes("function Test-TycpvExecutableCandidate"), true);
+assert.equal(windowsInstaller.includes("function Get-TycpvVersionInfo"), true);
 assert.equal(windowsInstaller.includes('"tycpv.cmd"'), true);
 assert.equal(windowsInstaller.includes('$IconPath -match "\\.(exe|cmd)$"'), true);
 assert.equal(bridge.includes("EXTENSION_RUNTIME_BUILD_MISMATCH"), true);
