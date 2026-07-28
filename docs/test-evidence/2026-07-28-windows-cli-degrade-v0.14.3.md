@@ -26,7 +26,20 @@
 - `tests/windows-installer-cli-degrade.test.cjs` 覆盖 CLI 候选运行验证、硬失败移除、环境变量清理、报告状态和完成提示。
 - 根目录 `14` 个测试文件全部通过，覆盖 Windows 编码、Native Helper 启动、更新器、Connector、打印模块和 CLI 独立降级。
 - 反馈服务 `7` 项测试全部通过。
+- Windows 和 macOS ZIP 均通过 SHA-256 与压缩完整性检查，包内 `source_dirty=false`。
+- Windows 包内 `install.cmd` / `uninstall.cmd` 为 ASCII + CRLF，`install.ps1` / `uninstall.ps1` 为 UTF-8 BOM。
+- 匿名在线更新检查确认 `0.14.2 / 2026072803` 可发现 `0.14.3 / 2026072804`，当前 `0.14.3` 不重复提示。
 - 真实 Windows x64 仍需用户运行新版 `install.cmd` 完成实机回归。
+
+## 发布
+
+- 源码提交：`a8c458d0755b7eb59f9f750c125ad4f32afb7e49`。
+- 源码标签：`v0.14.3`。
+- Windows SHA-256：`a304c21a92d161df1cad7364b637bdb388d3a46110f442d582cf4efe87681f56`。
+- macOS SHA-256：`8bd2b782921820fbd0416b59636e79b8bcb5f0ddde985b589bd8a5c042350b74`。
+- 运行指纹：`b09882582a15d2ef1b9582b2cb4ea8e4906773627d8066a7b6318625f8729bd9`。
+- 正式 Release：`https://github.com/zer0-lyz/tianyuan-browser-workbench-releases/releases/tag/v0.14.3`。
+- 5 个资产全部为 `uploaded`。
 
 ## 安全
 
