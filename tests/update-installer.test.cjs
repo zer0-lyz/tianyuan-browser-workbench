@@ -17,7 +17,7 @@ function sha256(value) {
 function writePackage(extractRoot, { windows = false, legacyOnly = false } = {}) {
   const packageRoot = path.join(
     extractRoot,
-    windows ? "tianyuan-workbench-v0.14.7-windows-x64" : "天源浏览器工作台",
+    windows ? "tianyuan-workbench-v0.14.8-windows-x64" : "天源浏览器工作台",
   );
   for (const relativePath of [
     "VERSION.txt",

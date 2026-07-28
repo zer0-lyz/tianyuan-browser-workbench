@@ -233,10 +233,7 @@ EOF
 )
 
 TEMP_OUTPUT="$BUILD_ROOT/${PACKAGE_NAME}.zip"
-(
-  cd "$BUILD_ROOT"
-  COPYFILE_DISABLE=1 /usr/bin/zip -X -q -r "$TEMP_OUTPUT" "$PACKAGE_NAME"
-)
+python3 "$ROOT_DIR/scripts/create-release-zip.py" "$STAGE" "$TEMP_OUTPUT"
 cp -f "$TEMP_OUTPUT" "$OUTPUT"
 (
   cd "$DIST_DIR"

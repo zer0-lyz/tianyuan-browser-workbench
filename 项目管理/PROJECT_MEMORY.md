@@ -2,6 +2,16 @@
 
 更新时间：2026-07-28 CST
 
+## 2026-07-28 v0.14.8 Windows ZIP 文件名编码修复
+
+- 工作台版本升级为 `0.14.8`，构建编号 `2026072809`；Connector 保持 `0.4.2`。
+- Windows `0.14.2` 可发现、下载和校验 `0.14.7`，但仍报 `UPDATE_INSTALLER_NOT_FOUND`。
+- 正式 `0.14.7` ZIP 回读发现兼容入口被解码为 `σ«ëΦúà.ps1`，不是精确的 `安装.ps1`。
+- 根因是 macOS `/usr/bin/zip -X` 没有给中文 ZIP 条目设置 UTF-8 general-purpose bit，PowerShell `Expand-Archive` 按旧编码解释文件名。
+- Windows ZIP 改用 Python `zipfile` 生成；非 ASCII 条目会设置 `0x800` UTF-8 标志。
+- 新增正式 ZIP 级测试，验证中文兼容入口名称、UTF-8 标志和解压后的精确路径。
+- 迁移失败不影响 ASCII `install.ps1`；新版更新器继续优先使用 ASCII 入口。
+
 ## 2026-07-28 v0.14.7 Windows 更新器自举修复
 
 - 工作台版本升级为 `0.14.7`，构建编号 `2026072808`；Connector 保持 `0.4.2`。
