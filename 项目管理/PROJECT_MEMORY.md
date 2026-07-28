@@ -9,7 +9,11 @@
 - 根因不是 Windows Python 语法错误，而是申报表 OOXML 缺少 `autoPageBreaks=0`，Windows Excel/WPS 可能未稳定切换到适合页面模式。
 - 申报表统一写入 `fitToPage=1`、`autoPageBreaks=0`、`fitToWidth=1`、`fitToHeight=0`，并清除固定 `scale`。
 - 明细表继续保持既定 100% 打印比例，不强制缩放。
-- 发布后本机继续保留 `0.14.1`，由用户亲自点击“更新全部组件”验证真实升级闭环。
+- 源码提交和标签为 `135b8d8aa3ec80c22a324156f095ecbe7cfbdd80` / `v0.14.2`。
+- Windows/macOS SHA-256 分别为 `943b437a872e70b00be734494f2ce247e40b5ab08b5834128ee186c0a66b3961` / `48ae731c7594556f60e4ef68ca6924a28806ff53fd237eb78c7bd161bc1d151a`。
+- 正式 Release 已上线，5 个资产全部上传；`0.14.1` 可发现 `0.14.2`。
+- 本机 `0.14.1` 更新器完成正式 macOS 包下载、校验和解压，`installed=false`。
+- 反馈状态已改为 `resolved`；本机继续保留 `0.14.1`，由用户亲自点击“更新全部组件”验证真实升级闭环。
 
 ## 2026-07-28 v0.14.1 更新模块安全自测
 

@@ -24,6 +24,7 @@
 
 ## 验证
 
+- 根目录 13 个 CJS/MJS 测试文件全部通过，反馈服务 7 项测试通过。
 - Python 语法编译通过。
 - 新增跨平台 OOXML 回归测试，直接读取生成工作簿的 `sheet1.xml`。
 - 完整申报表样本处理通过，输出为：
@@ -39,3 +40,18 @@
 - 工作台：`0.14.2`
 - 构建编号：`2026072803`
 - Connector：`0.4.2`
+
+## 正式发布
+
+- 源码提交：`135b8d8aa3ec80c22a324156f095ecbe7cfbdd80`。
+- 源码标签：`v0.14.2`。
+- 运行指纹：`9a1ee99a777705d078da23618e2f9477f62548da027a663c7c602a0d97fe5f19`。
+- Windows ZIP：`110770803` 字节，SHA-256 为 `943b437a872e70b00be734494f2ce247e40b5ab08b5834128ee186c0a66b3961`。
+- macOS ZIP：`127424431` 字节，SHA-256 为 `48ae731c7594556f60e4ef68ca6924a28806ff53fd237eb78c7bd161bc1d151a`。
+- 更新清单 SHA-256：`467680d9736069a7b672095771d6c8672ceef090e5a9c6e255450a8555c56369`。
+- 两个平台包均为 `source_dirty=false`；Windows ZIP 共 365 个条目，非 ASCII 文件名数量为 0。
+- 公开 Release：`https://github.com/zer0-lyz/tianyuan-browser-workbench-releases/releases/tag/v0.14.2`。
+- 5 个发行资产全部为 `uploaded`，匿名更新检查已读取 `manifestFound=true`。
+- 使用本机已安装的 `0.14.1` 更新器完成 `0.14.2` 正式 macOS 包安全自测，`packageValid=true`、`installed=false`。
+- 反馈 `TYF-20260728-A4E64B91` 已更新为 `resolved`。
+- 本机运行版本保持 `0.14.1 / 2026072802`，等待用户亲自点击“更新全部组件”。
