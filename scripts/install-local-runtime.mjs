@@ -444,6 +444,8 @@ function writeWindowsNativeHost(nodeBin, pythonBin) {
     pythonBin,
     printSkillsDir: printSkillsRoot,
   }, null, 2) + "\n");
+  const nativeHostExe = path.join(nativeRuntimeRoot, "native_host.exe");
+  const manifestHostPath = fs.existsSync(nativeHostExe) ? nativeHostExe : launcherPath;
   fs.writeFileSync(
     launcherPath,
     [
@@ -458,7 +460,7 @@ function writeWindowsNativeHost(nodeBin, pythonBin) {
   fs.writeFileSync(manifestPath, JSON.stringify({
     name: HOST_NAME,
     description: "Tianyuan Browser Workbench native helper",
-    path: launcherPath,
+    path: manifestHostPath,
     type: "stdio",
     allowed_origins: EXTENSION_IDS.map((id) => `chrome-extension://${id}/`),
   }, null, 2) + "\n");
@@ -536,7 +538,7 @@ function main() {
   copyDir(
     path.join(repoRoot, "native-helper"),
     path.join(runtimeProjectRoot, "native-helper"),
-    ["native_host.js", "connector_bridge.js", "process_launcher.js", "update_checker.js", "update_installer.js", "update-sources.json"],
+    ["native_host.js", "native_host_bootstrap.js", "connector_bridge.js", "process_launcher.js", "update_checker.js", "update_installer.js", "update-sources.json"],
   );
   copyDir(path.join(repoRoot, "skills"), path.join(runtimeProjectRoot, "skills"));
   copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), path.join(runtimeProjectRoot, "plugins", "tianyuan-browser-connector"));
@@ -547,11 +549,16 @@ function main() {
   }
 
   copyFileAtomic(path.join(repoRoot, "native-helper", "native_host.js"), path.join(nativeRuntimeRoot, "native_host.js"));
+  copyFileAtomic(path.join(repoRoot, "native-helper", "native_host_bootstrap.js"), path.join(nativeRuntimeRoot, "native_host_bootstrap.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "connector_bridge.js"), path.join(nativeRuntimeRoot, "connector_bridge.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "process_launcher.js"), path.join(nativeRuntimeRoot, "process_launcher.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "update_checker.js"), path.join(nativeRuntimeRoot, "update_checker.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "update_installer.js"), path.join(nativeRuntimeRoot, "update_installer.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "update-sources.json"), path.join(nativeRuntimeRoot, "update-sources.json"));
+  const packagedNativeHostExe = path.join(repoRoot, "native-helper", "native_host.exe");
+  if (isWindows && fs.existsSync(packagedNativeHostExe)) {
+    copyFileAtomic(packagedNativeHostExe, path.join(nativeRuntimeRoot, "native_host.exe"));
+  }
   copyDir(
     path.join(repoRoot, "native-helper", "platform"),
     path.join(nativeRuntimeRoot, "platform"),
@@ -579,9 +586,15 @@ function main() {
   const nativeManifest = isWindows
     ? writeWindowsNativeHost(nodeBin, printPython.path)
     : writeMacNativeHost(nodeBin, printPython.path);
+  const selfTestCommand = isWindows && fs.existsSync(path.join(nativeRuntimeRoot, "native_host.exe"))
+    ? path.join(nativeRuntimeRoot, "native_host.exe")
+    : nodeBin;
+  const selfTestArgs = selfTestCommand === nodeBin
+    ? [path.join(nativeRuntimeRoot, "native_host.js"), "--self-test"]
+    : ["--self-test"];
   const selfTestOutput = execFileSync(
-    nodeBin,
-    [path.join(nativeRuntimeRoot, "native_host.js"), "--self-test"],
+    selfTestCommand,
+    selfTestArgs,
     {
       encoding: "utf8",
       env: {

@@ -2,7 +2,7 @@ export const updatesTemplate = `
   <div class="page-heading">
     <div>
       <h2>版本更新</h2>
-      <p>通过 GitHub Releases 检查天源浏览器工作台更新</p>
+      <p>通过发布源检查天源浏览器工作台更新</p>
     </div>
     <button id="backFromUpdates" type="button" class="secondary">返回首页</button>
   </div>

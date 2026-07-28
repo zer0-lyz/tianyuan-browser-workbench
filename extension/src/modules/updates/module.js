@@ -17,10 +17,18 @@ function formatTime(value) {
     : date.toLocaleString("zh-CN", { hour12: false });
 }
 
-function safeGithubUrl(value) {
+function safeReleaseUrl(value) {
   try {
     const url = new URL(String(value || ""));
-    return url.protocol === "https:" && url.hostname === "github.com" ? url.href : "";
+    const hosts = new Set([
+      "github.com",
+      "api.github.com",
+      "objects.githubusercontent.com",
+      "release-assets.githubusercontent.com",
+      "gitee.com",
+      "raw.giteeusercontent.com",
+    ]);
+    return url.protocol === "https:" && hosts.has(url.hostname) ? url.href : "";
   } catch {
     return "";
   }
@@ -202,8 +210,8 @@ export const updatesModule = {
       );
       renderNotes(result?.notes);
 
-      const assetUrl = safeGithubUrl(result?.asset?.url);
-      const releaseUrl = safeGithubUrl(result?.releaseUrl);
+      const assetUrl = safeReleaseUrl(result?.asset?.url);
+      const releaseUrl = safeReleaseUrl(result?.releaseUrl);
       const operationBusy = checking || testing || installing;
       elements.downloadUpdate.disabled = operationBusy || !assetUrl;
       elements.downloadUpdate.dataset.url = assetUrl;
@@ -221,7 +229,7 @@ export const updatesModule = {
         elements.updateHeadline.textContent = `天源浏览器工作台 v${currentVersion}`;
         elements.updateDescription.textContent = "检查不使用 MCP token；安装前会再次确认。";
         elements.updateBadge.textContent = "未检查";
-        elements.updateFeedback.textContent = "尚未检查 GitHub Release";
+        elements.updateFeedback.textContent = "尚未检查发布源";
         elements.updateFeedback.dataset.kind = "";
         setTopStatus(`v${currentVersion}`, "idle");
         return;
@@ -230,16 +238,16 @@ export const updatesModule = {
         elements.updateHeadline.textContent = "暂时无法检查更新";
         elements.updateDescription.textContent = "当前版本可以继续使用，稍后可重新检查。";
         elements.updateBadge.textContent = "检查失败";
-        elements.updateFeedback.textContent = result.reason || "GitHub 更新检查失败";
+        elements.updateFeedback.textContent = result.reason || "发布源更新检查失败";
         elements.updateFeedback.dataset.kind = "error";
         setTopStatus("检查失败", "warn");
         return;
       }
       if (!result.releasePublished) {
         elements.updateHeadline.textContent = `当前版本 v${currentVersion}`;
-        elements.updateDescription.textContent = "GitHub 尚未发布正式 Release，当前安装保持不变。";
+        elements.updateDescription.textContent = "发布源尚未发布正式版本，当前安装保持不变。";
         elements.updateBadge.textContent = "尚未发布";
-        elements.updateFeedback.textContent = "仓库目前没有可供更新的正式 GitHub Release";
+        elements.updateFeedback.textContent = "仓库目前没有可供更新的正式版本";
         elements.updateFeedback.dataset.kind = "";
         setTopStatus(`v${currentVersion}`, "ok");
         return;
@@ -301,7 +309,7 @@ export const updatesModule = {
       elements.downloadUpdate.disabled = true;
       setTopStatus("检查中", "idle");
       elements.updateBadge.textContent = "检查中";
-      elements.updateFeedback.textContent = "正在连接 GitHub Releases...";
+      elements.updateFeedback.textContent = "正在连接发布源...";
       elements.updateFeedback.dataset.kind = "";
       try {
         const { config, contract } = await loadVersionContext();
@@ -368,7 +376,7 @@ export const updatesModule = {
         "确认测试更新模块？",
         "",
         "将下载约 100–130 MB 的当前平台完整安装包，并测试：",
-        "1. GitHub 下载与重试通道",
+        "1. 发布源下载与重试通道",
         "2. SHA-256 校验",
         "3. 解压和安装包文件完整性",
         "",
@@ -556,9 +564,9 @@ export const updatesModule = {
     }
 
     async function openUrl(element) {
-      const url = safeGithubUrl(element?.dataset?.url);
+      const url = safeReleaseUrl(element?.dataset?.url);
       if (!url) {
-        context.setStatus("没有可打开的 GitHub 更新地址", "warn");
+        context.setStatus("没有可打开的更新地址", "warn");
         return;
       }
       await context.chrome.tabs.create({ url });
