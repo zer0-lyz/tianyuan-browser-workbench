@@ -51,6 +51,7 @@ function mustExist(targetPath, label) {
 }
 
 function validateCopiedDirectory(dest, requiredRelativePaths = []) {
+  mustExist(dest, "installed directory");
   for (const relativePath of requiredRelativePaths) {
     mustExist(path.join(dest, relativePath), `installed file ${relativePath}`);
   }
@@ -58,6 +59,25 @@ function validateCopiedDirectory(dest, requiredRelativePaths = []) {
 
 function waitBeforeRetry(milliseconds) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+function copyDirectoryDirect(src, dest, requiredRelativePaths = []) {
+  let directCopyError = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    fs.rmSync(dest, { recursive: true, force: true });
+    try {
+      fs.cpSync(src, dest, { recursive: true, force: true });
+      validateCopiedDirectory(dest, requiredRelativePaths);
+      directCopyError = null;
+      break;
+    } catch (error) {
+      directCopyError = error;
+      if (attempt < 3) waitBeforeRetry(250);
+    }
+  }
+  if (directCopyError) {
+    throw new Error(`COPY_DIRECTORY_DIRECT_FAILED: ${directCopyError.message}`);
+  }
 }
 
 function copyDir(src, dest, requiredRelativePaths = []) {
@@ -103,10 +123,19 @@ function copyDir(src, dest, requiredRelativePaths = []) {
     if (movedExisting) fs.rmSync(backup, { recursive: true, force: true });
   } catch (error) {
     fs.rmSync(staging, { recursive: true, force: true });
-    if (!fs.existsSync(dest) && movedExisting && fs.existsSync(backup)) {
-      fs.renameSync(backup, dest);
+    try {
+      copyDirectoryDirect(src, dest, requiredRelativePaths);
+      if (movedExisting) fs.rmSync(backup, { recursive: true, force: true });
+      return;
+    } catch (fallbackError) {
+      fs.rmSync(dest, { recursive: true, force: true });
+      if (movedExisting && fs.existsSync(backup)) {
+        fs.renameSync(backup, dest);
+      }
+      throw new Error(
+        `COPY_DIRECTORY_REPLACE_FAILED: ${error.message}; fallback: ${fallbackError.message}`,
+      );
     }
-    throw error;
   }
 }
 
@@ -569,21 +598,28 @@ function main() {
   console.log(JSON.stringify(summary, null, 2));
 }
 
-try {
-  main();
-} catch (error) {
-  const reason = String(error?.message || error || "LOCAL_RUNTIME_INSTALL_FAILED")
-    .replace(/bearer\s+\S+/gi, "Bearer [REDACTED]")
-    .replace(/zhmcp_[A-Za-z0-9._-]+/gi, "[REDACTED]")
-    .slice(0, 500);
-  writeUpdateStatus("failed", 0, {
-    reason,
-  });
-  process.stdout.write(`${JSON.stringify({
-    ok: false,
-    action: "install_local_runtime",
-    reason,
-    security: { credentialsReturned: false, tokenUsed: false },
-  })}\n`);
-  process.exitCode = 1;
+const isMainModule = process.argv[1] && fs.realpathSync(process.argv[1])
+  === fs.realpathSync(fileURLToPath(import.meta.url));
+
+if (isMainModule) {
+  try {
+    main();
+  } catch (error) {
+    const reason = String(error?.message || error || "LOCAL_RUNTIME_INSTALL_FAILED")
+      .replace(/bearer\s+\S+/gi, "Bearer [REDACTED]")
+      .replace(/zhmcp_[A-Za-z0-9._-]+/gi, "[REDACTED]")
+      .slice(0, 500);
+    writeUpdateStatus("failed", 0, {
+      reason,
+    });
+    process.stdout.write(`${JSON.stringify({
+      ok: false,
+      action: "install_local_runtime",
+      reason,
+      security: { credentialsReturned: false, tokenUsed: false },
+    })}\n`);
+    process.exitCode = 1;
+  }
 }
+
+export { copyDir, copyFileAtomic };
