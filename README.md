@@ -40,7 +40,9 @@ node scripts/install-local-runtime.mjs
 
 `0.14.1` 起可先点击“测试更新模块”：它会下载当前平台完整包，验证 GitHub 下载、SHA-256、解压和安装包文件完整性，但不会安装、改变版本或重启，测试文件完成后自动删除。完整包约 100–130 MB。
 
-`0.14.7` 修复 Windows 在线更新误报“安装包中缺少安装程序”。新更新器优先定位 ASCII `install.ps1`；Windows 包同时保留一次旧版更新器自举所需的 `安装.ps1` 兼容别名。
+`0.14.8` 修复旧版 Windows 更新器仍无法识别兼容入口的问题。此前 macOS `/usr/bin/zip` 未给中文文件名写入 UTF-8 标志，PowerShell `Expand-Archive` 会把 `安装.ps1` 解压为乱码；Windows 包现改用 Python `zipfile` 生成，并对精确文件名和 UTF-8 标志做正式包回归验证。
+
+`0.14.7` 修复 Windows 在线更新误报“安装包中缺少安装程序”的第一层路径问题。新更新器优先定位 ASCII `install.ps1`；Windows 包同时保留一次旧版更新器自举所需的 `安装.ps1` 兼容别名。
 
 `0.14.6` 完全移除 Windows 本机目录同步中的 `fs.cpSync`。安装器改为逐目录创建、逐文件复制、单文件大小校验和整棵目录清单比对，避免该 Windows 环境中 `fs.cpSync` 静默不创建 `skills.staging-*`。
 
