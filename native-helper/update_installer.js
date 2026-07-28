@@ -151,12 +151,26 @@ async function expectedSha256(update, options) {
   return match[1].toLowerCase();
 }
 
+function installerNames(platformAdapter) {
+  return platformAdapter.isWindows
+    ? ["install.ps1", "安装.ps1"]
+    : ["安装.command"];
+}
+
+function resolveInstallerPath(packageRoot, platformAdapter) {
+  for (const installerName of installerNames(platformAdapter)) {
+    const installerPath = path.join(packageRoot, installerName);
+    if (fs.existsSync(installerPath)) return installerPath;
+  }
+  throw new Error("UPDATE_INSTALLER_NOT_FOUND");
+}
+
 function findPackageRoot(extractRoot, platformAdapter) {
-  const installerName = platformAdapter.isWindows ? "安装.ps1" : "安装.command";
+  const candidates = installerNames(platformAdapter);
   const queue = [{ directory: extractRoot, depth: 0 }];
   while (queue.length) {
     const current = queue.shift();
-    if (fs.existsSync(path.join(current.directory, installerName))) {
+    if (candidates.some((name) => fs.existsSync(path.join(current.directory, name)))) {
       return current.directory;
     }
     if (current.depth >= 2) continue;
@@ -182,13 +196,13 @@ function validatePackage(packageRoot, platformAdapter) {
     path.join("native-helper", "update_installer.js"),
     path.join("plugins", "tianyuan-browser-connector", ".codex-plugin", "plugin.json"),
     path.join("scripts", "install-local-runtime.mjs"),
-    platformAdapter.isWindows ? "安装.ps1" : "安装.command",
   ];
   for (const relativePath of required) {
     if (!fs.existsSync(path.join(packageRoot, relativePath))) {
       throw new Error(`UPDATE_PACKAGE_FILE_MISSING:${relativePath}`);
     }
   }
+  resolveInstallerPath(packageRoot, platformAdapter);
 }
 
 function createWorkbenchUpdater({
@@ -435,10 +449,7 @@ function createWorkbenchUpdater({
       await platformAdapter.extractZip(packagePath, extractRoot);
       const packageRoot = findPackageRoot(extractRoot, platformAdapter);
       validatePackage(packageRoot, platformAdapter);
-      const installerPath = path.join(
-        packageRoot,
-        platformAdapter.isWindows ? "安装.ps1" : "安装.command",
-      );
+      const installerPath = resolveInstallerPath(packageRoot, platformAdapter);
 
       status({
         updateId,
@@ -496,5 +507,7 @@ module.exports = {
   ALLOWED_DOWNLOAD_HOSTS,
   createWorkbenchUpdater,
   downloadFile,
+  findPackageRoot,
+  resolveInstallerPath,
   sha256File,
 };
