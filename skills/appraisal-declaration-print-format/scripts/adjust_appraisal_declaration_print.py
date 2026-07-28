@@ -15,6 +15,7 @@ from shutil import copy2
 
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter, range_boundaries
+from openpyxl.worksheet.properties import PageSetupProperties
 
 
 BASE_SCRIPT = Path(
@@ -808,6 +809,16 @@ def clear_evaluator_footer(ws):
     return changed
 
 
+def enforce_fit_all_columns(ws):
+    if ws.sheet_properties.pageSetUpPr is None:
+        ws.sheet_properties.pageSetUpPr = PageSetupProperties()
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.sheet_properties.pageSetUpPr.autoPageBreaks = False
+    ws.page_setup.scale = None
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+
+
 def tighten_for_signature_area(ws, last_row, limit=620.0):
     before = 0.0
     for row in range(1, last_row + 1):
@@ -839,10 +850,7 @@ def apply_final_print_setup_without_row_tighten(ws, args, base):
     ws.col_breaks.brk = []
     ws.page_setup.orientation = "landscape"
     ws.page_setup.paperSize = 9
-    ws.page_setup.scale = None
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    enforce_fit_all_columns(ws)
     ws.page_margins.left = args.margin
     ws.page_margins.right = args.margin
     ws.page_margins.top = args.top_margin
@@ -926,10 +934,7 @@ def main(argv=None):
         empty_cols = base.hide_empty_columns(ws)
         metrics = base.apply_print_setup(ws, base_args)
         # Fit all visible columns to one printed page width.
-        ws.sheet_properties.pageSetUpPr.fitToPage = True
-        ws.page_setup.fitToWidth = 1
-        ws.page_setup.fitToHeight = 0
-        ws.page_setup.scale = None
+        enforce_fit_all_columns(ws)
         ws.print_options.horizontalCentered = True
         row_layout = apply_adaptive_row_layout(ws)
         deleted_rows += row_layout["deleted"]

@@ -29,10 +29,14 @@ export const updatesTemplate = `
     </div>
     <div class="button-row">
       <button id="checkForUpdates" type="button">检查更新</button>
+      <button id="testUpdate" type="button" class="secondary" disabled>测试更新模块</button>
       <button id="installUpdate" type="button" disabled>更新全部组件</button>
       <button id="downloadUpdate" type="button" class="secondary" disabled>手动下载安装包</button>
       <button id="openReleasePage" type="button" class="secondary" disabled>查看发布页</button>
     </div>
+    <p class="section-description update-test-note">
+      安全自测会下载约 100–130 MB 的当前平台完整包，并验证 SHA-256、解压和文件完整性；不会安装、重启或改变当前版本，测试文件完成后自动删除。
+    </p>
   </section>
   <section class="section update-notes-panel">
     <div class="section-title-row">

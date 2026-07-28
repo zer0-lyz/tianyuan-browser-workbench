@@ -2187,6 +2187,13 @@ async function handle(message) {
       currentRuntimeBuildId: message.currentRuntimeBuildId,
     });
   }
+  if (message?.action === "test_workbench_update") {
+    return await workbenchUpdater.test({
+      currentVersion: message.currentVersion,
+      currentBuildNumber: message.currentBuildNumber,
+      currentRuntimeBuildId: message.currentRuntimeBuildId,
+    });
+  }
   if (message?.action === "get_workbench_update_status") {
     return workbenchUpdater.getStatus();
   }
