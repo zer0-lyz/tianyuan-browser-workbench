@@ -19,12 +19,18 @@ const freshSource = path.join(
   tempRoot,
   `天源浏览器工作台-v${version}-Windows-x64-20260726.zip`,
 );
+const liteSource = path.join(
+  tempRoot,
+  `tianyuan-workbench-v${version}-windows-x64-lite-20260727.zip`,
+);
 fs.writeFileSync(staleTarget, "stale");
 fs.writeFileSync(freshSource, "fresh");
+fs.writeFileSync(liteSource, "lite");
 const oldTime = new Date("2026-07-25T00:00:00Z");
 const newTime = new Date("2026-07-26T00:00:00Z");
 fs.utimesSync(staleTarget, oldTime, oldTime);
 fs.utimesSync(freshSource, newTime, newTime);
+fs.utimesSync(liteSource, new Date("2026-07-27T00:00:00Z"), new Date("2026-07-27T00:00:00Z"));
 
 execFileSync(process.execPath, [
   path.join(repoRoot, "scripts", "generate-update-manifest.mjs"),
@@ -52,6 +58,20 @@ assert.equal(
 );
 assert.equal(manifest.source, "static-manifest");
 assert.equal(manifest.channel, versionConfig.channel);
+
+execFileSync(process.execPath, [
+  path.join(repoRoot, "scripts", "generate-update-manifest.mjs"),
+], {
+  cwd: repoRoot,
+  env: {
+    ...process.env,
+    TIANYUAN_RELEASE_OUTPUT_DIR: tempRoot,
+    TIANYUAN_RELEASE_BASE_URL: "https://gitee.com/example/tianyuan/raw/main",
+    TIANYUAN_WINDOWS_PACKAGE_MODE: "lite",
+  },
+  stdio: ["ignore", "pipe", "pipe"],
+});
+assert.equal(fs.readFileSync(staleTarget, "utf8"), "lite");
 
 fs.rmSync(tempRoot, { recursive: true, force: true });
 console.log("Update manifest tests passed.");

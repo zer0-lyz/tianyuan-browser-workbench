@@ -145,7 +145,7 @@ SEA_CONFIG="$BUILD_ROOT/sea-config.json"
 SEA_BLOB="$BUILD_ROOT/native-host.blob"
 cat > "$SEA_CONFIG" <<EOF
 {
-  "main": "$ROOT_DIR/native-helper/native_host.js",
+  "main": "$ROOT_DIR/native-helper/native_host_bootstrap.js",
   "output": "$SEA_BLOB",
   "disableExperimentalSEAWarning": true,
   "useSnapshot": false,
@@ -163,6 +163,7 @@ cp "$WINDOWS_NODE" "$STAGE/runtime/node/node.exe"
   "$SEA_BLOB" \
   --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
 cp "$ROOT_DIR/native-helper/native_host.js" "$STAGE/native-helper/native_host.js"
+cp "$ROOT_DIR/native-helper/native_host_bootstrap.js" "$STAGE/native-helper/native_host_bootstrap.js"
 cp "$ROOT_DIR/native-helper/connector_bridge.js" "$STAGE/native-helper/connector_bridge.js"
 cp "$ROOT_DIR/native-helper/process_launcher.js" "$STAGE/native-helper/process_launcher.js"
 cp "$ROOT_DIR/native-helper/update_checker.js" "$STAGE/native-helper/update_checker.js"

@@ -53,14 +53,18 @@ function runtimeBuildId() {
   return hash.digest("hex");
 }
 
-function findPackage(patterns, targetFileName) {
+function findPackage(patterns, targetFileName, { includeLite = null } = {}) {
   if (!fs.existsSync(distRoot)) return null;
   const allCandidates = fs.readdirSync(distRoot)
-    .filter((name) =>
-      name.endsWith(".zip")
-      && name.includes(`v${versionConfig.productVersion}`)
-      && patterns.some((pattern) => name.toLowerCase().includes(pattern))
-    );
+    .filter((name) => {
+      const lowerName = name.toLowerCase();
+      if (!name.endsWith(".zip")) return false;
+      if (!name.includes(`v${versionConfig.productVersion}`)) return false;
+      if (!patterns.some((pattern) => lowerName.includes(pattern))) return false;
+      if (includeLite === true && !lowerName.includes("-lite")) return false;
+      if (includeLite === false && lowerName.includes("-lite")) return false;
+      return true;
+    });
   const sourceCandidates = allCandidates.filter((name) => name !== targetFileName);
   const candidates = (sourceCandidates.length ? sourceCandidates : allCandidates)
     .sort((left, right) => {
@@ -79,9 +83,9 @@ function findPackage(patterns, targetFileName) {
   };
 }
 
-function releaseAsset(patterns, key) {
+function releaseAsset(patterns, key, options = {}) {
   const fileName = `tianyuan-workbench-v${versionConfig.productVersion}-${key}.zip`;
-  const source = findPackage(patterns, fileName);
+  const source = findPackage(patterns, fileName, options);
   if (!source) return null;
   const targetPath = path.join(distRoot, fileName);
   const sourcePath = path.join(distRoot, source.fileName);
@@ -99,7 +103,10 @@ function releaseAsset(patterns, key) {
 }
 
 const assets = {};
-const windows = releaseAsset(["windows-x64"], "windows-x64");
+const windowsPackageMode = String(process.env.TIANYUAN_WINDOWS_PACKAGE_MODE || "full").trim().toLowerCase();
+const windows = releaseAsset(["windows-x64"], "windows-x64", {
+  includeLite: windowsPackageMode === "lite" ? true : false,
+});
 const macos = releaseAsset(["macos-arm64", "macos-apple"], "macos-arm64");
 if (windows) assets["windows-x64"] = windows;
 if (macos) assets["macos-arm64"] = macos;

@@ -68,6 +68,7 @@ NODE
 mkdir -p "$STAGE/native-helper/platform" "$STAGE/skills" "$STAGE/scripts" "$DIST_DIR"
 
 cp "$ROOT_DIR/native-helper/native_host.js" "$STAGE/native-helper/native_host.js"
+cp "$ROOT_DIR/native-helper/native_host_bootstrap.js" "$STAGE/native-helper/native_host_bootstrap.js"
 cp "$ROOT_DIR/native-helper/connector_bridge.js" "$STAGE/native-helper/connector_bridge.js"
 cp "$ROOT_DIR/native-helper/process_launcher.js" "$STAGE/native-helper/process_launcher.js"
 cp "$ROOT_DIR/native-helper/update_checker.js" "$STAGE/native-helper/update_checker.js"
