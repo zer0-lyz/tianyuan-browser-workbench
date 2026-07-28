@@ -28,6 +28,19 @@
 - 兼容别名确认带 UTF-8 BOM；除该受控兼容文件外，其余 Windows 顶层文件名保持 ASCII。
 - 根目录 `16` 个测试文件和反馈服务 `7` 项测试全部通过。
 - 静态门禁确认 Windows 更新器不存在将 `安装.ps1` 作为唯一入口的旧逻辑。
+- 正式 Windows ZIP 回读确认 `install.ps1` 与 `安装.ps1` 内容和 SHA-256 完全一致。
+- 使用旧更新器的中文路径搜索逻辑可找到正式包根目录；新更新器优先解析到 `install.ps1`。
+- 在线检查确认 Windows `0.14.2` 可发现 `0.14.7` 和正确资产摘要。
+
+## 发布
+
+- 源码提交：`6191d4440d4920d53352bd50d7d9a5f6c3e0d231`。
+- 源码标签：`v0.14.7`。
+- Windows SHA-256：`98971b91a4bc919f0e246935ad49cae656fa9bc53088db389f66c9df289d641d`。
+- macOS SHA-256：`0a439ce0b74d218caae28af87ef716849febad94576537140468c6c574d8365f`。
+- 运行指纹：`f6da21ec608f32be44e5a30c67135c54367a5da0cf8d303bbe77b6ac44d65822`。
+- 正式 Release：`https://github.com/zer0-lyz/tianyuan-browser-workbench-releases/releases/tag/v0.14.7`。
+- 5 个资产全部为 `uploaded`。
 
 ## 安全
 
