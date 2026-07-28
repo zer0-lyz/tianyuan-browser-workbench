@@ -14,12 +14,15 @@ function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function writePackage(extractRoot) {
-  const packageRoot = path.join(extractRoot, "天源浏览器工作台");
+function writePackage(extractRoot, { windows = false, legacyOnly = false } = {}) {
+  const packageRoot = path.join(
+    extractRoot,
+    windows ? "tianyuan-workbench-v0.14.7-windows-x64" : "天源浏览器工作台",
+  );
   for (const relativePath of [
     "VERSION.txt",
     "SHA256SUMS",
-    "安装.command",
+    windows ? (legacyOnly ? "安装.ps1" : "install.ps1") : "安装.command",
     "extension/manifest.json",
     "extension/version.json",
     "native-helper/native_host.js",
@@ -165,6 +168,45 @@ async function run() {
   assert.equal(mismatch.ok, false);
   assert.equal(mismatch.reason, "UPDATE_SHA256_MISMATCH");
   assert.equal(launched, false);
+
+  let windowsInstallerPath = "";
+  const windowsPlatformAdapter = {
+    runtimeRoot: path.join(tempRoot, "windows-runtime"),
+    isWindows: true,
+    async extractZip(_zipPath, destination) {
+      writePackage(destination, { windows: true });
+    },
+    launchWorkbenchInstaller(input) {
+      windowsInstallerPath = input.installerPath;
+      return { pid: 24680 };
+    },
+  };
+  const windowsUpdater = createWorkbenchUpdater({
+    updateChecker,
+    platformAdapter: windowsPlatformAdapter,
+    runtimeDirectory: path.join(tempRoot, "windows-native-helper"),
+    fetchImpl,
+    downloadRetryDelayMs: 0,
+  });
+  const windowsResult = await windowsUpdater.install({
+    currentVersion: "0.14.2",
+    currentBuildNumber: 2026072803,
+    currentRuntimeBuildId: "old-windows",
+  });
+  assert.equal(windowsResult.ok, true, JSON.stringify(windowsResult));
+  assert.equal(windowsResult.installerStarted, true);
+  assert.equal(path.basename(windowsInstallerPath), "install.ps1");
+
+  windowsPlatformAdapter.extractZip = async (_zipPath, destination) => {
+    writePackage(destination, { windows: true, legacyOnly: true });
+  };
+  const legacyWindowsResult = await windowsUpdater.test({
+    currentVersion: "0.14.2",
+    currentBuildNumber: 2026072803,
+    currentRuntimeBuildId: "old-windows",
+  });
+  assert.equal(legacyWindowsResult.ok, true, JSON.stringify(legacyWindowsResult));
+  assert.equal(legacyWindowsResult.packageValid, true);
 
   const sizeMismatchUpdater = createWorkbenchUpdater({
     updateChecker: {

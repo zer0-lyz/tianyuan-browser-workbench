@@ -18,7 +18,7 @@ execFileSync(process.execPath, [
 ], { stdio: "pipe" });
 
 const bom = Buffer.from([0xef, 0xbb, 0xbf]);
-for (const name of ["install.ps1", "uninstall.ps1"]) {
+for (const name of ["install.ps1", "安装.ps1", "uninstall.ps1"]) {
   const payload = fs.readFileSync(path.join(stageDir, name));
   assert.equal(payload.subarray(0, 3).equals(bom), true, `${name} must have UTF-8 BOM`);
 }
@@ -41,9 +41,9 @@ for (const name of ["install.cmd", "uninstall.cmd"]) {
   assert.equal(text.includes("powershell.exe -NoLogo -NoProfile"), true);
 }
 
-for (const name of fs.readdirSync(stageDir)) {
-  assert.equal([...Buffer.from(name)].every((value) => value < 128), true, `${name} must use an ASCII filename`);
-}
+const nonAsciiNames = fs.readdirSync(stageDir)
+  .filter((name) => ![...Buffer.from(name)].every((value) => value < 128));
+assert.deepEqual(nonAsciiNames, ["安装.ps1"]);
 
 fs.rmSync(tempRoot, { recursive: true, force: true });
 console.log("Windows package encoding tests passed.");

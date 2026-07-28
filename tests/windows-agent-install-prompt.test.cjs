@@ -44,5 +44,10 @@ assert.equal(
   true,
   "Windows package must include an ASCII-named install README",
 );
+assert.equal(
+  launcherScript.includes('["install.ps1", "安装.ps1"]'),
+  true,
+  "Windows package must keep the legacy updater bootstrap alias",
+);
 
 console.log("Windows Agent install prompt tests passed.");

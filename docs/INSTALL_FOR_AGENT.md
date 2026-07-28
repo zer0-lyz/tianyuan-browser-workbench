@@ -34,6 +34,8 @@ Version `0.14.5` adds a second replacement path for Windows environments where a
 
 Version `0.14.6` removes Node `fs.cpSync` from managed runtime directory synchronization. It creates directories and copies files deterministically, verifies every copied file size, and compares complete source and destination tree snapshots before replacement.
 
+Version `0.14.7` fixes Windows in-app update bootstrap. New runtimes locate ASCII `install.ps1`; the release package also contains a UTF-8 BOM `安装.ps1` compatibility alias so already-installed `0.14.2`–`0.14.6` Windows updaters can complete one automatic upgrade. Users should continue to launch `install.cmd` manually.
+
 Machines running `0.12.2` or earlier must manually install `0.13.0` once because their old Native Helper does not know the install action. Later releases can use **更新全部组件**.
 
 If Python print dependencies are unavailable, installation stops with `PRINT_PYTHON_OPENPYXL_NOT_FOUND` before registering a partial runtime.
