@@ -61,12 +61,75 @@ function waitBeforeRetry(milliseconds) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
 }
 
+function copyTreeSync(src, dest) {
+  const stats = fs.lstatSync(src);
+  if (stats.isSymbolicLink()) {
+    throw new Error(`SOURCE_SYMLINK_UNSUPPORTED: ${src}`);
+  }
+  if (stats.isDirectory()) {
+    fs.mkdirSync(dest, { recursive: true });
+    for (const entry of fs.readdirSync(src, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name))) {
+      copyTreeSync(path.join(src, entry.name), path.join(dest, entry.name));
+    }
+    if (!isWindows) fs.chmodSync(dest, stats.mode & 0o777);
+    return;
+  }
+  if (!stats.isFile()) {
+    throw new Error(`SOURCE_ENTRY_UNSUPPORTED: ${src}`);
+  }
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.copyFileSync(src, dest);
+  if (fs.statSync(dest).size !== stats.size) {
+    throw new Error(`COPIED_FILE_SIZE_MISMATCH: ${dest}`);
+  }
+  if (!isWindows) fs.chmodSync(dest, stats.mode & 0o777);
+}
+
+function directoryTreeSnapshot(root) {
+  const entries = [];
+  const visit = (directory, relativeDirectory = "") => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name))) {
+      const relativePath = path.join(relativeDirectory, entry.name);
+      const absolutePath = path.join(directory, entry.name);
+      const stats = fs.lstatSync(absolutePath);
+      if (stats.isSymbolicLink()) {
+        throw new Error(`SOURCE_SYMLINK_UNSUPPORTED: ${absolutePath}`);
+      }
+      if (stats.isDirectory()) {
+        entries.push(`D:${relativePath}`);
+        visit(absolutePath, relativePath);
+      } else if (stats.isFile()) {
+        entries.push(`F:${relativePath}:${stats.size}`);
+      } else {
+        throw new Error(`SOURCE_ENTRY_UNSUPPORTED: ${absolutePath}`);
+      }
+    }
+  };
+  visit(root);
+  return entries;
+}
+
+function validateDirectoryMirror(src, dest) {
+  validateCopiedDirectory(dest);
+  const sourceSnapshot = directoryTreeSnapshot(src);
+  const installedSnapshot = directoryTreeSnapshot(dest);
+  if (
+    sourceSnapshot.length !== installedSnapshot.length
+    || sourceSnapshot.some((entry, index) => entry !== installedSnapshot[index])
+  ) {
+    throw new Error(`INSTALLED_DIRECTORY_TREE_MISMATCH: ${dest}`);
+  }
+}
+
 function copyDirectoryDirect(src, dest, requiredRelativePaths = []) {
   let directCopyError = null;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     fs.rmSync(dest, { recursive: true, force: true });
     try {
-      fs.cpSync(src, dest, { recursive: true, force: true });
+      copyTreeSync(src, dest);
+      validateDirectoryMirror(src, dest);
       validateCopiedDirectory(dest, requiredRelativePaths);
       directCopyError = null;
       break;
@@ -90,17 +153,8 @@ function copyDir(src, dest, requiredRelativePaths = []) {
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     fs.rmSync(staging, { recursive: true, force: true });
     try {
-      fs.cpSync(src, staging, { recursive: true, force: true });
-      const missingPaths = requiredRelativePaths.filter(
-        (relativePath) => !fs.existsSync(path.join(staging, relativePath)),
-      );
-      for (const relativePath of missingPaths) {
-        const sourcePath = path.join(src, relativePath);
-        const targetPath = path.join(staging, relativePath);
-        mustExist(sourcePath, `source file ${relativePath}`);
-        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-        fs.copyFileSync(sourcePath, targetPath);
-      }
+      copyTreeSync(src, staging);
+      validateDirectoryMirror(src, staging);
       validateCopiedDirectory(staging, requiredRelativePaths);
       copyError = null;
       break;
@@ -130,7 +184,9 @@ function copyDir(src, dest, requiredRelativePaths = []) {
     } catch (fallbackError) {
       fs.rmSync(dest, { recursive: true, force: true });
       if (movedExisting && fs.existsSync(backup)) {
-        fs.renameSync(backup, dest);
+        copyTreeSync(backup, dest);
+        validateDirectoryMirror(backup, dest);
+        fs.rmSync(backup, { recursive: true, force: true });
       }
       throw new Error(
         `COPY_DIRECTORY_REPLACE_FAILED: ${error.message}; fallback: ${fallbackError.message}`,
@@ -148,7 +204,15 @@ function copyFileAtomic(src, dest) {
     fs.rmSync(temporary, { force: true });
     throw new Error(`installed file size mismatch: ${dest}`);
   }
-  fs.renameSync(temporary, dest);
+  try {
+    fs.renameSync(temporary, dest);
+  } catch (error) {
+    fs.rmSync(temporary, { force: true });
+    fs.copyFileSync(src, dest);
+    if (fs.statSync(dest).size !== fs.statSync(src).size) {
+      throw new Error(`COPY_FILE_REPLACE_FAILED: ${error.message}`);
+    }
+  }
 }
 
 function sourceBuildDigest() {
@@ -598,10 +662,17 @@ function main() {
   console.log(JSON.stringify(summary, null, 2));
 }
 
-const isMainModule = process.argv[1] && fs.realpathSync(process.argv[1])
-  === fs.realpathSync(fileURLToPath(import.meta.url));
+function isExecutedAsMainModule() {
+  if (!process.argv[1]) return false;
+  try {
+    return fs.realpathSync(process.argv[1])
+      === fs.realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
 
-if (isMainModule) {
+if (isExecutedAsMainModule()) {
   try {
     main();
   } catch (error) {
@@ -622,4 +693,4 @@ if (isMainModule) {
   }
 }
 
-export { copyDir, copyFileAtomic };
+export { copyDir, copyFileAtomic, copyTreeSync, directoryTreeSnapshot };
