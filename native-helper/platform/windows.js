@@ -129,7 +129,9 @@ function createWindowsAdapter(options = {}) {
     const quote = (value) => String(value).replace(/'/g, "''");
     fs.writeFileSync(runnerPath, [
       "$ErrorActionPreference = 'Continue'",
-      `while (Get-Process -Id ${Number(parentPid)} -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 200 }`,
+      `$ParentPid = ${Number(parentPid)}`,
+      "$Deadline = (Get-Date).AddSeconds(5)",
+      "while ((Get-Date) -lt $Deadline -and (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue)) { Start-Sleep -Milliseconds 200 }",
       "$env:TIANYUAN_UPDATE_MODE = '1'",
       `$env:TIANYUAN_UPDATE_STATUS_PATH = '${quote(statusPath)}'`,
       `& '${quote(installerPath)}' *>> '${quote(logPath)}'`,

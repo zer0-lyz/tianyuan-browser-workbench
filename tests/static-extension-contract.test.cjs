@@ -72,7 +72,7 @@ assert.equal(quotedConstant(sidepanel, "EXPECTED_CONNECTOR_PROTOCOL_VERSION"), q
 assert.equal(quotedConstant(nativeHost, "CONNECTOR_PROTOCOL_VERSION"), quotedConstant(bridge, "PROTOCOL_VERSION"));
 assert.equal(manifest.version, versionConfig.chromeVersion);
 assert.equal(manifest.version_name, versionConfig.versionName);
-assert.equal(versionConfig.productVersion, "0.14.11");
+assert.equal(versionConfig.productVersion, "0.14.12");
 assert.equal(versionConfig.repository, "zer0-lyz/tianyuan-browser-workbench-releases");
 
 assert.equal(pluginServer.includes(`version: "${pluginManifest.version}"`), true);
@@ -210,6 +210,10 @@ assert.equal(bridge.includes("platformAdapter.createCredentialReference"), true)
 assert.equal(platformIndex.includes('platform === "win32"'), true);
 assert.equal(platformIndex.includes('platform === "darwin"'), true);
 assert.equal(windowsPlatform.includes("windows-dpapi"), true);
+assert.equal(windowsPlatform.includes("AddSeconds(5)"), true);
+assert.equal(windowsPlatform.includes("while ((Get-Date) -lt $Deadline"), true);
+assert.equal(macosPlatform.includes("+ 5"), true);
+assert.equal(nativeHost.includes('process.stdin.on("end"'), true);
 assert.equal(windowsPlatform.includes('"tycpv.cmd"'), true);
 assert.equal(macosPlatform.includes("macos-keychain"), true);
 assert.equal(installer.includes('"--start-connector", "--force-restart"'), true);

@@ -1196,7 +1196,11 @@ function readMessages(onMessage) {
       onMessage(JSON.parse(raw));
     }
   });
+  process.stdin.on("end", () => {
+    process.exit(0);
+  });
 }
+
 
 function withTimeout(promise, ms, timeoutReason) {
   let timeout = null;
