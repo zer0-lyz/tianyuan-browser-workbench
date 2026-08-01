@@ -71,6 +71,71 @@ async function run() {
   );
   assert.equal(mirrorUpdate.asset.sha256, "c".repeat(64));
 
+  const staleMirrorFallback = await checkGithubUpdate({
+    currentVersion: "0.14.18",
+    currentBuildNumber: 2026080204,
+    platform: "win32",
+    architecture: "x64",
+    updateManifestUrls: ["https://gitee.com/example/tianyuan/raw/main/update-manifest.json"],
+  }, {
+    fetchImpl: async (url) => {
+      const requestUrl = String(url);
+      if (requestUrl.includes("gitee.com")) {
+        return response(200, {
+          productVersion: "0.14.12",
+          buildNumber: 2026072813,
+          assets: {
+            "windows-x64": {
+              fileName: "tianyuan-workbench-v0.14.12-windows-x64.zip",
+              url: "https://gitee.com/example/tianyuan/raw/main/tianyuan-workbench-v0.14.12-windows-x64.zip",
+              sha256: "d".repeat(64),
+              size: 100,
+            },
+          },
+        });
+      }
+      if (requestUrl.includes("releases/download")) {
+        return response(200, {
+          productVersion: "0.14.12",
+          buildNumber: 2026072813,
+          assets: {},
+        });
+      }
+      if (requestUrl.includes("api.github.com")) {
+        return response(200, {
+          tag_name: "v0.14.19",
+          name: "天源浏览器工作台 v0.14.19",
+          assets: [
+            {
+              name: "tianyuan-workbench-v0.14.19-windows-x64.zip",
+              browser_download_url: "https://github.com/example/package.zip",
+              size: 100,
+            },
+            {
+              name: "update-manifest.json",
+              browser_download_url: "https://github.com/example/update-manifest.json",
+              size: 200,
+            },
+          ],
+        });
+      }
+      return response(200, {
+        productVersion: "0.14.19",
+        buildNumber: 2026080205,
+        assets: {
+          "windows-x64": {
+            fileName: "tianyuan-workbench-v0.14.19-windows-x64.zip",
+            sha256: "e".repeat(64),
+            size: 100,
+          },
+        },
+      });
+    },
+  });
+  assert.equal(staleMirrorFallback.latestVersion, "0.14.19");
+  assert.equal(staleMirrorFallback.updateAvailable, true);
+  assert.equal(staleMirrorFallback.asset.name, "tianyuan-workbench-v0.14.19-windows-x64.zip");
+
   const noRelease = await checkGithubUpdate({
     currentVersion: "0.9.0",
     currentBuildNumber: 2026072601,
@@ -137,6 +202,10 @@ async function run() {
   }, {
     fetchImpl: async (url) => {
       if (String(url).includes("gitee.com")) return response(404, {});
+      if (!String(url).includes("api.github.com")
+        && !String(url).includes("releases/download/v0.9.0/update-manifest.json")) {
+        return response(404, {});
+      }
       requestCount += 1;
       return requestCount === 1
         ? response(200, manifestRelease)
