@@ -9,6 +9,7 @@ const common = require("./common.js");
 function createWindowsAdapter(options = {}) {
   const runFile = options.execFile || execFile;
   const runFileSync = options.execFileSync || execFileSync;
+  const launchProcess = options.spawn || spawn;
   const env = options.env || process.env;
   const homeDir = options.homeDir || os.homedir();
   const localAppData = env.LOCALAPPDATA || path.join(homeDir, "AppData", "Local");
@@ -128,17 +129,50 @@ function createWindowsAdapter(options = {}) {
     const runnerPath = path.join(path.dirname(statusPath), "run-update.ps1");
     const quote = (value) => String(value).replace(/'/g, "''");
     fs.writeFileSync(runnerPath, [
-      "$ErrorActionPreference = 'Continue'",
+      "$ErrorActionPreference = 'Stop'",
       `$ParentPid = ${Number(parentPid)}`,
-      "$Deadline = (Get-Date).AddSeconds(5)",
+      "$RunnerPid = $PID",
+      `$StatusPath = '${quote(statusPath)}'`,
+      `$LogPath = '${quote(logPath)}'`,
+      "$InstallerPid = $RunnerPid",
+      "function Protect-UpdateMessage([string]$Message) { return ($Message -replace '(?i)(bearer\\s+)[^\\s]+', '$1[REDACTED]' -replace '(?i)(authorization|cookie|password|验证码|token)\\s*[:=]\\s*[^\\s,;]+', '$1=[REDACTED]') }",
+      "function Write-UpdateStatus([string]$Phase, [int]$Percent, [string]$Message, [string]$Reason = '', [int]$ExitCode = 0) {",
+      "  $payload = [ordered]@{ ok = $Phase -ne 'failed'; action = 'workbench_update'; phase = $Phase; percent = $Percent; message = $Message; reason = (Protect-UpdateMessage $Reason); exitCode = $ExitCode; installerPid = $InstallerPid; updatedAt = [DateTime]::UtcNow.ToString('o'); logPath = $LogPath; security = @{ credentialsReturned = $false; tokenUsed = $false } }",
+      "  New-Item -ItemType Directory -Path (Split-Path -Parent $StatusPath) -Force | Out-Null",
+      "  $temporary = \"$StatusPath.tmp-$PID\"",
+      "  $payload | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $temporary -Encoding UTF8",
+      "  Move-Item -LiteralPath $temporary -Destination $StatusPath -Force",
+      "}",
+      "$LogDirectory = Split-Path -Parent $LogPath",
+      "New-Item -ItemType Directory -Path $LogDirectory -Force | Out-Null",
+      "\"runnerPid=$RunnerPid\" | Set-Content -LiteralPath $LogPath -Encoding UTF8",
+      "Write-UpdateStatus 'preparing' 74 '更新程序已启动，正在准备停止工作台服务'",
+      "$Deadline = (Get-Date).AddSeconds(15)",
       "while ((Get-Date) -lt $Deadline -and (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue)) { Start-Sleep -Milliseconds 200 }",
+      "if (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) { throw 'UPDATE_PARENT_PROCESS_NOT_EXITED' }",
+      "Write-UpdateStatus 'stopping_services' 76 '正在停止工作台服务并等待文件释放'",
       "$env:TIANYUAN_UPDATE_MODE = '1'",
       `$env:TIANYUAN_UPDATE_STATUS_PATH = '${quote(statusPath)}'`,
+      `$env:TIANYUAN_UPDATE_LOG_PATH = '${quote(logPath)}'`,
+      "$env:TIANYUAN_UPDATE_INSTALLER_PID = \"$InstallerPid\"",
       `& '${quote(installerPath)}' *>> '${quote(logPath)}'`,
-      "exit $LASTEXITCODE",
+      "$InstallerExitCode = [int]$LASTEXITCODE",
+      "if ($InstallerExitCode -ne 0) { throw \"UPDATE_INSTALLER_EXIT_$InstallerExitCode\" }",
+      "if (-not (Test-Path -LiteralPath $StatusPath)) { throw 'UPDATE_COMPLETION_STATUS_MISSING' }",
+      "$final = Get-Content -LiteralPath $StatusPath -Raw -Encoding UTF8 | ConvertFrom-Json",
+      "if ($final.phase -notin @('complete')) { throw 'UPDATE_COMPLETION_STATUS_MISSING' }",
+      "exit 0",
       "",
+      "trap {",
+      "  $reason = Protect-UpdateMessage $_.Exception.Message",
+      "  try { $existing = if (Test-Path -LiteralPath $StatusPath) { Get-Content -LiteralPath $StatusPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null } } catch { $existing = $null }",
+      "  if ($existing -and $existing.phase -eq 'failed' -and $existing.reason) { $reason = Protect-UpdateMessage ([string]$existing.reason) }",
+      "  $failedPercent = 0; if ($existing -and $existing.percent) { $failedPercent = [int]$existing.percent }",
+      "  try { Write-UpdateStatus 'failed' $failedPercent '工作台更新失败' $reason ([int]($LASTEXITCODE)) } catch {}",
+      "  exit 1",
+      "}",
     ].join("\r\n"), "utf8");
-    const child = spawn("powershell.exe", [
+    const child = launchProcess("powershell.exe", [
       "-NoProfile",
       "-ExecutionPolicy",
       "Bypass",
@@ -149,6 +183,34 @@ function createWindowsAdapter(options = {}) {
       stdio: "ignore",
       windowsHide: true,
       env: { ...env },
+    });
+    child.once("error", (error) => {
+      const reason = String(error?.code === "ENOENT" ? "UPDATE_RUNNER_NOT_FOUND" : error?.message || error)
+        .replace(/bearer\s+\S+/gi, "Bearer [REDACTED]")
+        .replace(/(authorization|cookie|password|验证码|token)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]")
+        .slice(0, 500);
+      try {
+        const current = fs.existsSync(statusPath)
+          ? JSON.parse(fs.readFileSync(statusPath, "utf8"))
+          : {};
+        const next = {
+          ...current,
+          ok: false,
+          action: "workbench_update",
+          phase: "failed",
+          reason,
+          message: "更新程序启动失败",
+          installerPid: child.pid || null,
+          logPath,
+          updatedAt: new Date().toISOString(),
+          security: { credentialsReturned: false, tokenUsed: false },
+        };
+        const temporary = `${statusPath}.spawn-error-${process.pid}`;
+        fs.writeFileSync(temporary, `${JSON.stringify(next)}\n`, { mode: 0o600 });
+        fs.renameSync(temporary, statusPath);
+      } catch {
+        // The detached runner will write the durable failure state when possible.
+      }
     });
     child.unref();
     return { pid: child.pid, runnerPath };

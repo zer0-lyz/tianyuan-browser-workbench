@@ -1,6 +1,22 @@
 # 天源浏览器工作台项目长期记忆
 
-更新时间：2026-07-28 CST
+更新时间：2026-08-02 CST
+
+## 2026-08-02 v0.14.19 Windows 明细表一页宽修复
+
+- 明细表打印格式此前仍写入固定 `scale=100`、`fitToWidth=0`、`fitToPage=False`，导致 Windows Excel/WPS 不执行“所有列打印在一页”。
+- 现统一写入 `fitToPage=1`、`autoPageBreaks=0`、`fitToWidth=1`、`fitToHeight=0` 并清除 `scale`；页高不限，长表自然纵向分页。
+- 申报表与明细表的打印页设置回读测试均通过；不改变明细表数据、公式、空列隐藏和页脚处理规则。
+- v0.14.19 / build `2026080205` 用于从 Windows v0.14.18 实测自动更新和明细表打印预览。
+
+## 2026-08-02 Windows 自动更新事务边界
+
+- Windows 更新不能把 `spawn()` 成功或 `installing / 82%` 视为安装成功；必须读取状态文件和安装器退出码，最终阶段必须为 `complete`。
+- Native Host 处理 `install_workbench_update` 后，先将结果回传给扩展，再主动退出；Detached runner 等待旧 Host 退出后才可覆盖 `native_host.exe` 和 `native-helper\\node\\node.exe`。
+- 更新前只允许停止天源自己的 Connector Bridge、Native Host 和 managed Node；第三方占用 40415 时返回 `CONNECTOR_PORT_OCCUPIED_BY_OTHER_SERVICE`，天源文件锁无法释放时返回 `UPDATE_FILE_LOCKED`，最多重试 3 次。
+- Windows runner 必须写入 phase、percent、message、reason、exitCode、installerPid、updatedAt 和 logPath；失败不能留下长期 `installing` 状态，超过 20 分钟转为 `WORKBENCH_UPDATE_TIMEOUT`。
+- 安装成功门禁包括：扩展 productVersion/buildNumber、runtimeBuildId、Native Messaging 注册、Node/Python/openpyxl、Connector health；Native Helper 关键文件保留回滚备份。
+- v0.14.18 / build `2026080204` 已生成 Windows 完整包和 lite 包，但 Windows 实机验证前不发布 GitHub Release。
 
 ## 2026-08-02 CLI 动态授权流程边界
 

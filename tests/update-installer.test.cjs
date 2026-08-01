@@ -124,9 +124,9 @@ async function run() {
     currentRuntimeBuildId: "old",
   });
   assert.equal(result.ok, true);
-  assert.equal(result.phase, "installing");
+  assert.equal(result.phase, "stopping_services");
   assert.equal(launched, true);
-  assert.equal(updater.getStatus().phase, "installing");
+  assert.equal(updater.getStatus().phase, "stopping_services");
 
   launched = false;
   const testResult = await updater.test({
@@ -195,6 +195,7 @@ async function run() {
   });
   assert.equal(windowsResult.ok, true, JSON.stringify(windowsResult));
   assert.equal(windowsResult.installerStarted, true);
+  assert.equal(windowsResult.shutdownRequired, true);
   assert.equal(path.basename(windowsInstallerPath), "install.ps1");
 
   windowsPlatformAdapter.extractZip = async (_zipPath, destination) => {

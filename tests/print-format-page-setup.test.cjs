@@ -12,6 +12,13 @@ const declarationScript = path.join(
   "scripts",
   "adjust_appraisal_declaration_print.py",
 );
+const detailScript = path.join(
+  repoRoot,
+  "skills",
+  "appraisal-detail-print-format",
+  "scripts",
+  "adjust_appraisal_detail_print.py",
+);
 const python = process.env.TIANYUAN_PYTHON_BIN || "python3";
 const code = [
   "import importlib.util, json, sys, tempfile, zipfile",
@@ -41,20 +48,57 @@ const code = [
   "        'fitToHeight': setup.attrib.get('fitToHeight'),",
   "        'scale': setup.attrib.get('scale'),",
   "    }))",
+  "detail_script = Path(sys.argv[2])",
+  "detail_spec = importlib.util.spec_from_file_location('detail_print', detail_script)",
+  "detail_module = importlib.util.module_from_spec(detail_spec)",
+  "detail_spec.loader.exec_module(detail_module)",
+  "with tempfile.TemporaryDirectory() as temp_dir:",
+  "    target = Path(temp_dir) / 'detail-fit-columns.xlsx'",
+  "    workbook = Workbook()",
+  "    sheet = workbook.active",
+  "    sheet['A1'] = '测试明细表'",
+  "    detail_module.apply_print_setup(sheet, type('Args', (), {",
+  "        'margin': 0.45, 'top_margin': 0.30, 'bottom_margin': 0.60,",
+  "        'header_margin': 0.12, 'footer_margin': 0.30, 'target_width': 143.0,",
+  "        'page_height_factor': 0.95, 'min_compress_row_height': 11.2,",
+  "    })())",
+  "    workbook.save(target)",
+  "    with zipfile.ZipFile(target, 'r') as archive:",
+  "        root = ET.fromstring(archive.read('xl/worksheets/sheet1.xml'))",
+  "    properties = root.find('m:sheetPr/m:pageSetUpPr', namespace)",
+  "    setup = root.find('m:pageSetup', namespace)",
+  "    print(json.dumps({",
+  "        'detail': {",
+  "            'fitToPage': properties.attrib.get('fitToPage'),",
+  "            'autoPageBreaks': properties.attrib.get('autoPageBreaks'),",
+  "            'fitToWidth': setup.attrib.get('fitToWidth'),",
+  "            'fitToHeight': setup.attrib.get('fitToHeight'),",
+  "            'scale': setup.attrib.get('scale'),",
+  "        }",
+  "    }))",
 ].join("\n");
 
-const result = spawnSync(python, ["-c", code, declarationScript], {
+const result = spawnSync(python, ["-c", code, declarationScript, detailScript], {
   cwd: repoRoot,
   encoding: "utf8",
 });
 assert.equal(result.status, 0, result.stderr || result.stdout);
-const setup = JSON.parse(result.stdout.trim());
-assert.deepEqual(setup, {
+const output = result.stdout.trim().split("\n").map((line) => JSON.parse(line));
+assert.deepEqual(output[0], {
   fitToPage: "1",
   autoPageBreaks: "0",
   fitToWidth: "1",
   fitToHeight: "0",
   scale: null,
+});
+assert.deepEqual(output[1], {
+  detail: {
+    fitToPage: "1",
+    autoPageBreaks: "0",
+    fitToWidth: "1",
+    fitToHeight: "0",
+    scale: null,
+  },
 });
 
 console.log("Print format page setup tests passed.");

@@ -33,6 +33,7 @@ const nativeInstaller = fs.readFileSync(path.join(repoRoot, "native-helper", "in
 const windowsInstaller = fs.readFileSync(path.join(repoRoot, "release", "windows-x64", "install.ps1"), "utf8");
 const macosLiteBuilder = fs.readFileSync(path.join(repoRoot, "release", "build_macos_arm64_lite_release.sh"), "utf8");
 const declarationPrintScript = fs.readFileSync(path.join(repoRoot, "skills", "appraisal-declaration-print-format", "scripts", "adjust_appraisal_declaration_print.py"), "utf8");
+const detailPrintScript = fs.readFileSync(path.join(repoRoot, "skills", "appraisal-detail-print-format", "scripts", "adjust_appraisal_detail_print.py"), "utf8");
 const versionConfig = JSON.parse(fs.readFileSync(path.join(extensionRoot, "version.json"), "utf8"));
 const pluginServer = fs.readFileSync(path.join(repoRoot, "plugins", "tianyuan-browser-connector", "runtime", "apps", "mcp", "server.mjs"), "utf8");
 const pluginReadme = fs.readFileSync(path.join(repoRoot, "plugins", "tianyuan-browser-connector", "README.md"), "utf8");
@@ -185,6 +186,10 @@ assert.equal(updateInstaller.includes("UPDATE_DOWNLOAD_SIZE_MISMATCH"), true);
 assert.equal(declarationPrintScript.includes("autoPageBreaks = False"), true);
 assert.equal(declarationPrintScript.includes("fitToWidth = 1"), true);
 assert.equal(declarationPrintScript.includes("fitToHeight = 0"), true);
+assert.equal(detailPrintScript.includes("autoPageBreaks = False"), true);
+assert.equal(detailPrintScript.includes("fitToPage = True"), true);
+assert.equal(detailPrintScript.includes("fitToWidth = 1"), true);
+assert.equal(detailPrintScript.includes("fitToHeight = 0"), true);
 assert.equal(updateInstaller.includes("tianyuan-browser-connector"), true);
 assert.equal(installer.includes('copyFileAtomic(path.join(repoRoot, "native-helper", "native_host_bootstrap.js")'), true);
 assert.equal(installer.includes('copyFileAtomic(path.join(repoRoot, "native-helper", "update_checker.js")'), true);
@@ -232,7 +237,7 @@ assert.equal(bridge.includes("platformAdapter.createCredentialReference"), true)
 assert.equal(platformIndex.includes('platform === "win32"'), true);
 assert.equal(platformIndex.includes('platform === "darwin"'), true);
 assert.equal(windowsPlatform.includes("windows-dpapi"), true);
-assert.equal(windowsPlatform.includes("AddSeconds(5)"), true);
+assert.equal(windowsPlatform.includes("AddSeconds(15)"), true);
 assert.equal(windowsPlatform.includes("while ((Get-Date) -lt $Deadline"), true);
 assert.equal(macosPlatform.includes("+ 5"), true);
 assert.equal(nativeHost.includes('process.stdin.on("end"'), true);

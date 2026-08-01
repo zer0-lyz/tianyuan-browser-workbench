@@ -118,6 +118,13 @@ export const updatesModule = {
         UPDATE_DOWNLOAD_TIMEOUT: "安装包下载超时，请检查网络稳定性后重试。",
         UPDATE_DOWNLOAD_SIZE_MISMATCH: "安装包大小与发布记录不一致，已停止处理。",
         UPDATE_FETCH_UNAVAILABLE: "本机 Node.js 运行时不支持下载，请更新本机运行组件。",
+        UPDATE_INSTALLER_NOT_STARTED: "更新程序没有成功启动，请重试并查看诊断日志。",
+        UPDATE_RUNNER_NOT_FOUND: "Windows 更新脚本没有成功启动，请重新加载工作台后重试。",
+        UPDATE_PARENT_PROCESS_NOT_EXITED: "旧工作台服务没有及时退出，已停止更新以保护当前版本。",
+        UPDATE_FILE_LOCKED: "工作台文件仍被占用，当前版本已保留；请关闭相关浏览器窗口后重试。",
+        UPDATE_ALREADY_RUNNING: "已有更新正在执行，请等待当前更新结束。",
+        UPDATE_COMPLETION_STATUS_MISSING: "安装程序未返回完成状态，当前版本已保留。",
+        WORKBENCH_UPDATE_TIMEOUT: "更新等待超时，当前版本已保留；请查看诊断日志后重试。",
         PLATFORM_UPDATE_UNSUPPORTED: "当前系统暂不支持一键更新。",
         UNKNOWN_ACTION: "当前 Native Helper 版本较旧，需要手动安装一次新版。",
       };
@@ -132,7 +139,27 @@ export const updatesModule = {
       if (String(reason || "").startsWith("UPDATE_PACKAGE_FILE_MISSING:")) {
         return "安装包文件不完整，已停止处理。";
       }
+      if (String(reason || "").startsWith("UPDATE_INSTALLER_EXIT_")) {
+        const code = String(reason).slice("UPDATE_INSTALLER_EXIT_".length);
+        return `Windows 安装脚本失败（退出码 ${code}），当前版本已保留。`;
+      }
       return messages[reason] || reason || "完整更新失败";
+    }
+
+    function progressMessage(status) {
+      if (status?.message) return status.message;
+      const labels = {
+        preparing: "正在准备更新",
+        stopping_services: "正在停止工作台服务",
+        waiting_for_file_release: "正在等待文件释放",
+        installing: "正在安装全部组件",
+        verifying_install: "正在验证安装结果",
+        restarting_services: "正在重启工作台服务",
+        rollback: "正在恢复原版本",
+      };
+      return labels[status?.phase] || (status?.phase === "failed"
+        ? updateFailureText(status.reason)
+        : "等待开始");
     }
 
     function renderProgress(status = operationStatus) {
@@ -143,8 +170,7 @@ export const updatesModule = {
       );
       elements.updateProgressPanel.classList.toggle("hidden", !active && !status);
       elements.updateProgressBar.value = Math.max(0, Math.min(100, Number(status?.percent || 0)));
-      elements.updateProgressText.textContent = status?.message
-        || (status?.phase === "failed" ? updateFailureText(status.reason) : "等待开始");
+      elements.updateProgressText.textContent = progressMessage(status);
     }
 
     function setTopStatus(text, kind = "idle") {

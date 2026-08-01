@@ -45,6 +45,26 @@ const codexPluginRoot = path.join(
   CONNECTOR_VERSION,
 );
 const updateStatusPath = String(process.env.TIANYUAN_UPDATE_STATUS_PATH || "").trim();
+let nativeRuntimeBackupPath = "";
+
+const NATIVE_RUNTIME_BACKUP_FILES = [
+  "native_host.exe",
+  "native_host.js",
+  "native_host_bootstrap.js",
+  "connector_bridge.js",
+  "process_launcher.js",
+  "update_checker.js",
+  "update_installer.js",
+  "update-sources.json",
+  "runtime-config.json",
+  "com.tianyuan.workbench.helper.json",
+  "node/node.exe",
+  "platform/index.js",
+  "platform/common.js",
+  "platform/windows.js",
+  "platform/macos.js",
+  "platform/unsupported.js",
+];
 
 function mustExist(targetPath, label) {
   if (!fs.existsSync(targetPath)) throw new Error(`${label} not found: ${targetPath}`);
@@ -213,6 +233,42 @@ function copyFileAtomic(src, dest) {
       throw new Error(`COPY_FILE_REPLACE_FAILED: ${error.message}`);
     }
   }
+}
+
+function backupNativeRuntime() {
+  if (!isWindows || nativeRuntimeBackupPath || !fs.existsSync(nativeRuntimeRoot)) return;
+  const backupPath = path.join(
+    nativeRuntimeRoot,
+    `.update-backup-${process.pid}-${randomBytes(4).toString("hex")}`,
+  );
+  let copied = 0;
+  for (const relativePath of NATIVE_RUNTIME_BACKUP_FILES) {
+    const source = path.join(nativeRuntimeRoot, relativePath);
+    if (!fs.existsSync(source) || !fs.statSync(source).isFile()) continue;
+    const target = path.join(backupPath, relativePath);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(source, target);
+    copied += 1;
+  }
+  if (copied > 0) nativeRuntimeBackupPath = backupPath;
+  else fs.rmSync(backupPath, { recursive: true, force: true });
+}
+
+function restoreNativeRuntimeBackup() {
+  if (!nativeRuntimeBackupPath || !fs.existsSync(nativeRuntimeBackupPath)) return;
+  for (const relativePath of NATIVE_RUNTIME_BACKUP_FILES) {
+    const source = path.join(nativeRuntimeBackupPath, relativePath);
+    if (!fs.existsSync(source)) continue;
+    const target = path.join(nativeRuntimeRoot, relativePath);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(source, target);
+  }
+}
+
+function cleanupNativeRuntimeBackup() {
+  if (!nativeRuntimeBackupPath) return;
+  fs.rmSync(nativeRuntimeBackupPath, { recursive: true, force: true });
+  nativeRuntimeBackupPath = "";
 }
 
 function unblockWindowsFile(targetPath) {
@@ -589,6 +645,7 @@ function main() {
     copyDir(path.join(repoRoot, "skills", skillName), path.join(printSkillsRoot, skillName));
   }
 
+  backupNativeRuntime();
   copyFileAtomic(path.join(repoRoot, "native-helper", "native_host.js"), path.join(nativeRuntimeRoot, "native_host.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "native_host_bootstrap.js"), path.join(nativeRuntimeRoot, "native_host_bootstrap.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "connector_bridge.js"), path.join(nativeRuntimeRoot, "connector_bridge.js"));
@@ -722,6 +779,7 @@ function main() {
     connectorPath: summary.connectorPath,
     codexConnectorCachePath: summary.codexConnectorCachePath,
   });
+  cleanupNativeRuntimeBackup();
   console.log(JSON.stringify(summary, null, 2));
 }
 
@@ -739,6 +797,12 @@ if (isExecutedAsMainModule()) {
   try {
     main();
   } catch (error) {
+    try {
+      restoreNativeRuntimeBackup();
+      cleanupNativeRuntimeBackup();
+    } catch {
+      // Preserve the original failure reason if rollback itself is blocked.
+    }
     const reason = String(error?.message || error || "LOCAL_RUNTIME_INSTALL_FAILED")
       .replace(/bearer\s+\S+/gi, "Bearer [REDACTED]")
       .replace(/zhmcp_[A-Za-z0-9._-]+/gi, "[REDACTED]")

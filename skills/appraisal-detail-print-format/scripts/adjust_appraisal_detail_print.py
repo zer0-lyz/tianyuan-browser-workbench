@@ -294,10 +294,13 @@ def apply_print_setup(ws, args):
     ws.col_breaks.brk = []
     ws.page_setup.orientation = "landscape"
     ws.page_setup.paperSize = 9
-    ws.page_setup.scale = 100
-    ws.page_setup.fitToWidth = 0
+    # Use OOXML fit-to-page mode so Excel/WPS on Windows prints every visible
+    # column on one page wide; the page height remains unrestricted.
+    ws.page_setup.scale = None
+    ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 0
-    ws.sheet_properties.pageSetUpPr.fitToPage = False
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.sheet_properties.pageSetUpPr.autoPageBreaks = False
     ws.page_margins.left = args.margin
     ws.page_margins.right = args.margin
     ws.page_margins.top = args.top_margin
