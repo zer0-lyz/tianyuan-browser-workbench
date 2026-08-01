@@ -6,11 +6,13 @@
 - 连接配置页新增动态授权链接备用区域和“复制链接”按钮；自动打开失败时仍可手动完成授权。
 - `extension/manifest.json` 增加 `https://mcp.zhrdc.net/*` 权限，用于复用和聚焦真实动态授权页。
 - Native Helper 保留 stdout/stderr 捕获、20 秒动态 URL 超时、CLI 不存在、执行阻止、回调端口冲突、非零退出和授权状态轮询；不读取或回传 token、Cookie、Authorization、密码或验证码。
-- 版本同步为 `0.14.17`，构建号 `2026080203`；本轮暂不推送 GitHub，待 Windows 实机验证后再发布。
-- 已生成完整包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.17-windows-x64-20260802.zip`，SHA-256：`c499206140ce0b0eb31845514adb5588db4c465b5e459bf979fa81f77b73f2ac`。
-- 已生成轻量包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.17-windows-x64-lite-20260802.zip`，SHA-256：`0e66d1a5324dab5374817cd7a74ab3b6567c66029986278993dbc5d2dac64596`。
+- 版本同步为 `0.14.17`，构建号 `2026080203`；源码已推送 GitHub，提交为 `88dbb26`。
+- GitHub Release：`https://github.com/zer0-lyz/tianyuan-browser-workbench-releases/releases/tag/v0.14.17`。
+- 已生成完整包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.17-windows-x64-20260802.zip`，SHA-256：`17fed0471a0da4db3f610555ab08917f58722d554872b897460db36dbc79c293`。
+- 已生成轻量包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.17-windows-x64-lite-20260802.zip`，SHA-256：`e21532c63bb77f539002aacd4eddebb5580f1d6d6c66217c160239f698231d22`。
 - 包内回读通过：完整包含 Node、Python、CLI 安装器和 `native_host.exe`；轻量包标记 `package_type=lite-update` 且不含上述运行时。
-- 待验证：Chrome 全新重启和扩展重新加载后，正常 CLI、CLI 不存在、Native Messaging 失败、重复点击、授权成功/超时等场景。
+- GitHub Release 资产和更新清单已在线核验；Gitee 镜像因本机没有写入凭据仍停在 `0.14.12`，旧安装器若只读取 Gitee 会暂时看不到 `0.14.17`。
+- 待验证：Chrome 全新重启和扩展重新加载后，Windows 更新检查、完整包下载校验、轻量更新安装及 CLI 授权场景。
 
 ## 2026-08-02 Windows 轻量更新包 v0.14.16
 

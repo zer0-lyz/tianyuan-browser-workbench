@@ -8,10 +8,12 @@
 - 安全边界：动态链接只用于当前授权流程和备用展示；状态、日志和证据不写入 token、Cookie、Authorization、密码、验证码或完整敏感凭据。
 - 版本：`0.14.17`，构建号 `2026080203`。
 - 回归验证：sidepanel/native_host 语法、静态扩展契约、Agent Bridge、Windows 安装安全、CLI 降级、ZIP 编码、Release ZIP、Runtime 启动、Agent 提示词和 lite 包测试全部通过。
-- 完整包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.17-windows-x64-20260802.zip`；SHA-256：`c499206140ce0b0eb31845514adb5588db4c465b5e459bf979fa81f77b73f2ac`。
-- 轻量包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.17-windows-x64-lite-20260802.zip`；SHA-256：`0e66d1a5324dab5374817cd7a74ab3b6567c66029986278993dbc5d2dac64596`。
+- 源码已推送 GitHub，提交：`88dbb26`；公开 Release：`https://github.com/zer0-lyz/tianyuan-browser-workbench-releases/releases/tag/v0.14.17`。
+- 完整包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.17-windows-x64-20260802.zip`；SHA-256：`17fed0471a0da4db3f610555ab08917f58722d554872b897460db36dbc79c293`。
+- 轻量包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.17-windows-x64-lite-20260802.zip`；SHA-256：`e21532c63bb77f539002aacd4eddebb5580f1d6d6c66217c160239f698231d22`。
 - 包内回读通过：完整包包含 `native_host.exe`、Node、Python 和 CLI 安装器；轻量包不包含这些运行时，供已有安装用户更新。
-- 当前暂不推送 GitHub，等待 Windows 实机验证动态 CLI 授权链路。
+- GitHub Release 资产和更新清单在线核验通过；Gitee 镜像推送因缺少本机写入凭据失败，当前仍为 `0.14.12`，旧安装器优先读取 Gitee 时无法立即发现 `0.14.17`。
+- Windows 实机更新测试前需使用已同步的更新清单，或在测试机临时将 `native-helper/update-sources.json` 指向 GitHub Release 的 `update-manifest.json`。
 
 ## 2026-08-02 Windows v0.14.16 完整包与轻量包
 
