@@ -223,11 +223,12 @@ async function checkManifestSources(input = {}, options = {}) {
       });
       if (!result.found || !result.payload) continue;
       const update = resultFromManifest(result.payload, manifestUrl, input);
-      if (update.asset?.url || !update.updateAvailable) return update;
+      if (update.updateAvailable) return update;
     } catch {
       continue;
     }
   }
+  // A stale mirror must not mask the authoritative GitHub release check.
   return null;
 }
 
