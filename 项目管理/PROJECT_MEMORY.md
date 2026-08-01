@@ -7,9 +7,10 @@
 - 明细表打印格式此前仍写入固定 `scale=100`、`fitToWidth=0`、`fitToPage=False`，导致 Windows Excel/WPS 不执行“所有列打印在一页”。
 - 现统一写入 `fitToPage=1`、`autoPageBreaks=0`、`fitToWidth=1`、`fitToHeight=0` 并清除 `scale`；页高不限，长表自然纵向分页。
 - 申报表与明细表的打印页设置回读测试均通过；不改变明细表数据、公式、空列隐藏和页脚处理规则。
-- v0.14.19 / build `2026080205` 用于从 Windows v0.14.18 实测自动更新和明细表打印预览。
-- `v0.14.19` 已于 2026-08-02 CST 发布到 `zer0-lyz/tianyuan-browser-workbench-releases`；Windows 完整包 SHA-256 为 `feab0b1a2e2dc78086b23dc7d3db37d403c92bf07af5ea4f899c1211a51cdb87`，Lite 包 SHA-256 为 `f0864336143836e6a10fe56d7f1823d40ef950ecdce76df507f9451de41ca67e`。
+- v0.14.19 / build `2026080206` 用于从 Windows v0.14.18 实测自动更新和明细表打印预览。
+- `v0.14.19` 已于 2026-08-02 CST 发布到 `zer0-lyz/tianyuan-browser-workbench-releases`；Windows 完整包 SHA-256 为 `ad6314eb00a3bf169b1efbec1232b148632fcfce9665650d8d1b48cca07eb8ff`，Lite 包 SHA-256 为 `d7afef6de5785fb7de7d7c87e174d33fcef4fe077023b81371ae59a731bfc25a`。
 - 发布更新清单指向完整 Windows 包；Windows v0.14.18 可直接通过“更新全部组件”发现 v0.14.19。
+- 更新源已改为 GitHub Release 清单首选；即使旧镜像返回较低版本，也会继续检查 GitHub，不再被镜像遮蔽。
 
 ## 2026-08-02 Windows 自动更新事务边界
 
