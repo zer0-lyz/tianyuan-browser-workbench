@@ -39,6 +39,7 @@ $UpdateStatusPath = [string]$env:TIANYUAN_UPDATE_STATUS_PATH
 $AgentMode = $Agent.IsPresent -or $env:TIANYUAN_AGENT_MODE -eq "1"
 $Warnings = New-Object System.Collections.Generic.List[string]
 $ManualActions = New-Object System.Collections.Generic.List[string]
+$StoppedProcessIds = New-Object System.Collections.Generic.List[int]
 $BrowserExe = $null
 $TycpvProbeFailure = ""
 
@@ -57,11 +58,13 @@ function Write-UpdateStatus(
     phase = $Phase
     percent = $Percent
     message = $Message
+    reason = if ($Reason) { Protect-Message $Reason } else { "" }
+    exitCode = if ($env:TIANYUAN_UPDATE_EXIT_CODE) { [int]$env:TIANYUAN_UPDATE_EXIT_CODE } else { 0 }
+    installerPid = if ($env:TIANYUAN_UPDATE_INSTALLER_PID) { [int]$env:TIANYUAN_UPDATE_INSTALLER_PID } else { $null }
+    stoppedProcessIds = @($StoppedProcessIds | Sort-Object -Unique)
+    logPath = [string]$env:TIANYUAN_UPDATE_LOG_PATH
     updatedAt = [DateTime]::UtcNow.ToString("o")
     security = @{ credentialsReturned = $false; tokenUsed = $false }
-  }
-  if ($Reason) {
-    $Payload.reason = Protect-Message $Reason
   }
   New-Item -ItemType Directory -Path (Split-Path -Parent $UpdateStatusPath) -Force | Out-Null
   [IO.File]::WriteAllText(
@@ -169,41 +172,95 @@ function Restore-PreviousDirectory([string]$Destination, [string]$Backup) {
 }
 
 function Stop-ExistingConnector {
-  try {
-    $Health = Invoke-RestMethod -Uri "http://127.0.0.1:40415/health" -TimeoutSec 2
+  $Health = $null
+  try { $Health = Invoke-RestMethod -Uri "http://127.0.0.1:40415/health" -TimeoutSec 2 } catch {}
+  if ($Health -and $Health.ok -and $Health.service -ne "tianyuan-connector-bridge") {
+    throw "CONNECTOR_PORT_OCCUPIED_BY_OTHER_SERVICE: 端口 40415 被其他程序占用，不能安全升级 Connector。"
   }
-  catch {
-    return
-  }
-  if (-not $Health.ok) {
-    return
-  }
-  if ($Health.service -ne "tianyuan-connector-bridge") {
-    throw "端口 40415 被其他程序占用，不能安全升级 Connector。"
-  }
-  if ($Health.pid) {
-    Stop-Process -Id ([int]$Health.pid) -Force -ErrorAction SilentlyContinue
-  } else {
-    $ListenerLine = netstat.exe -ano -p tcp |
-      Select-String -Pattern "127\.0\.0\.1:40415\s+\S+\s+LISTENING\s+(\d+)" |
-      Select-Object -First 1
-    if ($ListenerLine -and $ListenerLine.Matches[0].Groups[1].Value) {
-      Stop-Process -Id ([int]$ListenerLine.Matches[0].Groups[1].Value) -Force -ErrorAction SilentlyContinue
+  for ($Attempt = 1; $Attempt -le 3; $Attempt += 1) {
+    $Pids = New-Object System.Collections.Generic.List[int]
+    if ($Health -and $Health.ok -and $Health.pid) {
+      $Pids.Add([int]$Health.pid)
     }
-  }
-  for ($Attempt = 0; $Attempt -lt 30; $Attempt += 1) {
-    Start-Sleep -Milliseconds 100
-    try {
-      $StillRunning = Invoke-RestMethod -Uri "http://127.0.0.1:40415/health" -TimeoutSec 1
-      if (-not $StillRunning.ok) {
-        return
+    if ($Health -and $Health.ok -and $Health.service -eq "tianyuan-connector-bridge") {
+      try {
+        $ListenerLine = netstat.exe -ano -p tcp |
+          Select-String -Pattern "127\.0\.0\.1:40415\s+\S+\s+LISTENING\s+(\d+)" |
+          Select-Object -First 1
+        if ($ListenerLine -and $ListenerLine.Matches[0].Groups[1].Value) {
+          $Pids.Add([int]$ListenerLine.Matches[0].Groups[1].Value)
+        }
+      } catch {}
+    }
+    foreach ($OwnedPid in Get-WorkbenchOwnedProcessIds) { $Pids.Add([int]$OwnedPid) }
+    foreach ($ProcessId in @($Pids | Sort-Object -Unique)) {
+      if ($ProcessId -gt 0 -and $ProcessId -ne $PID) {
+        try {
+          & taskkill.exe /PID $ProcessId /T /F *> $null
+          $StoppedProcessIds.Add([int]$ProcessId)
+        } catch {}
       }
     }
-    catch {
-      return
-    }
+    Start-Sleep -Milliseconds (250 * $Attempt)
+    $Health = $null
+    try { $Health = Invoke-RestMethod -Uri "http://127.0.0.1:40415/health" -TimeoutSec 1 } catch {}
+    $Remaining = @(Get-WorkbenchOwnedProcessIds)
+    if ((-not $Health -or -not $Health.ok) -and $Remaining.Count -eq 0) { return }
+    Write-UpdateStatus "waiting_for_file_release" (78 + ($Attempt * 2)) "正在等待工作台文件释放（第 $Attempt/3 次）"
   }
-  throw "旧 Connector 未能在升级前停止。"
+  throw "UPDATE_FILE_LOCKED: 工作台 Connector 或 Native Helper 进程未能完全退出。"
+}
+
+function Get-WorkbenchOwnedProcessIds {
+  $Roots = @($NativeHelperDir, $InstallRoot) |
+    Where-Object { $_ } |
+    ForEach-Object { [IO.Path]::GetFullPath($_).TrimEnd('\') }
+  try {
+    return @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+      Where-Object { $_.ProcessId -ne $PID -and $_.Name -in @('native_host.exe', 'node.exe') } |
+      ForEach-Object {
+        $ExecutablePath = [string]$_.ExecutablePath
+        $CommandLine = [string]$_.CommandLine
+        $Owned = @($Roots | Where-Object {
+          ($ExecutablePath -and $ExecutablePath.StartsWith($_ + '\', [StringComparison]::OrdinalIgnoreCase)) -or
+          ($CommandLine -and $CommandLine.IndexOf($_, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+        }).Count -gt 0
+        if ($Owned) { [int]$_.ProcessId }
+      } | Sort-Object -Unique)
+  } catch {
+    return @()
+  }
+}
+
+function Test-WorkbenchFileUnlocked([string]$TargetPath) {
+  if (-not (Test-Path -LiteralPath $TargetPath -PathType Leaf)) { return $true }
+  $Stream = $null
+  try {
+    $Stream = [IO.File]::Open($TargetPath, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    return $true
+  } catch {
+    return $false
+  } finally {
+    if ($Stream) { $Stream.Dispose() }
+  }
+}
+
+function Wait-WorkbenchFileRelease {
+  $Candidates = @(
+    (Join-Path $NativeHelperDir "native_host.exe"),
+    (Join-Path $NativeHelperDir "node\node.exe"),
+    (Join-Path $NativeHelperDir "native_host.js"),
+    (Join-Path $NativeHelperDir "connector_bridge.js"),
+    (Join-Path $NativeHelperDir "update_installer.js")
+  )
+  for ($Attempt = 1; $Attempt -le 3; $Attempt += 1) {
+    $Locked = @($Candidates | Where-Object { -not (Test-WorkbenchFileUnlocked $_) })
+    $OwnedProcesses = @(Get-WorkbenchOwnedProcessIds)
+    if ($Locked.Count -eq 0 -and $OwnedProcesses.Count -eq 0) { return }
+    Write-UpdateStatus "waiting_for_file_release" (78 + ($Attempt * 2)) "正在等待文件释放（第 $Attempt/3 次）"
+    Start-Sleep -Milliseconds (250 * $Attempt)
+  }
+  throw "UPDATE_FILE_LOCKED: 目标 Node 或 Native Helper 文件仍被占用。"
 }
 
 function Get-PackageChecksumIndex {
@@ -709,8 +766,11 @@ try {
     throw "最终 Python 环境或 openpyxl 无法运行。"
   }
 
+  Write-UpdateStatus "stopping_services" 76 "正在停止工作台服务"
+  Stop-ExistingConnector
+  Wait-WorkbenchFileRelease
   Write-Step "5/7 同步扩展、Native Helper、Bridge 和 Connector"
-  Write-UpdateStatus "installing" 88 "正在同步全部工作台组件"
+  Write-UpdateStatus "installing" 82 "正在同步全部工作台组件"
   $NodeForInstall = Resolve-NodeForInstall
   $env:TIANYUAN_PYTHON_BIN = $PythonExe
   $env:TIANYUAN_BUNDLED_NODE_SOURCE = $NodeForInstall
@@ -736,6 +796,12 @@ try {
   if (-not $InstallResult.ok) {
     throw "本机运行组件同步未通过：$InstallJson"
   }
+  if (-not $InstallResult.runtimeCompatibility.runtimeBuildId) {
+    throw "RUNTIME_BUILD_ID_MISSING"
+  }
+  if ([string]$InstallResult.runtimeCompatibility.extensionVersion -ne [string]$PackageVersionConfig.chromeVersion) {
+    throw "RUNTIME_EXTENSION_VERSION_MISMATCH"
+  }
   Unblock-WorkbenchPath $NativeHelperDir
 
   Write-Step "6/7 检查 Native Messaging 和 Agent 插件"
@@ -754,6 +820,13 @@ try {
   }
   if (-not (Test-Path -LiteralPath $InstallResult.codexConnectorCachePath)) {
     throw "Codex Connector 缓存没有安装成功。"
+  }
+  $InstalledVersionConfig = Get-Content -LiteralPath (Join-Path $ExtensionDir "version.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+  if (
+    [string]$InstalledVersionConfig.productVersion -ne [string]$PackageVersionConfig.productVersion -or
+    [string]$InstalledVersionConfig.buildNumber -ne [string]$PackageVersionConfig.buildNumber
+  ) {
+    throw "INSTALLED_VERSION_METADATA_MISMATCH"
   }
 
   Write-Step "7/7 执行环境检查"

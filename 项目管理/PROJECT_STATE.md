@@ -1,5 +1,34 @@
 # 天源浏览器工作台项目状态
 
+## 2026-08-02 Windows 明细表一页宽修复 v0.14.19（待 Windows 实机验收）
+
+- 明细表打印脚本已改为 `fitToPage=1`、`autoPageBreaks=0`、`fitToWidth=1`、`fitToHeight=0`，清除固定缩放比例，解决 Windows 打印设置仍显示“无打印缩放”的问题。
+- 申报表和明细表 OOXML 回读均通过；全量自动测试 21 项通过。
+- 版本：`0.14.19`，构建号 `2026080205`；待提交并发布 GitHub Release，供 Windows `0.14.18` 测试更新。
+- Windows 完整包和 Lite 包将在提交后重新构建，以写入干净的源码提交指纹。
+
+## 2026-08-02 Windows 自动更新卡 82% 修复 v0.14.18（待 Windows 实机验收）
+
+- 根因已确认：旧 Native Host 未退出，Connector/Node 仍占用 `native_host.exe` 或 `native-helper\\node\\node.exe`；更新脚本只等待 5 秒且启动后没有真实完成/失败回写，最终表现为 `installing / 82%`。
+- 已修复：更新请求返回后 Native Host 主动退出；Windows runner 使用 Stop 模式、等待父 Host 退出、捕获安装器退出码、写入安装器 PID/日志/状态，并验证最终状态必须为 `complete`。
+- Windows 安装前只停止天源自己的 Connector、Native Host 和 managed Node；第三方端口占用返回 `CONNECTOR_PORT_OCCUPIED_BY_OTHER_SERVICE`，目标文件仍占用返回 `UPDATE_FILE_LOCKED`，最多重试 3 次。
+- 新增状态阶段：`preparing`、`stopping_services`、`waiting_for_file_release`、`installing`、`failed`；状态超过 20 分钟自动转为 `WORKBENCH_UPDATE_TIMEOUT`，不再永久停留在安装中。
+- 本机运行同步增加 Native Helper 关键文件回滚备份；版本、构建号、runtimeBuildId、Native Messaging、Python/openpyxl、Connector health 均在安装阶段验收。
+- 版本：`0.14.18`，构建号 `2026080204`；源码当前只在本地修改，暂未推送 GitHub。
+- Windows 完整包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.18-windows-x64-20260802.zip`，SHA-256：`251dec874764fe9222bc0d04c252144918d7ef5790ed2f9ed73b20e417d3f0d3`。
+- Windows lite 包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.18-windows-x64-lite-20260802.zip`，SHA-256：`0a567414558d408c1b2747f574b41a9e65b4afa4e47854f7a929ac074060f6fa`。
+- 包内回读通过：完整包 369 个条目并含 Node/Python/native_host.exe；lite 包 94 个条目且不含 Node/Python/CLI/native_host.exe；两包版本、构建号和 runtimeBuildId 一致。
+- Mac 静态与全量回归通过；Windows 实际安装、Connector 停止/恢复、Node 文件占用和 Chrome 重载仍需用户在 Windows 机器上实测。
+
+## 2026-08-02 v0.14.16 更新源修复包
+
+- 针对 Windows `v0.14.16` 仍读取旧 Gitee 清单的问题，生成同版本更新源修复包；不回退主分支 `v0.14.17`。
+- 已有安装环境建议使用轻量修复包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.16-windows-x64-lite-update-source-repair-20260802.zip`。
+- 轻量修复包 SHA-256：`29eed572dff665ad9f36890d4f2f0a100580ec6853607b6659d3504a037b5f5c`。
+- 全量修复包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.16-windows-x64-update-source-repair-20260802.zip`。
+- 全量修复包 SHA-256：`e86ab777b282cd287b6c4eab71ec9c5756dbb1b02d0d5fb21709c339ab1e5872`。
+- 修复内容仅为 `native-helper/update-sources.json`，改为读取 GitHub `v0.14.17/update-manifest.json`；包内 307/61 项校验全部通过。
+
 ## 2026-08-02 CLI 动态授权链路修复 v0.14.17
 
 - 修复 `extension/src/sidepanel/sidepanel.js`：授权 CLI 现在等待 Native Helper 捕获 `tycpv login` 输出中的动态 `authorizationUrl`，再打开或复用唯一授权标签页。

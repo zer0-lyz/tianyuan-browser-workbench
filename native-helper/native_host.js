@@ -220,6 +220,19 @@ function writeMessage(payload) {
   process.stdout.write(Buffer.concat([header, body]));
 }
 
+function scheduleUpdateHostShutdown(message, payload) {
+  if (
+    message?.action !== "install_workbench_update"
+    || !payload?.ok
+    || payload?.shutdownRequired !== true
+  ) {
+    return;
+  }
+  // The detached installer waits for this process to exit before replacing
+  // native_host.exe and the managed Node runtime on Windows.
+  setTimeout(() => process.exit(0), 250);
+}
+
 function writeCliLoginStatus(status) {
   const payload = {
     action: "cli_login_status",
@@ -2618,11 +2631,16 @@ if (process.argv.includes("--connector-bridge")) {
       return;
     }
     handle(message)
-      .then((payload) => writeMessage(payload))
-      .catch((error) => writeMessage({
-        ok: false,
-        reason: error?.message || String(error),
-        security: { credentialsReturned: false },
-      }));
+      .then((payload) => {
+        writeMessage(payload);
+        scheduleUpdateHostShutdown(message, payload);
+      })
+      .catch((error) => {
+        writeMessage({
+          ok: false,
+          reason: error?.message || String(error),
+          security: { credentialsReturned: false },
+        });
+      });
   });
 }

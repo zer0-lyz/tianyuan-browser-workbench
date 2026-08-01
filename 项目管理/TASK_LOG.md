@@ -1,5 +1,25 @@
 # 天源浏览器工作台任务日志
 
+## 2026-08-02 Windows 自动更新卡 82% 修复 v0.14.18
+
+- 任务目标：修复 Windows 从 `v0.14.16`/`v0.14.17` 更新时下载解压成功、安装阶段卡在 82%，实际版本不变的问题。
+- 主要修改：`native-helper/update_installer.js`、`native-helper/native_host.js`、`native-helper/platform/windows.js`、`release/windows-x64/install.ps1`、`scripts/install-local-runtime.mjs`、`extension/src/modules/updates/module.js`。
+- 流程改为：更新器准备 -> Native Host 回传并退出 -> runner 等待父进程退出 -> 停止天源 Connector/Helper/Node -> 等待文件释放 -> 安装 -> 版本/构建/runtimeBuildId/Connector 验证 -> 重启服务并回写完成；失败保留旧版本并回写明确错误。
+- 测试新增：`tests/windows-update-runner.test.cjs`，覆盖动态 runner 的 Stop 模式、父进程超时、状态字段、安装器退出和完成状态门禁。
+- 全量回归：`node --test tests/*.cjs tests/*.mjs`，21 项通过；另完成完整包/lite 包结构、包内校验、SHA-256 和运行指纹回读。
+- 完整包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.18-windows-x64-20260802.zip`，SHA-256：`251dec874764fe9222bc0d04c252144918d7ef5790ed2f9ed73b20e417d3f0d3`。
+- lite 包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.18-windows-x64-lite-20260802.zip`，SHA-256：`0a567414558d408c1b2747f574b41a9e65b4afa4e47854f7a929ac074060f6fa`。
+- 本轮未推送 GitHub；下一步由 Windows 实机先验证 v0.14.18，重点观察 `UPDATE_FILE_LOCKED`、安装器日志、旧 Connector 恢复和更新后版本一致性。
+
+## 2026-08-02 v0.14.16 更新源修复包
+
+- 任务目标：让已安装的 Windows `v0.14.16` 能绕过过期 Gitee 清单，检测 GitHub `v0.14.17`。
+- 轻量修复包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.16-windows-x64-lite-update-source-repair-20260802.zip`。
+- 轻量包 SHA-256：`29eed572dff665ad9f36890d4f2f0a100580ec6853607b6659d3504a037b5f5c`。
+- 全量修复包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.16-windows-x64-update-source-repair-20260802.zip`。
+- 全量包 SHA-256：`e86ab777b282cd287b6c4eab71ec9c5756dbb1b02d0d5fb21709c339ab1e5872`。
+- 验证：更新源内容、包外 SHA-256 和包内 `SHA256SUMS` 全部通过；本轮不推送新 GitHub Release。
+
 ## 2026-08-02 CLI 动态授权链路修复 v0.14.17
 
 - 任务目标：修复授权 CLI 打开静态说明页、后台 CLI 输出不可见、spawn 后立即报成功的问题。
@@ -4197,3 +4217,26 @@ v20 已生效，空 `tag:{isClear:true}` 不再干扰当前最终扫描结果。
 
 - 已有完整安装：通过工作台“检查更新/更新全部组件”使用，或由 Windows Agent 在更新模式下执行包内安装程序。
 - 全新 Windows 电脑：不能使用此包，必须使用同版本完整安装包。
+## 2026-08-02 Windows 明细表一页宽修复 v0.14.19
+
+### 任务目标
+
+修复 Windows 端设置明细表打印格式时未落实“所有列打印在一页”的问题，并发布 0.14.19 供从 0.14.18 测试自动更新。
+
+### 执行动作
+
+- 检查明细表 Skill 和 `adjust_appraisal_detail_print.py`，确认旧逻辑写入固定 100% 比例且关闭 fit-to-page。
+- 将明细表与申报表统一为 `fitToPage=1`、`autoPageBreaks=0`、`fitToWidth=1`、`fitToHeight=0`，清除 `scale`。
+- 增加明细表 OOXML 打印页设置回归测试，并更新 Skill 和项目记忆。
+- 版本提升为 `0.14.19`，构建号 `2026080205`。
+
+### 验证结果
+
+- `node --test tests/*.cjs tests/*.mjs`：21 项通过，0 项失败。
+- 申报表和明细表页设置 XML 均回读为一页宽、页高不限、无固定比例。
+- Windows 完整包和 Lite 包 ZIP 解压测试通过，均包含修复后的明细表脚本。
+
+### 待办
+
+- 提交源码并创建 `v0.14.19` GitHub Release。
+- 在 Windows v0.14.18 中点击“更新全部组件”，验证更新过程和明细表 WPS/Excel 打印预览。

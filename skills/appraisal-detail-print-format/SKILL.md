@@ -1,6 +1,6 @@
 ---
 name: appraisal-detail-print-format
-description: "中文备注：明细表打印格式设置；评估明细表打印格式智能调整。Use when Codex needs to format exported appraisal detail Excel workbooks (.xlsx/.xlsm) for clean printing: landscape A4, visible sheets only, hide empty display columns such as 外币账面金额/评估基准日汇率/成新率, preserve formulas/data, set 100% print scale, adjust visible column widths, fix print areas, remove blank-print pages, keep agency/signature footers aligned, and prevent tables from overlapping footers."
+description: "中文备注：明细表打印格式设置；评估明细表打印格式智能调整。Use when Codex needs to format exported appraisal detail Excel workbooks (.xlsx/.xlsm) for clean printing: landscape A4, visible sheets only, hide empty display columns such as 外币账面金额/评估基准日汇率/成新率, preserve formulas/data, fit all visible columns to one page wide, adjust visible column widths, fix print areas, remove blank-print pages, keep agency/signature footers aligned, and prevent tables from overlapping footers."
 ---
 
 # 评估明细表打印格式
@@ -21,7 +21,7 @@ The script:
 
 - creates a timestamped backup beside the workbook;
 - processes visible sheets only and leaves hidden sheets hidden;
-- sets A4 landscape, 100% scale, no fit-to-page scaling;
+- sets A4 landscape and fits all visible columns to one page wide while allowing multiple pages vertically;
 - hides columns that are display-empty in detail rows, including `外币账面金额`;
 - hides `评估基准日汇率` when all detail-row currencies are RMB;
 - hides `成新率` / `成新率%` only when detail rows are empty or zero;
@@ -37,7 +37,7 @@ The script:
 ## Page Setup Rules
 
 - 页面设置使用 A4 横向打印。
-- 明细表保持 `100%` 打印比例，不使用 `fitToWidth/fitToHeight` 缩放；通过隐藏空列和调整可见列宽来减少两侧空白。
+- 明细表使用 `fitToPage=1`、`autoPageBreaks=0`、`fitToWidth=1`、`fitToHeight=0`，确保 Windows Excel/WPS 将所有可见列打印在一页宽度内，页高允许自然分页；同时通过隐藏空列和调整可见列宽改善版面。
 - 左右页边距保持一致，默认 `0.45` inch，并设置水平居中，使表格两侧视觉对齐。
 - 顶部、底部、页眉、页脚边距分别默认 `0.30`、`0.60`、`0.12`、`0.30` inch。
 - 计算页面高度时按 A4 横向、上下页边距、WPS 打印预览安全区动态判断，不再使用固定高度。

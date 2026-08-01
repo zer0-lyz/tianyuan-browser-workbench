@@ -10,6 +10,7 @@ const { Readable } = require("node:stream");
 const DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000;
 const DOWNLOAD_ATTEMPTS = 3;
 const DOWNLOAD_RETRY_DELAY_MS = 750;
+const MAX_INSTALL_STATUS_AGE_MS = 20 * 60 * 1000;
 const ALLOWED_DOWNLOAD_HOSTS = new Set([
   "api.github.com",
   "github.com",
@@ -27,6 +28,7 @@ function safeReason(error) {
   return String(error?.message || error || "WORKBENCH_UPDATE_FAILED")
     .replace(/bearer\s+\S+/gi, "Bearer [REDACTED]")
     .replace(/zhmcp_[A-Za-z0-9._-]+/gi, "[REDACTED]")
+    .replace(/(authorization|cookie|password|验证码|token)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]")
     .slice(0, 500);
 }
 
@@ -220,6 +222,7 @@ function createWorkbenchUpdater({
   }
   const statusPath = path.join(runtimeDirectory, "workbench-update-status.json");
   const logPath = path.join(runtimeDirectory, "workbench-update.log");
+  let installBusy = false;
 
   function status(payload) {
     const next = {
@@ -398,6 +401,17 @@ function createWorkbenchUpdater({
 
   async function install(input = {}) {
     const updateId = `update-${Date.now()}-${randomBytes(4).toString("hex")}`;
+    if (installBusy) {
+      return {
+        ok: false,
+        action: "install_workbench_update",
+        updateId,
+        phase: "failed",
+        reason: "UPDATE_ALREADY_RUNNING",
+        security: security(),
+      };
+    }
+    installBusy = true;
     try {
       status({ updateId, phase: "checking", percent: 5, message: "正在检查官方更新" });
       const update = await updateChecker.checkGithubUpdate({
@@ -455,10 +469,10 @@ function createWorkbenchUpdater({
 
       status({
         updateId,
-        phase: "installing",
-        percent: 82,
+        phase: "preparing",
+        percent: 74,
         latestVersion: update.latestVersion,
-        message: "安装程序已启动，正在同步全部组件",
+        message: "正在准备停止工作台服务",
       });
       const launch = platformAdapter.launchWorkbenchInstaller({
         installerPath,
@@ -466,15 +480,29 @@ function createWorkbenchUpdater({
         logPath,
         parentPid: process.pid,
       });
+      if (!launch || !Number.isInteger(Number(launch.pid)) || Number(launch.pid) <= 0) {
+        throw new Error("UPDATE_INSTALLER_NOT_STARTED");
+      }
+      status({
+        updateId,
+        phase: "stopping_services",
+        percent: 76,
+        latestVersion: update.latestVersion,
+        installerPid: Number(launch.pid),
+        logPath,
+        message: "更新程序已启动，正在停止工作台服务",
+      });
       return {
         ok: true,
         action: "install_workbench_update",
         updateId,
-        phase: "installing",
-        percent: 82,
+        phase: "stopping_services",
+        percent: 76,
         latestVersion: update.latestVersion,
         installerStarted: true,
         installerPid: launch.pid || null,
+        logPath,
+        shutdownRequired: true,
         security: security(),
       };
     } catch (error) {
@@ -488,11 +516,13 @@ function createWorkbenchUpdater({
         reason,
         security: security(),
       };
+    } finally {
+      installBusy = false;
     }
   }
 
   function getStatus() {
-    return readJson(statusPath, {
+    const current = readJson(statusPath, {
       ok: true,
       action: "get_workbench_update_status",
       phase: "idle",
@@ -500,6 +530,36 @@ function createWorkbenchUpdater({
       updatedAt: null,
       security: security(),
     });
+    const activePhases = new Set([
+      "checking",
+      "downloading",
+      "verifying",
+      "extracting",
+      "preparing",
+      "stopping_services",
+      "waiting_for_file_release",
+      "installing",
+      "verifying_install",
+      "restarting_services",
+      "rollback",
+    ]);
+    const updatedAt = Date.parse(current?.updatedAt || "");
+    if (
+      activePhases.has(String(current?.phase || ""))
+      && Number.isFinite(updatedAt)
+      && Date.now() - updatedAt > MAX_INSTALL_STATUS_AGE_MS
+    ) {
+      const stale = status({
+        ...current,
+        ok: false,
+        phase: "failed",
+        percent: Number(current.percent || 0),
+        reason: "WORKBENCH_UPDATE_TIMEOUT",
+        message: "更新状态超过最大等待时间，已停止报告安装中",
+      });
+      return stale;
+    }
+    return current;
   }
 
   return { install, test, getStatus, statusPath };
