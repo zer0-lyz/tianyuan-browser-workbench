@@ -9,6 +9,7 @@
 - 完整包 SHA-256：`49f41c4d409d6c0a821d3b91bd1caea7e1fcd038d433bb052a10bf7df4f693e6`；Lite 包 SHA-256：`6050258b61038d830ec5df45b6f42f924be58383381dba3ee3cc8cb20d7e3756`。
 - 更新器已将 GitHub Release 清单置于首选，并增加“镜像无新版本时继续检查 GitHub”的回归测试。
 - 更新清单改用 `releases/latest/download/update-manifest.json`，后续版本不需要再次修改更新源地址。
+- 已额外生成一次性修复工具：`/Users/zer0y/Downloads/tianyuan-workbench-repair-update-source.cmd`；用于已安装 0.14.18 的旧更新器切换到 GitHub 清单。
 
 ## 2026-08-02 Windows 自动更新卡 82% 修复 v0.14.18（待 Windows 实机验收）
 
