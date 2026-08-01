@@ -1,11 +1,12 @@
 # 天源浏览器工作台项目状态
 
-## 2026-08-02 Windows 明细表一页宽修复 v0.14.19（待 Windows 实机验收）
+## 2026-08-02 Windows 明细表一页宽修复 v0.14.19（已发布，待 Windows 实机验收）
 
 - 明细表打印脚本已改为 `fitToPage=1`、`autoPageBreaks=0`、`fitToWidth=1`、`fitToHeight=0`，清除固定缩放比例，解决 Windows 打印设置仍显示“无打印缩放”的问题。
 - 申报表和明细表 OOXML 回读均通过；全量自动测试 21 项通过。
-- 版本：`0.14.19`，构建号 `2026080205`；待提交并发布 GitHub Release，供 Windows `0.14.18` 测试更新。
-- Windows 完整包和 Lite 包将在提交后重新构建，以写入干净的源码提交指纹。
+- 版本：`0.14.19`，构建号 `2026080205`；GitHub Release 已发布，供 Windows `0.14.18` 测试更新。
+- GitHub Release：`https://github.com/zer0-lyz/tianyuan-browser-workbench-releases/releases/tag/v0.14.19`。
+- 完整包 SHA-256：`feab0b1a2e2dc78086b23dc7d3db37d403c92bf07af5ea4f899c1211a51cdb87`；Lite 包 SHA-256：`f0864336143836e6a10fe56d7f1823d40ef950ecdce76df507f9451de41ca67e`。
 
 ## 2026-08-02 Windows 自动更新卡 82% 修复 v0.14.18（待 Windows 实机验收）
 
