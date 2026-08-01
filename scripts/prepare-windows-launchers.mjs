@@ -30,7 +30,33 @@ function writeBomUtf8Text(sourceName, outputNames) {
   }
 }
 
-function writeAsciiCmd(outputNames, powerShellName, successText, failureText) {
+function writeInstallCmd(outputNames, powerShellName, successText, failureText) {
+  const lines = [
+    "@echo off",
+    "setlocal",
+    "set \"SCRIPT_DIR=%~dp0\"",
+    "set \"AGENT_MODE=0\"",
+    "if /I \"%~1\"==\"/Agent\" set \"AGENT_MODE=1\"",
+    "if /I \"%TIANYUAN_AGENT_MODE%\"==\"1\" set \"AGENT_MODE=1\"",
+    "if \"%AGENT_MODE%\"==\"1\" (",
+    `  set \"TIANYUAN_AGENT_MODE=1\"`,
+    `  powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"%SCRIPT_DIR%${powerShellName}\" -Agent`,
+    ") else (",
+    `  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File \"%SCRIPT_DIR%${powerShellName}\"`,
+    ")",
+    "set \"EXIT_CODE=%ERRORLEVEL%\"",
+    "echo.",
+    `if \"%EXIT_CODE%\"==\"0\" echo ${successText}`,
+    `if not \"%EXIT_CODE%\"==\"0\" echo ${failureText}`,
+    "if \"%AGENT_MODE%\"==\"0\" pause",
+    "exit /b %EXIT_CODE%",
+    "",
+  ];
+  const payload = Buffer.from(lines.join("\r\n"), "ascii");
+  for (const outputName of outputNames) fs.writeFileSync(path.join(stageDir, outputName), payload);
+}
+
+function writeUninstallCmd(outputName, powerShellName, successText, failureText) {
   const lines = [
     "@echo off",
     "setlocal",
@@ -44,10 +70,20 @@ function writeAsciiCmd(outputNames, powerShellName, successText, failureText) {
     "exit /b %EXIT_CODE%",
     "",
   ];
-  const payload = Buffer.from(lines.join("\r\n"), "ascii");
-  for (const outputName of outputNames) {
-    fs.writeFileSync(path.join(stageDir, outputName), payload);
-  }
+  fs.writeFileSync(path.join(stageDir, outputName), Buffer.from(lines.join("\r\n"), "ascii"));
+}
+
+function writeAgentCmd(outputName, powerShellName) {
+  const lines = [
+    "@echo off",
+    "setlocal",
+    "set \"SCRIPT_DIR=%~dp0\"",
+    "set \"TIANYUAN_AGENT_MODE=1\"",
+    `powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"%SCRIPT_DIR%${powerShellName}\" -Agent`,
+    "exit /b %ERRORLEVEL%",
+    "",
+  ];
+  fs.writeFileSync(path.join(stageDir, outputName), Buffer.from(lines.join("\r\n"), "ascii"));
 }
 
 fs.mkdirSync(stageDir, { recursive: true });
@@ -55,14 +91,15 @@ writeBomPowerShell("install.ps1", ["install.ps1", "安装.ps1"]);
 writeBomPowerShell("uninstall.ps1", ["uninstall.ps1"]);
 writeBomUtf8Text("安装使用说明.md", ["INSTALL_README.md"]);
 writeBomUtf8Text("交给Agent安装.md", ["START_WITH_AGENT.txt", "AGENT_INSTALL_PROMPT.md"]);
-writeAsciiCmd(
+writeInstallCmd(
   ["install.cmd"],
   "install.ps1",
   "Installation completed.",
   "Installation failed. See the PowerShell window and installation report.",
 );
-writeAsciiCmd(
-  ["uninstall.cmd"],
+writeAgentCmd("install-agent.cmd", "install.ps1");
+writeUninstallCmd(
+  "uninstall.cmd",
   "uninstall.ps1",
   "Uninstallation completed.",
   "Uninstallation failed. See the PowerShell window for details.",

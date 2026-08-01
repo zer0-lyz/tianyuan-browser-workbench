@@ -2,6 +2,15 @@
 
 更新时间：2026-07-28 CST
 
+## 2026-08-02 CLI 动态授权流程边界
+
+- `tycpv login` 才是 CLI 授权入口；`https://mcp.zhrdc.net/connect?source=valuation&tab=cli` 只是静态说明页，不能作为实际授权地址。
+- Native Helper 必须捕获 CLI stdout/stderr 中的动态 `/connect` URL，校验主机为 `mcp.zhrdc.net` 且不是静态地址，再传给扩展打开或复用。
+- 授权状态必须区分申请授权、等待用户授权、已打开授权页、成功、失败和超时；`spawn()` 成功不等于授权成功。
+- CLI 授权过程允许返回临时动态 URL，但不得读取、记录或输出 token、Cookie、Authorization、密码、验证码或完整敏感凭据。
+- `cli_login_status` 只返回非敏感状态、会话标识、错误码和授权是否完成；CLI 不存在、执行阻止、回调端口冲突、非零退出和超时都必须可读地反馈。
+- 连接配置页必须保留动态 URL 复制入口，避免系统自动打开标签页失败时用户无法继续。
+
 ## 2026-07-28 v0.14.8 Windows ZIP 文件名编码修复
 
 - 工作台版本升级为 `0.14.8`，构建编号 `2026072809`；Connector 保持 `0.4.2`。
@@ -140,6 +149,45 @@
 - 两个平台包构建编号为 `2026072701`，包内构建日期为 `20260727`，通道为 `stable`。
 - 共同运行指纹为 `d2691fc4ad6c2009664e0cefbadbc6cd38a8746c4289c5b79fd33458f06bc4ae`。
 - 公开发行仓库已创建正式 `v0.12.2` Release。
+
+## 2026-07-28 v0.14.9 GitHub 最新版同步
+
+- 2026-07-28 已从 GitHub 私有源码仓库 `zer0-lyz/tianyuan-browser-workbench` 同步到 `main` 最新提交 `99fcfa29cdb1b852510ea2fc9fc892626054c741`。
+- 本地原提交为 `8cc51043e8d0d64182874e4d0f6adb5b111c8baf`，远端领先 25 个提交；普通 Git HTTPS 传输连接 `github.com:443` 超时，本次通过 GitHub API 下载提交快照、校验 Git tree 哈希、补齐提交对象后快进到远端 `main`。
+- 当前产品版本为 `0.14.9`，构建编号 `2026072810`，通道为 `stable`。
+- 本机运行目录已同步：`~/.tianyuan-workbench/projects/天源评估系统/extension`。
+- Native Helper 运行目录已同步：`~/.tianyuan-workbench/native-helper`。
+- Connector 插件已同步：`~/plugins/tianyuan-browser-connector` 和 Codex 缓存 `~/.codex/plugins/cache/personal/tianyuan-browser-connector/0.4.2`。
+- 当前运行兼容指纹为 `468c82cd2104f9522fb9edab6c9c000cf717a52cedc8780b8657cc6b9b8185d8`，协议仍为 `connector-agent-binding-v3`。
+- 公开发行仓库最新版为 `https://github.com/zer0-lyz/tianyuan-browser-workbench-releases/releases/tag/v0.14.9`，发布时间为 `2026-07-28T10:38:49Z`。
+- `v0.14.9` 重点新增 Gitee 国内静态更新源、轻量更新包、更新模块自测、Windows 安装/更新乱码和路径兼容修复、CLI 降级提示、反馈服务在线提交。
+- 本地未跟踪目录 `天源 cli 安装文件/` 为用户资料目录，未纳入同步、未删除、未覆盖、未提交。
+
+## 2026-07-28 v0.14.11 更新按钮不可用原因
+
+- `0.14.9` 可通过 Native Helper 从 Gitee 静态清单发现 `0.14.11`，但侧栏前端 `safeGithubUrl` 只允许 `github.com`，会把 Gitee 镜像安装包 URL 过滤为空。
+- 因此前端显示“发现新版本”，同时提示“未找到当前平台安装包”，并禁用“测试更新模块”和“更新全部组件”。
+- `0.14.11` 源码已将前端安全 URL 白名单扩展为 `github.com`、`api.github.com`、`objects.githubusercontent.com`、`release-assets.githubusercontent.com`、`gitee.com` 和 `raw.giteeusercontent.com`。
+- 本机已同步并安装到 `0.14.11`，运行兼容指纹为 `1d577f005c3f39a73e59ce4bdbba0efdaca5e713bd1b3f79ff0aa0554bfac6f5`。
+- 安装后更新检查回读：当前版本 `0.14.11`、最新版本 `0.14.11`、`updateAvailable=false`。
+
+## 2026-07-29 v0.14.13 macOS 轻量更新修复
+
+- `0.14.12` macOS 轻量更新失败根因：发布包 `release/macos-arm64/安装.command` 在更新模式只接受 `/Library/Frameworks/Python.framework/Versions/3.14/bin/python3`，未复用本机已有 `/usr/bin/python3`。
+- 本机 `/usr/bin/python3` 实际可导入 `openpyxl 3.1.5` 和 `et_xmlfile`，因此“本机缺少 Python”属于安装器误判。
+- `0.14.13` 修复规则：macOS 安装器先检测可用 Python，候选包括虚拟环境、Python.framework、Homebrew、系统 Python 和 PATH 中的 `python3/python`；只要可导入 `openpyxl>=3.1.5` 与 `et_xmlfile`，更新模式直接复用。
+- 修复版导出 `TIANYUAN_PYTHON_BIN` 为实际选中的 Python，避免后续打印格式脚本仍绑定固定 venv 路径。
+- 本机运行副本已安装为 `0.14.13`，构建编号 `2026072901`，运行兼容指纹 `99106db7100efe4e33b63fb0e82694b902d280abdf88e119e52f2daaf28bf493`。
+- 本机更新状态已清为完成：`workbench-update-status.json` 显示 `phase=complete`、`percent=100`。
+- 当前公开最新版仍为 `0.14.12`；本机 `0.14.13` 是未发布修复版，确认稳定后再发布正式 Release。
+
+## 2026-07-29 v0.14.14 Windows 新用户一键安装修复
+
+- Windows 新用户首次安装截图显示 CLI 和 Python 均已通过，失败发生在第 5 步同步组件后执行 `native_host.exe --self-test`：`spawnSync ... native_host.exe EPERM`。
+- 判断根因优先级：安装包经微信、浏览器或压缩包分发后，Windows 可能给包内 exe 添加 `Zone.Identifier` 下载阻止标记；也可能被安全软件或执行策略拦截。安装器此前没有自动解除阻止，也没有给出可读原因。
+- `0.14.14` 修复：Windows `install.ps1` 在安装开始时对解压包目录执行 `Unblock-File` 和删除 `Zone.Identifier`，同步完成后再对 `%LOCALAPPDATA%\TianyuanWorkbench\native-helper` 执行一次。
+- `scripts/install-local-runtime.mjs` 在复制和自检 `native_host.exe` 前也会尝试解除阻止；如仍被系统拒绝，错误转换为 `WINDOWS_NATIVE_HOST_EXECUTION_BLOCKED`，说明可能原因和处理方向。
+- 新用户首次安装必须使用完整包 `tianyuan-workbench-v<version>-windows-x64-<date>.zip`；`windows-x64-lite` 只适合已经安装过完整运行时的用户更新。
 
 ## 2026-07-26 侧栏状态区与工具入口
 
@@ -482,3 +530,23 @@
 - 新模块默认设为 `beta`，显式启用并完成真实测试后才能改为 `stable`。
 - 第一阶段已将“版本更新”迁移为完整独立模块，其余八个功能先通过兼容模块清单接入。
 - 高风险的批量上传和批量清理最后迁移，迁移期间不得改变编辑锁、确认、保存和回读规则。
+
+## 2026-07-30 Mac + Windows 双机同步开发规则
+
+- GitHub 是 Mac 与 Windows 唯一代码同步中心；不要用 OneDrive 同步源码、运行目录、依赖或构建缓存。
+- Mac 作为主开发机：负责主要功能开发、模块化改造、macOS 本机运行验证和通用测试。
+- Windows 作为发布验收机：负责 Windows Native Helper、Chrome/Edge Native Messaging、PowerShell 安装、tycpv CLI、Python、路径权限、完整包和轻量包实机验证。
+- 两端本机运行目录保持隔离：macOS 使用 `~/.tianyuan-workbench/`，Windows 使用 `%LOCALAPPDATA%\TianyuanWorkbench\`。
+- 开发新功能建议从 `main` 创建 `codex/feature-*` 分支；Windows 修复建议使用 `codex/windows-fix-*` 分支，验证后再合并回 `main`。
+- 发布前只在一个时间点统一升版本，版本单一来源为 `extension/version.json`，并同步 `extension/manifest.json`、安装包文件名、更新清单和 Release tag。
+- 后续需要补充 Windows 初始化提示词和脚本，目标是一句提示词让 Windows 上的 Codex 自动完成 clone/pull、环境检查、本机安装、Chrome/Edge 加载路径提示、测试和打包验收。
+
+## 2026-08-02 Windows 安装器反馈修复基线
+
+- `v0.14.14` Windows 实机反馈确认：CLI `--version` 探测可能常驻不退出；旧安装器的候选执行和 Agent 入口需要进一步收紧。
+- `v0.14.15` 修复安装器 CLI 查找：只接受已知天源目录中的严格 `tycpv.exe`/`tycpv.cmd`，删除 Program Files 递归搜索，不再执行第三方程序。
+- `v0.14.15` CLI 探测使用隐藏窗口、只读 `--help`、5 秒超时和进程树终止；Native Host Windows 健康检查采用同一探测策略，版本优先从已知 CLI 目录的 package.json 读取。
+- 新增 `install-agent.cmd` 和 `install.cmd /Agent`，Agent 模式不暂停、不自动打开 Explorer/Chrome/Edge，并返回安装器退出码。
+- 新增机器可读报告 `%LOCALAPPDATA%\TianyuanWorkbench\安装检查结果.json`，将组件安装结果与浏览器加载、MCP token、CLI 授权等 `manualActions` 分开。
+- 当前 Windows 测试包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.15-windows-x64-20260802.zip`，SHA-256 为 `b09ad643e0f794a3084a92667589302cfad9f0a084be685ddb43fdf4a963f0fd`。
+- tycpv CLI 本体源码不在当前仓库；因此 `--version` 本身未能直接修改，当前边界是工作台侧安全探测和超时隔离，拿到 CLI 源码后再补 CLI 本体修复。

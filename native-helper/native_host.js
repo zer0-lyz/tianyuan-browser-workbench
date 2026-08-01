@@ -92,6 +92,10 @@ const CONNECTOR_ALLOWED_EXTENSION_ORIGINS = new Set([
 const IS_WINDOWS = platformAdapter.isWindows;
 const RUNTIME_CONFIG_PATH = process.env.TIANYUAN_RUNTIME_CONFIG_PATH
   || path.join(processLauncher.runtimeDirectory(), "runtime-config.json");
+const CLI_LOGIN_STATUS_PATH = path.join(processLauncher.runtimeDirectory(), "cli-login-status.json");
+const CLI_LOGIN_SESSION_TTL_MS = 10 * 60 * 1000;
+const CLI_LOGIN_URL_WAIT_MS = 20 * 1000;
+const CLI_AUTH_HOST = "mcp.zhrdc.net";
 
 function loadRuntimeConfig() {
   try {
@@ -214,6 +218,100 @@ function writeMessage(payload) {
   const header = Buffer.alloc(4);
   header.writeUInt32LE(body.length, 0);
   process.stdout.write(Buffer.concat([header, body]));
+}
+
+function writeCliLoginStatus(status) {
+  const payload = {
+    action: "cli_login_status",
+    updatedAt: new Date().toISOString(),
+    ...status,
+    security: { credentialsReturned: false, tokenUsed: false, secretsWritten: false },
+  };
+  try {
+    fs.mkdirSync(path.dirname(CLI_LOGIN_STATUS_PATH), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(CLI_LOGIN_STATUS_PATH, `${JSON.stringify(payload)}\n`, { mode: 0o600 });
+  } catch {
+    // The authorization response remains useful even if the optional status file cannot be written.
+  }
+  return payload;
+}
+
+function readCliLoginStatus() {
+  try {
+    const payload = JSON.parse(fs.readFileSync(CLI_LOGIN_STATUS_PATH, "utf8"));
+    if (!payload || typeof payload !== "object") return null;
+    const updatedAt = Date.parse(payload.updatedAt || "");
+    if (!Number.isFinite(updatedAt) || Date.now() - updatedAt > CLI_LOGIN_SESSION_TTL_MS) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function readCliAuthState() {
+  const authPath = path.join(os.homedir(), ".tycpv", "auth.json");
+  const tokenPath = path.join(os.homedir(), ".tycpv", "token.secret.json");
+  if (!fs.existsSync(authPath) || !fs.existsSync(tokenPath)) {
+    return { authenticated: false, expiresAt: null };
+  }
+  try {
+    const auth = JSON.parse(fs.readFileSync(authPath, "utf8"));
+    const expiresAt = auth?.expiresAt || null;
+    if (expiresAt && Date.parse(expiresAt) <= Date.now()) {
+      return { authenticated: false, expiresAt };
+    }
+    return { authenticated: true, expiresAt };
+  } catch {
+    return { authenticated: false, expiresAt: null };
+  }
+}
+
+function isProcessAlive(pid) {
+  const value = Number(pid);
+  if (!Number.isInteger(value) || value <= 0) return false;
+  try {
+    process.kill(value, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+function stripAnsi(value) {
+  return String(value || "").replace(/[\u001b\u009b]\[[0-?]*[ -/]*[@-~]/g, "");
+}
+
+function extractCliAuthorizationUrl(output) {
+  const candidates = stripAnsi(output).match(/https?:\/\/[^\s"'<>]+/gi) || [];
+  for (const candidate of candidates) {
+    const cleaned = candidate.replace(/[),.;]+$/, "");
+    try {
+      const url = new URL(cleaned);
+      if (url.hostname !== CLI_AUTH_HOST && !url.hostname.endsWith(`.${CLI_AUTH_HOST}`)) continue;
+      if (url.pathname !== "/connect") continue;
+      const isStaticPage = url.searchParams.get("source") === "valuation"
+        && url.searchParams.get("tab") === "cli"
+        && url.searchParams.size === 2;
+      if (isStaticPage) continue;
+      if (url.searchParams.get("auth") !== "login" && url.searchParams.size < 3) continue;
+      return url.toString();
+    } catch {
+      // Ignore non-URL CLI output.
+    }
+  }
+  return "";
+}
+
+function cliLoginFailureReason({ error, exitCode, output = "" } = {}) {
+  const text = stripAnsi(output).toLowerCase();
+  if (error?.code === "ENOENT") return "TYCPV_NOT_FOUND";
+  if (error?.code === "EACCES" || error?.code === "EPERM") return "TYCPV_EXECUTION_BLOCKED";
+  if (/eaddrinuse|address already in use|listen/i.test(text)) return "CLI_CALLBACK_PORT_UNAVAILABLE";
+  if (/authorization|授权|登录|login|http \d{3}|fetch failed|network/i.test(text)) {
+    return "CLI_AUTHORIZATION_REQUEST_FAILED";
+  }
+  if (exitCode !== undefined && exitCode !== null) return `CLI_LOGIN_EXIT_${exitCode}`;
+  return "CLI_LOGIN_START_FAILED";
 }
 
 function connectorJson(res, statusCode, payload, origin = "*") {
@@ -1186,6 +1284,7 @@ async function startConnectorBridgeAction({ forceRestart = false } = {}) {
 
 function readMessages(onMessage) {
   let buffer = Buffer.alloc(0);
+  process.stdin.on("end", () => process.exit(0));
   process.stdin.on("data", (chunk) => {
     buffer = Buffer.concat([buffer, chunk]);
     while (buffer.length >= 4) {
@@ -1210,11 +1309,34 @@ function withTimeout(promise, ms, timeoutReason) {
   return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeout));
 }
 
+function readCliPackageVersion(candidate) {
+  if (!candidate) return "";
+  const candidateDirectory = path.dirname(candidate);
+  const packageCandidates = [
+    path.join(candidateDirectory, "app", "package.json"),
+    path.join(candidateDirectory, "package.json"),
+    path.join(path.dirname(candidateDirectory), "package.json"),
+  ];
+  for (const packagePath of packageCandidates) {
+    try {
+      const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+      if (packageJson?.version) return String(packageJson.version);
+    } catch {
+      // Try the next known package location without exposing local file contents.
+    }
+  }
+  return "";
+}
+
 function checkCli() {
   return new Promise((resolve) => {
-    const launch = processLauncher.commandLaunchSpec(CLI_BIN, ["--version"]);
+    const auth = readCliAuthState();
+    // Windows tycpv 0.1.0 may keep a Node process alive during --version.
+    // --help is a read-only probe; package.json supplies the version when available.
+    const probeArgs = IS_WINDOWS ? ["--help"] : ["--version"];
+    const launch = processLauncher.commandLaunchSpec(CLI_BIN, probeArgs);
     execFile(launch.command, launch.args, {
-      timeout: 3000,
+      timeout: 5000,
       env: launch.env,
       windowsHide: true,
     }, (error, stdout, stderr) => {
@@ -1222,42 +1344,217 @@ function checkCli() {
         resolve({
           ok: false,
           reason: error.code === "ENOENT" ? "TYCPV_NOT_FOUND" : "TYCPV_VERSION_FAILED",
+          authenticated: auth.authenticated,
+          authExpiresAt: auth.expiresAt,
         });
         return;
       }
       resolve({
         ok: true,
-        version: String(stdout || stderr || "").trim().split(/\r?\n/)[0] || "可用",
+        version: IS_WINDOWS
+          ? (readCliPackageVersion(CLI_BIN) || "可用（--help 探测通过）")
+          : String(stdout || stderr || "").trim().split(/\r?\n/)[0] || "可用",
+        authenticated: auth.authenticated,
+        authExpiresAt: auth.expiresAt,
       });
     });
   });
 }
 
+async function getCliLoginStatus(sessionId = "") {
+  const status = readCliLoginStatus();
+  if (sessionId && status?.sessionId && status.sessionId !== sessionId) {
+    return { ok: false, reason: "CLI_LOGIN_SESSION_NOT_FOUND" };
+  }
+  const auth = readCliAuthState();
+  if (auth.authenticated) {
+    const next = writeCliLoginStatus({
+      ...(status || {}),
+      state: "authenticated",
+      authenticated: true,
+      authExpiresAt: auth.expiresAt,
+    });
+    return { ok: true, ...next };
+  }
+  if (!status) {
+    return { ok: false, state: "idle", reason: "CLI_LOGIN_NOT_STARTED" };
+  }
+  if (["authorization_required", "starting"].includes(status.state) && !isProcessAlive(status.pid)) {
+    const next = writeCliLoginStatus({
+      ...status,
+      state: "failed",
+      reason: "CLI_LOGIN_PROCESS_EXITED",
+      authenticated: false,
+    });
+    return { ok: false, ...next };
+  }
+  return { ok: status.state !== "failed", ...status, authenticated: false };
+}
+
 function startCliLogin() {
-  return new Promise((resolve) => {
-    const launch = processLauncher.commandLaunchSpec(CLI_BIN, ["login"]);
-    const child = spawn(launch.command, launch.args, {
+  const auth = readCliAuthState();
+  if (auth.authenticated) {
+    return Promise.resolve({
+      ok: true,
+      action: "cli_login",
+      state: "authenticated",
+      authenticated: true,
+      authExpiresAt: auth.expiresAt,
+      security: { credentialsReturned: false },
+    });
+  }
+
+  const previous = readCliLoginStatus();
+  if (
+    previous
+    && ["starting", "authorization_required"].includes(previous.state)
+    && isProcessAlive(previous.pid)
+    && previous.authorizationUrl
+  ) {
+    return Promise.resolve({
+      ok: true,
+      action: "cli_login",
+      state: previous.state,
+      sessionId: previous.sessionId,
+      pid: previous.pid,
+      authorizationUrl: previous.authorizationUrl,
+      reused: true,
+      security: { credentialsReturned: false },
+    });
+  }
+
+  if (!CLI_BIN || (!fs.existsSync(CLI_BIN) && /[\\/]/.test(CLI_BIN))) {
+    return Promise.resolve({
+      ok: false,
+      action: "cli_login",
+      reason: "TYCPV_NOT_FOUND",
+      manualCommand: "tycpv login",
+      security: { credentialsReturned: false },
+    });
+  }
+
+  const sessionId = randomUUID();
+  const launch = processLauncher.commandLaunchSpec(CLI_BIN, ["login"]);
+  let child;
+  try {
+    child = spawn(launch.command, launch.args, {
       detached: true,
-      stdio: "ignore",
+      stdio: ["ignore", "pipe", "pipe"],
       env: launch.env,
       windowsHide: true,
     });
+  } catch (error) {
+    return Promise.resolve({
+      ok: false,
+      action: "cli_login",
+      reason: cliLoginFailureReason({ error }),
+      manualCommand: "tycpv login",
+      security: { credentialsReturned: false },
+    });
+  }
 
-    child.on("error", (error) => {
-      resolve({
+  const started = writeCliLoginStatus({
+    sessionId,
+    pid: child.pid,
+    state: "starting",
+    authenticated: false,
+  });
+  let output = "";
+  let settled = false;
+  let timer = null;
+  const appendOutput = (chunk) => {
+    output = `${output}${stripAnsi(chunk)}`.slice(-32 * 1024);
+  };
+  const finish = (callback, value) => {
+    if (settled) return;
+    settled = true;
+    if (timer) clearTimeout(timer);
+    callback(value);
+  };
+
+  return new Promise((resolve) => {
+    const onOutput = (chunk) => {
+      appendOutput(chunk);
+      const authorizationUrl = extractCliAuthorizationUrl(output);
+      if (!authorizationUrl) return;
+      const status = writeCliLoginStatus({
+        ...started,
+        sessionId,
+        pid: child.pid,
+        state: "authorization_required",
+        authorizationUrl,
+        authenticated: false,
+      });
+      finish(resolve, {
+        ok: true,
+        action: "cli_login",
+        state: "authorization_required",
+        sessionId,
+        pid: child.pid,
+        authorizationUrl,
+        security: { credentialsReturned: false },
+        statusUpdatedAt: status.updatedAt,
+      });
+    };
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", onOutput);
+    child.stderr?.on("data", onOutput);
+    child.once("error", (error) => {
+      const reason = cliLoginFailureReason({ error, output });
+      writeCliLoginStatus({ ...started, state: "failed", reason, authenticated: false });
+      finish(resolve, {
         ok: false,
-        reason: error.code === "ENOENT" ? "TYCPV_NOT_FOUND" : (error?.message || String(error)),
+        action: "cli_login",
+        reason,
+        manualCommand: "tycpv login",
         security: { credentialsReturned: false },
       });
     });
-
-    child.unref();
-    resolve({
-      ok: true,
-      action: "cli_login_started",
-      message: "已打开 tycpv 授权流程",
-      security: { credentialsReturned: false },
+    child.once("close", (exitCode) => {
+      const authAfterExit = readCliAuthState();
+      if (authAfterExit.authenticated) {
+        writeCliLoginStatus({
+          ...started,
+          state: "authenticated",
+          authenticated: true,
+          authExpiresAt: authAfterExit.expiresAt,
+        });
+        finish(resolve, {
+          ok: true,
+          action: "cli_login",
+          state: "authenticated",
+          sessionId,
+          authenticated: true,
+          security: { credentialsReturned: false },
+        });
+        return;
+      }
+      const reason = cliLoginFailureReason({ exitCode, output });
+      writeCliLoginStatus({ ...started, state: "failed", reason, authenticated: false });
+      finish(resolve, {
+        ok: false,
+        action: "cli_login",
+        reason,
+        manualCommand: "tycpv login",
+        security: { credentialsReturned: false },
+      });
     });
+    timer = setTimeout(() => {
+      const reason = "CLI_AUTHORIZATION_URL_TIMEOUT";
+      void platformAdapter.terminateProcess(child.pid);
+      writeCliLoginStatus({ ...started, state: "failed", reason, authenticated: false });
+      finish(resolve, {
+        ok: false,
+        action: "cli_login",
+        reason,
+        manualCommand: "tycpv login",
+        security: { credentialsReturned: false },
+      });
+    }, CLI_LOGIN_URL_WAIT_MS);
+    child.unref();
+    child.stdout?._handle?.unref?.();
+    child.stderr?._handle?.unref?.();
   });
 }
 
@@ -2203,6 +2500,9 @@ async function handle(message) {
   }
   if (message?.action === "cli_login") {
     return await startCliLogin();
+  }
+  if (message?.action === "cli_login_status") {
+    return await getCliLoginStatus(String(message.sessionId || ""));
   }
   if (message?.action === "select_export_directory") {
     return await chooseExportDirectory();

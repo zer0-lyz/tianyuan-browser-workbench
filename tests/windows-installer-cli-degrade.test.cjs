@@ -15,8 +15,11 @@ const runtimeInstaller = fs.readFileSync(
 );
 
 assert.equal(installer.includes("function Get-TycpvVersionInfo"), true);
-assert.equal(installer.includes("& $env:ComSpec /d /s /c $CommandLine"), true);
-assert.equal(installer.includes("$VersionInfo = Get-TycpvVersionInfo $ResolvedPath"), true);
+assert.equal(installer.includes("function Invoke-TycpvProbe"), true);
+assert.equal(installer.includes("$VersionInfo = Get-TycpvVersionInfo $ResolvedPath $TrustedDirectories"), true);
+assert.equal(installer.includes("WaitForExit($TimeoutSeconds * 1000)"), true);
+assert.equal(installer.includes("taskkill.exe /PID $Process.Id /T /F"), true);
+assert.equal(installer.includes('Get-TycpvPackageVersion $ResolvedPath'), true);
 assert.equal(installer.includes("天源 CLI 无法运行。"), false);
 assert.equal(installer.includes("天源 CLI 已运行安装程序，但没有找到"), false);
 assert.equal(installer.includes("CLI 修复失败不会阻断工作台其他组件更新"), true);

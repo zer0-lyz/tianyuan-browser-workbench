@@ -1405,6 +1405,24 @@ pre {
   display: none !important;
 }
 
+.cli-authorization-fallback {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.cli-authorization-fallback .external-link {
+  min-width: 0;
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
 @media (min-width: 720px) {
   .diagnostic-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));

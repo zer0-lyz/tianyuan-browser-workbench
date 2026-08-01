@@ -1,3 +1,7 @@
+param(
+  [switch]$Agent
+)
+
 $ErrorActionPreference = "Stop"
 [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
@@ -32,6 +36,11 @@ $PackageVersion = "未知"
 $PackageBuildNumber = "未知"
 $UpdateMode = $env:TIANYUAN_UPDATE_MODE -eq "1"
 $UpdateStatusPath = [string]$env:TIANYUAN_UPDATE_STATUS_PATH
+$AgentMode = $Agent.IsPresent -or $env:TIANYUAN_AGENT_MODE -eq "1"
+$Warnings = New-Object System.Collections.Generic.List[string]
+$ManualActions = New-Object System.Collections.Generic.List[string]
+$BrowserExe = $null
+$TycpvProbeFailure = ""
 
 function Write-UpdateStatus(
   [string]$Phase,
@@ -73,6 +82,29 @@ function Protect-Message([string]$Message) {
     -replace '(?i)(bearer\s+)[^\s"'']+', '$1[REDACTED]' `
     -replace '(?i)zhmcp_[A-Za-z0-9._-]+', '[REDACTED]' `
     -replace '(?i)(token\s*[=:]\s*)[^\s"'']+', '$1[REDACTED]'
+}
+
+function Unblock-WorkbenchPath([string]$Path) {
+  if (-not $Path -or -not (Test-Path -LiteralPath $Path)) {
+    return
+  }
+  try {
+    if ((Get-Command Unblock-File -ErrorAction SilentlyContinue)) {
+      if (Test-Path -LiteralPath $Path -PathType Container) {
+        Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue |
+          Unblock-File -ErrorAction SilentlyContinue
+      } else {
+        Unblock-File -LiteralPath $Path -ErrorAction SilentlyContinue
+      }
+    }
+    Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue |
+      ForEach-Object {
+        Remove-Item -LiteralPath ($_.FullName + ":Zone.Identifier") -Force -ErrorAction SilentlyContinue
+      }
+  }
+  catch {
+    Write-Warning "解除 Windows 下载阻止标记失败，将继续安装：$(Protect-Message $_.Exception.Message)"
+  }
 }
 
 function Copy-DirectoryContents([string]$Source, [string]$Destination) {
@@ -227,107 +259,159 @@ function Refresh-ProcessPath {
   $env:Path = "$MachinePath;$UserPath"
 }
 
-function Add-TycpvPathCandidates($Candidates, [string]$Directory) {
-  if (-not $Directory) {
+function Add-TycpvPathCandidates($Candidates, $TrustedDirectories, [string]$Directory) {
+  if (-not $Directory -or -not (Test-Path -LiteralPath $Directory -PathType Container)) {
     return
   }
-  $Candidates.Add((Join-Path $Directory "tycpv.exe"))
-  $Candidates.Add((Join-Path $Directory "bin\tycpv.exe"))
-  $Candidates.Add((Join-Path $Directory "tycpv.cmd"))
-  $Candidates.Add((Join-Path $Directory "bin\tycpv.cmd"))
+  $ResolvedDirectory = (Resolve-Path -LiteralPath $Directory).Path
+  if (-not $TrustedDirectories.Contains($ResolvedDirectory)) {
+    $TrustedDirectories.Add($ResolvedDirectory)
+  }
+  foreach ($RelativePath in @("tycpv.exe", "bin\tycpv.exe", "tycpv.cmd", "bin\tycpv.cmd")) {
+    $Candidates.Add((Join-Path $ResolvedDirectory $RelativePath))
+  }
 }
 
-function Test-TycpvExecutableCandidate([string]$Candidate) {
-  if (-not $Candidate) {
+function Test-TycpvExecutableCandidate([string]$Candidate, $TrustedDirectories) {
+  if (-not $Candidate -or -not (Test-Path -LiteralPath $Candidate -PathType Leaf)) {
     return $false
   }
-  if (-not (Test-Path -LiteralPath $Candidate -PathType Leaf)) {
+  $ResolvedPath = (Resolve-Path -LiteralPath $Candidate).Path
+  if ([IO.Path]::GetFileName($ResolvedPath) -notin @("tycpv.exe", "tycpv.cmd")) {
     return $false
   }
-  return $Candidate -match "\.(exe|cmd)$"
+  $Parent = [IO.Path]::GetDirectoryName($ResolvedPath)
+  return @($TrustedDirectories | Where-Object {
+    $Parent.Equals($_, [StringComparison]::OrdinalIgnoreCase) -or
+      $Parent.StartsWith($_ + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)
+  }).Count -gt 0
 }
 
-function Get-TycpvVersionInfo([string]$Candidate) {
-  if (-not (Test-TycpvExecutableCandidate $Candidate)) {
-    return $null
+function Get-TycpvPackageVersion([string]$Candidate) {
+  $Directory = [IO.Path]::GetDirectoryName((Resolve-Path -LiteralPath $Candidate).Path)
+  foreach ($PackagePath in @(
+    (Join-Path $Directory "app\package.json"),
+    (Join-Path $Directory "package.json"),
+    (Join-Path ([IO.Path]::GetDirectoryName($Directory)) "package.json")
+  )) {
+    if (-not (Test-Path -LiteralPath $PackagePath -PathType Leaf)) {
+      continue
+    }
+    try {
+      $Package = Get-Content -LiteralPath $PackagePath -Raw -Encoding UTF8 | ConvertFrom-Json
+      if ($Package.version) {
+        return [string]$Package.version
+      }
+    }
+    catch {
+      continue
+    }
   }
+  return $null
+}
+
+function Invoke-TycpvProbe([string]$Candidate, [int]$TimeoutSeconds = 5) {
+  $ResolvedPath = (Resolve-Path -LiteralPath $Candidate).Path
+  $ProcessInfo = New-Object Diagnostics.ProcessStartInfo
+  $ProcessInfo.UseShellExecute = $false
+  $ProcessInfo.CreateNoWindow = $true
+  $ProcessInfo.RedirectStandardOutput = $false
+  $ProcessInfo.RedirectStandardError = $false
+  $ProcessInfo.WorkingDirectory = [IO.Path]::GetDirectoryName($ResolvedPath)
+  if ([IO.Path]::GetFileName($ResolvedPath) -eq "tycpv.cmd") {
+    $ProcessInfo.FileName = $env:ComSpec
+    $ProcessInfo.Arguments = '/d /s /c ""{0}" --help"' -f $ResolvedPath
+  } else {
+    $ProcessInfo.FileName = $ResolvedPath
+    $ProcessInfo.Arguments = "--help"
+  }
+  $Process = New-Object Diagnostics.Process
+  $Process.StartInfo = $ProcessInfo
   try {
-    $ResolvedPath = (Resolve-Path -LiteralPath $Candidate).Path
-    if ($ResolvedPath -match "\.cmd$") {
-      $CommandLine = '""{0}" --version"' -f $ResolvedPath
-      $OutputLines = @(& $env:ComSpec /d /s /c $CommandLine 2>&1)
-    } else {
-      $OutputLines = @(& $ResolvedPath --version 2>&1)
+    if (-not $Process.Start()) {
+      return [PSCustomObject]@{ Ok = $false; TimedOut = $false; Output = "无法启动 CLI" }
     }
-    $ExitCode = $LASTEXITCODE
-    $VersionLine = $OutputLines |
-      ForEach-Object { [string]$_ } |
-      Where-Object { $_.Trim() } |
-      Select-Object -First 1
-    if ($ExitCode -ne 0 -or -not $VersionLine) {
-      return $null
+    if (-not $Process.WaitForExit($TimeoutSeconds * 1000)) {
+      & taskkill.exe /PID $Process.Id /T /F *> $null
+      return [PSCustomObject]@{ Ok = $false; TimedOut = $true; Output = "CLI 探测超过 $TimeoutSeconds 秒，已终止进程树" }
     }
-    return [PSCustomObject]@{
-      Path = $ResolvedPath
-      Version = (Protect-Message $VersionLine.Trim())
-    }
+    return [PSCustomObject]@{ Ok = $Process.ExitCode -eq 0; TimedOut = $false; Output = "退出码：$($Process.ExitCode)" }
   }
   catch {
+    return [PSCustomObject]@{ Ok = $false; TimedOut = $false; Output = (Protect-Message $_.Exception.Message) }
+  }
+  finally {
+    $Process.Dispose()
+  }
+}
+
+function Get-TycpvVersionInfo([string]$Candidate, $TrustedDirectories) {
+  if (-not (Test-TycpvExecutableCandidate $Candidate $TrustedDirectories)) {
     return $null
+  }
+  $Probe = Invoke-TycpvProbe $Candidate 5
+  if (-not $Probe.Ok) {
+    $script:TycpvProbeFailure = "$Candidate：$($Probe.Output)"
+    return $null
+  }
+  $ResolvedPath = (Resolve-Path -LiteralPath $Candidate).Path
+  $Version = Get-TycpvPackageVersion $ResolvedPath
+  if (-not $Version) {
+    $Version = "可用（--help 探测通过）"
+  }
+  return [PSCustomObject]@{
+    Path = $ResolvedPath
+    Version = (Protect-Message $Version)
+    Probe = "--help"
   }
 }
 
 function Find-Tycpv {
   Refresh-ProcessPath
   $Candidates = New-Object System.Collections.Generic.List[string]
-  $Command = Get-Command "tycpv.exe" -ErrorAction SilentlyContinue
-  if ($Command -and (Test-TycpvExecutableCandidate $Command.Source)) {
-    $Candidates.Add($Command.Source)
+  $TrustedDirectories = New-Object System.Collections.Generic.List[string]
+  foreach ($KnownDirectory in @(
+    (Join-Path $env:LOCALAPPDATA "Programs\tycpv"),
+    (Join-Path $env:LOCALAPPDATA "tycpv"),
+    (Join-Path $env:USERPROFILE ".tycpv"),
+    (Join-Path $env:APPDATA "npm"),
+    $(if ($env:ProgramFiles) { Join-Path $env:ProgramFiles "tycpv" }),
+    $(if (${env:ProgramFiles(x86)}) { Join-Path ${env:ProgramFiles(x86)} "tycpv" })
+  )) {
+    Add-TycpvPathCandidates $Candidates $TrustedDirectories $KnownDirectory
   }
-  $Command = Get-Command "tycpv.cmd" -ErrorAction SilentlyContinue
-  if ($Command -and (Test-TycpvExecutableCandidate $Command.Source)) {
-    $Candidates.Add($Command.Source)
-  }
-
-  Add-TycpvPathCandidates $Candidates (Join-Path $env:LOCALAPPDATA "Programs\tycpv")
-  Add-TycpvPathCandidates $Candidates (Join-Path $env:LOCALAPPDATA "tycpv")
-  Add-TycpvPathCandidates $Candidates (Join-Path $env:USERPROFILE ".tycpv")
-  if ($env:ProgramFiles) { Add-TycpvPathCandidates $Candidates (Join-Path $env:ProgramFiles "tycpv") }
-  if (${env:ProgramFiles(x86)}) { Add-TycpvPathCandidates $Candidates (Join-Path ${env:ProgramFiles(x86)} "tycpv") }
-
   foreach ($RegistryRoot in @(
     "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
     "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
     "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
   )) {
     Get-ItemProperty $RegistryRoot -ErrorAction SilentlyContinue |
-      Where-Object { $_.DisplayName -match "tycpv" } |
+      Where-Object { $_.DisplayName -match "^tycpv(?:\s|$)" } |
       ForEach-Object {
-        if ($_.InstallLocation) { Add-TycpvPathCandidates $Candidates $_.InstallLocation }
+        if ($_.InstallLocation) {
+          Add-TycpvPathCandidates $Candidates $TrustedDirectories ([string]$_.InstallLocation)
+        }
         if ($_.DisplayIcon) {
           $IconPath = ([string]$_.DisplayIcon).Split(",")[0].Trim('"')
-          if ($IconPath -match "\.(exe|cmd)$") {
+          if ([IO.Path]::GetFileName($IconPath) -in @("tycpv.exe", "tycpv.cmd")) {
+            $IconDirectory = [IO.Path]::GetDirectoryName($IconPath)
+            if ($IconDirectory -and -not $TrustedDirectories.Contains($IconDirectory)) {
+              $TrustedDirectories.Add($IconDirectory)
+            }
             $Candidates.Add($IconPath)
           }
         }
       }
   }
-
-  foreach ($SearchRoot in @(
-    (Join-Path $env:LOCALAPPDATA "Programs"),
-    $env:ProgramFiles,
-    ${env:ProgramFiles(x86)}
-  )) {
-    if (-not $SearchRoot -or -not (Test-Path -LiteralPath $SearchRoot)) {
-      continue
+  foreach ($CommandName in @("tycpv.exe", "tycpv.cmd")) {
+    $Command = Get-Command $CommandName -ErrorAction SilentlyContinue
+    if ($Command -and (Test-TycpvExecutableCandidate $Command.Source $TrustedDirectories)) {
+      $Candidates.Add($Command.Source)
     }
-    Get-ChildItem -LiteralPath $SearchRoot -Include "tycpv.exe", "tycpv.cmd" -File -Recurse -ErrorAction SilentlyContinue |
-      ForEach-Object { $Candidates.Add($_.FullName) }
   }
-
   $Seen = @{}
   foreach ($Candidate in $Candidates) {
-    if (-not (Test-TycpvExecutableCandidate $Candidate)) {
+    if (-not (Test-TycpvExecutableCandidate $Candidate $TrustedDirectories)) {
       continue
     }
     $ResolvedPath = (Resolve-Path -LiteralPath $Candidate).Path
@@ -336,7 +420,7 @@ function Find-Tycpv {
       continue
     }
     $Seen[$CandidateKey] = $true
-    $VersionInfo = Get-TycpvVersionInfo $ResolvedPath
+    $VersionInfo = Get-TycpvVersionInfo $ResolvedPath $TrustedDirectories
     if ($VersionInfo) {
       return $VersionInfo
     }
@@ -500,9 +584,16 @@ try {
     throw "此安装包只支持 64 位 Windows。"
   }
 
+  Unblock-WorkbenchPath $RootDir
+
   $BrowserExe = Find-Browser
   if (-not $BrowserExe) {
-    throw "未找到 Google Chrome 或 Microsoft Edge，请先安装其中一个浏览器。"
+    if ($AgentMode) {
+      $Warnings.Add("未找到 Google Chrome 或 Microsoft Edge；安装继续，浏览器扩展加载属于后续人工步骤。")
+      $ManualActions.Add("安装 Google Chrome 或 Microsoft Edge，并在扩展管理页加载已解压扩展。")
+    } else {
+      throw "未找到 Google Chrome 或 Microsoft Edge，请先安装其中一个浏览器。"
+    }
   }
 
   Write-Step "1/7 校验核心文件"
@@ -550,17 +641,21 @@ try {
     catch {
       $TycpvRepairMessage = Protect-Message $_.Exception.Message
     }
+    if (-not $TycpvRepairMessage -and $TycpvProbeFailure) {
+      $TycpvRepairMessage = Protect-Message $TycpvProbeFailure
+    }
   } else {
     Write-Host "检测到可运行的天源 CLI，跳过安装。"
   }
   if ($TycpvInfo) {
     $TycpvExe = [string]$TycpvInfo.Path
     $TycpvVersion = [string]$TycpvInfo.Version
-    Write-Host "天源 CLI：$TycpvVersion"
+    Write-Host "天源 CLI：$TycpvVersion（$($TycpvInfo.Probe) 探测）"
   } else {
     $TycpvExe = $null
     $TycpvVersion = "不可用"
     $TycpvStatus = "待修复（未阻断工作台组件安装）"
+    $Warnings.Add("天源 CLI 未通过 5 秒 --help 探测；工作台组件继续安装，CLI 导出能力需后续修复。")
     Write-Warning "天源 CLI 当前不可用：$TycpvRepairMessage"
     Write-Warning "将继续更新浏览器扩展、Native Helper、Connector 和打印组件；仅 CLI 导出功能暂不可用。"
   }
@@ -641,6 +736,7 @@ try {
   if (-not $InstallResult.ok) {
     throw "本机运行组件同步未通过：$InstallJson"
   }
+  Unblock-WorkbenchPath $NativeHelperDir
 
   Write-Step "6/7 检查 Native Messaging 和 Agent 插件"
   $ExtensionDir = [string]$InstallResult.extensionPath
@@ -677,6 +773,57 @@ try {
   }
   $ElapsedSeconds = [Math]::Round(((Get-Date) - $StartedAt).TotalSeconds, 1)
   $ReportPath = Join-Path $InstallRoot "安装检查结果.txt"
+  $JsonReportPath = Join-Path $InstallRoot "安装检查结果.json"
+  $ChromeNativeMessagingOk = [bool]((Get-ItemProperty -Path $ChromeRegistryPath -Name "(default)" -ErrorAction SilentlyContinue).'(default)' -eq $ManifestPath)
+  $EdgeNativeMessagingOk = [bool]((Get-ItemProperty -Path $EdgeRegistryPath -Name "(default)" -ErrorAction SilentlyContinue).'(default)' -eq $ManifestPath)
+  if ($BrowserExe) {
+    $ManualActions.Add("在 Chrome 或 Edge 扩展管理页加载已解压扩展：$ExtensionDir")
+  }
+  $ManualActions.Add("由用户本人在工作台面板输入 MCP token（不发送给 Agent）")
+  $ManualActions.Add("由用户本人完成天源 CLI 授权（如面板显示需要授权）")
+  $ConnectorHealth = if ($InstallResult.connector.connector) { $InstallResult.connector.connector } else { [ordered]@{} }
+  $ConnectorOk = [bool]($InstallResult.connector.ok -and $ConnectorHealth.ok)
+  $InstallModeCode = if ($UpdateMode) { "upgrade" } elseif ($UsedBundledCli -or $UsedBundledPython) { "full" } else { "quick" }
+  $JsonReport = [ordered]@{
+    product = "天源浏览器工作台"
+    status = "success"
+    installation = [ordered]@{ status = "success"; mode = $InstallModeCode }
+    version = $PackageVersion
+    buildNumber = $PackageBuildNumber
+    platform = "Windows-x64"
+    packageSha256 = if ($env:TIANYUAN_PACKAGE_SHA256) { [string]$env:TIANYUAN_PACKAGE_SHA256 } else { "not-provided-after-extraction" }
+    installMode = $InstallModeCode
+    elapsedSeconds = $ElapsedSeconds
+    paths = [ordered]@{
+      installRoot = $InstallRoot
+      extension = $ExtensionDir
+      nativeHelper = $NativeHelperDir
+      connector = [string]$InstallResult.connectorPath
+      codexConnectorCache = [string]$InstallResult.codexConnectorCachePath
+      python = [string]$PythonExe
+      cli = [string]$TycpvExe
+    }
+    components = [ordered]@{
+      extension = if (Test-Path -LiteralPath $ExtensionDir) { "ok" } else { "failed" }
+      nativeHelper = if (Test-Path -LiteralPath $NativeHostExe) { "ok" } else { "failed" }
+      nativeMessagingChrome = if ($ChromeNativeMessagingOk) { "ok" } else { "failed" }
+      nativeMessagingEdge = if ($EdgeNativeMessagingOk) { "ok" } else { "failed" }
+      connector = if ($ConnectorOk) { "ok" } else { "failed" }
+      python = "ok"
+      openpyxl = "ok"
+      cli = if ($TycpvExe) { "ok" } else { "unavailable" }
+    }
+    connectorHealth = [ordered]@{
+      ok = $ConnectorOk
+      protocolVersion = [string]$ConnectorHealth.protocolVersion
+      runtimeBuildId = [string]$ExtensionContract.runtimeBuildId
+      sessionCount = if ($null -ne $ConnectorHealth.sessionCount) { $ConnectorHealth.sessionCount } else { 0 }
+      bindingCount = if ($null -ne $ConnectorHealth.bindingCount) { $ConnectorHealth.bindingCount } else { 0 }
+    }
+    warnings = @($Warnings)
+    manualActions = @($ManualActions)
+    security = [ordered]@{ credentialsReturned = $false; tokenUsed = $false; secretsWritten = $false }
+  }
   @(
     "天源浏览器工作台 Windows x64"
     "安装时间：$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
@@ -704,6 +851,7 @@ try {
     "Codex Connector 缓存：$($InstallResult.codexConnectorCachePath)"
     "安全：安装程序未写入 MCP token、Cookie、Authorization、密码或验证码。"
   ) | Set-Content -LiteralPath $ReportPath -Encoding UTF8
+  $JsonReport | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $JsonReportPath -Encoding UTF8
 
   if ($ExtensionBackupPath) {
     Remove-Item -LiteralPath $ExtensionBackupPath -Recurse -Force -ErrorAction SilentlyContinue
@@ -720,6 +868,7 @@ try {
   Write-Host $ExtensionDir -ForegroundColor Yellow
   Write-Host ""
   Write-Host "安装检查结果：$ReportPath"
+  Write-Host "机器可读安装结果：$JsonReportPath"
 
   if ($TycpvExe) {
     Write-UpdateStatus "complete" 100 "全部组件更新完成，浏览器扩展可重新加载"
@@ -727,7 +876,7 @@ try {
     Write-Warning "工作台组件更新完成，但天源 CLI 仍需单独修复。"
     Write-UpdateStatus "complete" 100 "工作台组件更新完成，天源 CLI 待修复"
   }
-  if (-not $UpdateMode) {
+  if (-not $UpdateMode -and -not $AgentMode -and $BrowserExe) {
     Start-Process "explorer.exe" -ArgumentList "`"$ExtensionDir`""
     $ExtensionPage = if ($BrowserExe -match '(?i)msedge\.exe$') { "edge://extensions/" } else { "chrome://extensions/" }
     Start-Process $BrowserExe -ArgumentList $ExtensionPage
@@ -746,6 +895,7 @@ catch {
     }
   }
   $ReportPath = Join-Path $InstallRoot "安装检查结果.txt"
+  $JsonReportPath = Join-Path $InstallRoot "安装检查结果.json"
   New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
   @(
     "天源浏览器工作台 Windows x64"
@@ -761,8 +911,24 @@ catch {
     "Native Messaging 清单存在：$(Test-Path -LiteralPath $ManifestPath)"
     "安全：安装失败报告不记录 MCP token、Cookie、Authorization、密码或验证码。"
   ) | Set-Content -LiteralPath $ReportPath -Encoding UTF8
+  $FailureExitCode = if ($CurrentStep -like "1/7*") { 20 } elseif ($CurrentStep -like "2/7*" -or $CurrentStep -like "3/7*") { 10 } elseif ($CurrentStep -like "5/7*") { 30 } elseif ($CurrentStep -like "6/7*" -or $CurrentStep -like "7/7*") { 40 } else { 50 }
+  [ordered]@{
+    product = "天源浏览器工作台"
+    version = $PackageVersion
+    buildNumber = $PackageBuildNumber
+    platform = "Windows-x64"
+    installMode = if ($UpdateMode) { "upgrade" } else { "unknown" }
+    status = "failed"
+    failedStep = $CurrentStep
+    error = (Protect-Message $OriginalError.Exception.Message)
+    paths = [ordered]@{ installRoot = $InstallRoot; extension = $ExtensionDir; nativeHelper = $NativeHelperDir }
+    warnings = @($Warnings)
+    manualActions = @($ManualActions)
+    security = [ordered]@{ credentialsReturned = $false; tokenUsed = $false; secretsWritten = $false }
+  } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $JsonReportPath -Encoding UTF8
   Write-Host ""
   Write-Host "安装失败：$(Protect-Message $OriginalError.Exception.Message)" -ForegroundColor Red
   Write-Host "安装检查结果：$ReportPath"
-  exit 1
+  Write-Host "机器可读安装结果：$JsonReportPath"
+  exit $FailureExitCode
 }
