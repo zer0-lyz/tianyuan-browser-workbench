@@ -4,7 +4,7 @@
   "chromeVersion": "0.14.19",
   "versionName": "0.14.19",
   "channel": "stable",
-  "buildNumber": 2026080206,
+  "buildNumber": 2026080207,
   "repository": "zer0-lyz/tianyuan-browser-workbench-releases",
   "bridgeProtocol": "connector-agent-binding-v3",
   "minimumSupportedVersion": "0.8.3",
