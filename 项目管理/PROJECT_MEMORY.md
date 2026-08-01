@@ -8,6 +8,8 @@
 - 现统一写入 `fitToPage=1`、`autoPageBreaks=0`、`fitToWidth=1`、`fitToHeight=0` 并清除 `scale`；页高不限，长表自然纵向分页。
 - 申报表与明细表的打印页设置回读测试均通过；不改变明细表数据、公式、空列隐藏和页脚处理规则。
 - v0.14.19 / build `2026080205` 用于从 Windows v0.14.18 实测自动更新和明细表打印预览。
+- `v0.14.19` 已于 2026-08-02 CST 发布到 `zer0-lyz/tianyuan-browser-workbench-releases`；Windows 完整包 SHA-256 为 `feab0b1a2e2dc78086b23dc7d3db37d403c92bf07af5ea4f899c1211a51cdb87`，Lite 包 SHA-256 为 `f0864336143836e6a10fe56d7f1823d40ef950ecdce76df507f9451de41ca67e`。
+- 发布更新清单指向完整 Windows 包；Windows v0.14.18 可直接通过“更新全部组件”发现 v0.14.19。
 
 ## 2026-08-02 Windows 自动更新事务边界
 

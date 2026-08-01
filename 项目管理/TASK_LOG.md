@@ -4217,7 +4217,7 @@ v20 已生效，空 `tag:{isClear:true}` 不再干扰当前最终扫描结果。
 
 - 已有完整安装：通过工作台“检查更新/更新全部组件”使用，或由 Windows Agent 在更新模式下执行包内安装程序。
 - 全新 Windows 电脑：不能使用此包，必须使用同版本完整安装包。
-## 2026-08-02 Windows 明细表一页宽修复 v0.14.19
+## 2026-08-02 Windows 明细表一页宽修复 v0.14.19（已发布）
 
 ### 任务目标
 
@@ -4238,5 +4238,12 @@ v20 已生效，空 `tag:{isClear:true}` 不再干扰当前最终扫描结果。
 
 ### 待办
 
-- 提交源码并创建 `v0.14.19` GitHub Release。
 - 在 Windows v0.14.18 中点击“更新全部组件”，验证更新过程和明细表 WPS/Excel 打印预览。
+
+### 发布结果
+
+- 源码提交 `8dcdb90c4cc8a146f397971b469f6fb4edffbec6` 已推送到 `main`。
+- GitHub Release `v0.14.19` 已公开，在线更新清单回读版本 `0.14.19`、构建号 `2026080205` 和完整包资产。
+- Windows 完整包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.19-windows-x64-20260802.zip`，SHA-256：`feab0b1a2e2dc78086b23dc7d3db37d403c92bf07af5ea4f899c1211a51cdb87`。
+- Windows Lite 包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.19-windows-x64-lite-20260802.zip`，SHA-256：`f0864336143836e6a10fe56d7f1823d40ef950ecdce76df507f9451de41ca67e`。
+- 仍需用户在 Windows v0.14.18 上点击“更新全部组件”完成真实进程释放、安装器、扩展重载和打印预览验收。
