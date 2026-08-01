@@ -4249,4 +4249,5 @@ v20 已生效，空 `tag:{isClear:true}` 不再干扰当前最终扫描结果。
 - GitHub Release `v0.14.19` 已公开，在线更新清单回读版本 `0.14.19`、构建号 `2026080207` 和完整包资产。
 - Windows 完整包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.19-windows-x64-20260802.zip`，SHA-256：`49f41c4d409d6c0a821d3b91bd1caea7e1fcd038d433bb052a10bf7df4f693e6`。
 - Windows Lite 包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.19-windows-x64-lite-20260802.zip`，SHA-256：`6050258b61038d830ec5df45b6f42f924be58383381dba3ee3cc8cb20d7e3756`。
+- 针对旧版 0.14.18 仍读取 Gitee 的情况，新增并上传 `tianyuan-workbench-repair-update-source.cmd`；该工具只修改本机 Native Helper 的更新清单，不修改版本和业务组件。
 - 仍需用户在 Windows v0.14.18 上点击“更新全部组件”完成真实进程释放、安装器、扩展重载和打印预览验收。
