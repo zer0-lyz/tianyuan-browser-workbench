@@ -29,7 +29,7 @@ Windows 版本执行“明细表打印格式”后，打印设置仍显示“无
 - 全部 `node --test tests/*.cjs tests/*.mjs`：21 项通过，0 项失败。
 - Windows 完整包和 Lite 包 ZIP 校验通过，并包含修复后的明细表脚本。
 - 更新检查器模拟验证通过：即使镜像返回旧版 `0.14.12`，仍会继续检查 GitHub 并发现 `0.14.19`。
-- GitHub Release 更新清单在线回读为 `0.14.19 / build 2026080206`。
+- GitHub Release 更新清单在线回读为 `0.14.19 / build 2026080207`，并使用 `releases/latest/download/update-manifest.json` 稳定地址。
 
 ## 实机边界
 
