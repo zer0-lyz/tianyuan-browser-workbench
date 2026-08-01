@@ -4228,7 +4228,8 @@ v20 已生效，空 `tag:{isClear:true}` 不再干扰当前最终扫描结果。
 - 检查明细表 Skill 和 `adjust_appraisal_detail_print.py`，确认旧逻辑写入固定 100% 比例且关闭 fit-to-page。
 - 将明细表与申报表统一为 `fitToPage=1`、`autoPageBreaks=0`、`fitToWidth=1`、`fitToHeight=0`，清除 `scale`。
 - 增加明细表 OOXML 打印页设置回归测试，并更新 Skill 和项目记忆。
-- 版本为 `0.14.19`，构建号更新为 `2026080206`。
+- 版本为 `0.14.19`，构建号更新为 `2026080207`。
+- 更新清单改用 GitHub `releases/latest/download/update-manifest.json` 稳定地址，避免后续版本固定在 19。
 - 将 GitHub Release 更新清单设为首选；镜像清单没有可用新版本时继续执行 GitHub API 检查。
 - 增加“镜像返回 0.14.12、GitHub 返回 0.14.19”回归测试。
 
@@ -4245,7 +4246,7 @@ v20 已生效，空 `tag:{isClear:true}` 不再干扰当前最终扫描结果。
 ### 发布结果
 
 - 源码修复提交 `019627eff990503749b76319d72b08d9a299d3e9` 已推送到 `main`。
-- GitHub Release `v0.14.19` 已公开，在线更新清单回读版本 `0.14.19`、构建号 `2026080206` 和完整包资产。
-- Windows 完整包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.19-windows-x64-20260802.zip`，SHA-256：`ad6314eb00a3bf169b1efbec1232b148632fcfce9665650d8d1b48cca07eb8ff`。
-- Windows Lite 包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.19-windows-x64-lite-20260802.zip`，SHA-256：`d7afef6de5785fb7de7d7c87e174d33fcef4fe077023b81371ae59a731bfc25a`。
+- GitHub Release `v0.14.19` 已公开，在线更新清单回读版本 `0.14.19`、构建号 `2026080207` 和完整包资产。
+- Windows 完整包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.19-windows-x64-20260802.zip`，SHA-256：`49f41c4d409d6c0a821d3b91bd1caea7e1fcd038d433bb052a10bf7df4f693e6`。
+- Windows Lite 包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.19-windows-x64-lite-20260802.zip`，SHA-256：`6050258b61038d830ec5df45b6f42f924be58383381dba3ee3cc8cb20d7e3756`。
 - 仍需用户在 Windows v0.14.18 上点击“更新全部组件”完成真实进程释放、安装器、扩展重载和打印预览验收。
