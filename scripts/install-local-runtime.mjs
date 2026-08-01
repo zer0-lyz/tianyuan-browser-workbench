@@ -215,6 +215,47 @@ function copyFileAtomic(src, dest) {
   }
 }
 
+function unblockWindowsFile(targetPath) {
+  if (!isWindows || !targetPath || !fs.existsSync(targetPath)) return;
+  try {
+    fs.unlinkSync(`${targetPath}:Zone.Identifier`);
+  } catch {
+    // The alternate data stream normally does not exist; ignore silently.
+  }
+  try {
+    execFileSync("powershell.exe", [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      "Unblock-File -LiteralPath $env:TIANYUAN_UNBLOCK_PATH -ErrorAction SilentlyContinue",
+    ], {
+      env: {
+        ...process.env,
+        TIANYUAN_UNBLOCK_PATH: targetPath,
+      },
+      stdio: "ignore",
+      timeout: 10000,
+    });
+  } catch {
+    // Some locked-down Windows environments disable Unblock-File; the self-test
+    // below will report the real launch failure if the file remains blocked.
+  }
+}
+
+function explainSpawnFailure(error, command) {
+  const code = String(error?.code || "").toUpperCase();
+  const message = String(error?.message || error || "");
+  if (isWindows && (code === "EPERM" || code === "EACCES" || message.includes("EPERM"))) {
+    return [
+      `WINDOWS_NATIVE_HOST_EXECUTION_BLOCKED: ${command}`,
+      "Windows 拒绝启动 native_host.exe。常见原因是安装包来自微信、浏览器或压缩包下载后被标记为不受信任，或被安全软件拦截。",
+      "安装器已尝试自动解除阻止；如果仍失败，请从 Windows 安全中心允许该文件，或对解压后的安装目录执行 Unblock-File 后重新安装。",
+    ].join(" ");
+  }
+  return message;
+}
+
 function sourceBuildDigest() {
   const hash = createHash("sha256");
   const roots = [
@@ -557,7 +598,9 @@ function main() {
   copyFileAtomic(path.join(repoRoot, "native-helper", "update-sources.json"), path.join(nativeRuntimeRoot, "update-sources.json"));
   const packagedNativeHostExe = path.join(repoRoot, "native-helper", "native_host.exe");
   if (isWindows && fs.existsSync(packagedNativeHostExe)) {
+    unblockWindowsFile(packagedNativeHostExe);
     copyFileAtomic(packagedNativeHostExe, path.join(nativeRuntimeRoot, "native_host.exe"));
+    unblockWindowsFile(path.join(nativeRuntimeRoot, "native_host.exe"));
   }
   copyDir(
     path.join(repoRoot, "native-helper", "platform"),
@@ -592,20 +635,26 @@ function main() {
   const selfTestArgs = selfTestCommand === nodeBin
     ? [path.join(nativeRuntimeRoot, "native_host.js"), "--self-test"]
     : ["--self-test"];
-  const selfTestOutput = execFileSync(
-    selfTestCommand,
-    selfTestArgs,
-    {
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        TIANYUAN_PYTHON_BIN: printPython.path,
-        TIANYUAN_RUNTIME_CONFIG_PATH: path.join(nativeRuntimeRoot, "runtime-config.json"),
+  let selfTestOutput = "";
+  try {
+    if (isWindows) unblockWindowsFile(selfTestCommand);
+    selfTestOutput = execFileSync(
+      selfTestCommand,
+      selfTestArgs,
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          TIANYUAN_PYTHON_BIN: printPython.path,
+          TIANYUAN_RUNTIME_CONFIG_PATH: path.join(nativeRuntimeRoot, "runtime-config.json"),
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 15000,
       },
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 15000,
-    },
-  ).trim();
+    ).trim();
+  } catch (error) {
+    throw new Error(explainSpawnFailure(error, selfTestCommand));
+  }
   const selfTest = JSON.parse(selfTestOutput);
   if (!selfTest.ok || !selfTest.platformAdapter?.supported) {
     throw new Error(`NATIVE_HOST_SELF_TEST_FAILED: ${selfTestOutput}`);

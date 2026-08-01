@@ -1,7 +1,7 @@
 {
   "name": "tianyuan-browser-connector",
   "version": "0.4.2",
-  "description": "Connect a registered local Agent to its own Tianyuan browser bindings and run controlled audit actions.",
+  "description": "把本地 Agent 安全连接到已绑定的天源浏览器页面，并执行受控查询和操作。",
   "author": {
     "name": "Tianyuan Browser Connector"
   },
@@ -16,22 +16,21 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "天源浏览器连接器",
-    "shortDescription": "连接已授权的天源页面并执行受控动作。",
+    "shortDescription": "连接已授权的天源页面，执行受控读取和操作。",
     "longDescription": "通过本地 Connector Bridge 将已注册的 Agent 工作区或对话安全路由到对应的天源浏览器标签页。读取和控制权限按页面绑定隔离，正式动作仍要求确认、编辑锁和回读。",
     "developerName": "Tianyuan Browser Connector",
     "category": "Productivity",
     "capabilities": [
       "MCP",
-      "Local",
-      "Browser",
-      "Read",
-      "Write"
+      "本地运行",
+      "浏览器连接",
+      "受控读取",
+      "受控写入"
     ],
     "brandColor": "#202124",
     "defaultPrompt": [
       "确认当前项目绑定的天源浏览器页面。",
       "读取当前天源页面的项目、公司和科目上下文。",
-      "查看当前天源浏览器连接器能力。",
       "预演或确认执行评估核实附件上传。"
     ]
   },

@@ -1,5 +1,132 @@
 # 天源浏览器工作台项目状态
 
+## 2026-08-02 CLI 动态授权链路修复 v0.14.17
+
+- 修复 `extension/src/sidepanel/sidepanel.js`：授权 CLI 现在等待 Native Helper 捕获 `tycpv login` 输出中的动态 `authorizationUrl`，再打开或复用唯一授权标签页。
+- 连接配置页新增动态授权链接备用区域和“复制链接”按钮；自动打开失败时仍可手动完成授权。
+- `extension/manifest.json` 增加 `https://mcp.zhrdc.net/*` 权限，用于复用和聚焦真实动态授权页。
+- Native Helper 保留 stdout/stderr 捕获、20 秒动态 URL 超时、CLI 不存在、执行阻止、回调端口冲突、非零退出和授权状态轮询；不读取或回传 token、Cookie、Authorization、密码或验证码。
+- 版本同步为 `0.14.17`，构建号 `2026080203`；本轮暂不推送 GitHub，待 Windows 实机验证后再发布。
+- 已生成完整包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.17-windows-x64-20260802.zip`，SHA-256：`c499206140ce0b0eb31845514adb5588db4c465b5e459bf979fa81f77b73f2ac`。
+- 已生成轻量包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.17-windows-x64-lite-20260802.zip`，SHA-256：`0e66d1a5324dab5374817cd7a74ab3b6567c66029986278993dbc5d2dac64596`。
+- 包内回读通过：完整包含 Node、Python、CLI 安装器和 `native_host.exe`；轻量包标记 `package_type=lite-update` 且不含上述运行时。
+- 待验证：Chrome 全新重启和扩展重新加载后，正常 CLI、CLI 不存在、Native Messaging 失败、重复点击、授权成功/超时等场景。
+
+## 2026-08-02 Windows 轻量更新包 v0.14.16
+
+- 已补生成已有安装用户使用的 Windows x64 轻量更新包。
+- 更新包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.16-windows-x64-lite-20260802.zip`。
+- SHA-256：`cf6b05e30f5adf2874d992a036fb54e0016b415734ad32e55aefb97307ee112f`。
+- 包内 `VERSION.txt` 标记 `package_type=lite-update`、`requires_existing_runtime=true`。
+- 已确认不包含 Node、Python、CLI 安装器或 `native_host.exe`；包含扩展、Native Host JS、更新器、Connector、安装脚本和校验清单。
+- 仅适用于已经完成完整安装的 Windows 用户；全新电脑仍必须使用完整安装包。
+- 本轮未推送 GitHub Release。
+
+## 2026-08-02 Windows 安装测试包 v0.14.16
+
+- 已将连接授权入口修复同步进 Windows x64 完整测试包。
+- 下载包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.16-windows-x64-20260802.zip`。
+- SHA-256：`6445621db02f0a135e34f4c841d85db1c1c8ba04d97698700dcadbd699529df5`。
+- 独立提示词：`/Users/zer0y/Downloads/天源工作台_Windows_Codex_自动安装提示词_v0.14.16.md`。
+- 独立说明：`/Users/zer0y/Downloads/天源工作台_Windows_安装说明_v0.14.16.md`。
+- 包内包含 `install-agent.cmd`、Node、Native Helper、扩展、离线 Python/wheel 和 CLI 安装器；新 Windows 机器使用完整包，不使用 lite 包。
+- 待 Windows 实机执行 `install-agent.cmd`，再回读 `%LOCALAPPDATA%\\TianyuanWorkbench\\安装检查结果.json`。
+
+## 2026-08-02 连接授权入口修复 v0.14.16
+
+- 修复连接配置页“授权 CLI”只启动本地 `tycpv login`、不打开授权网页的问题。
+- CLI 授权按钮现在打开 `https://mcp.zhrdc.net/connect?source=valuation&tab=cli`，并保留本地 CLI 登录作为辅助动作。
+- MCP 配置按钮现在打开 `https://mcp.zhrdc.net/connect?source=valuation`，同时保留 token 输入弹窗；弹窗内增加重复打开接入页入口。
+- 版本同步为 `0.14.16`，构建号 `2026080202`；本轮只更新本机运行副本，暂不推送 GitHub。
+- 已通过 sidepanel 语法检查、静态扩展契约、Agent Bridge、更新检查器、更新安装器和 `git diff --check`。
+- 待用户重新加载本机扩展后，分别点击“授权 CLI”和“配置 MCP”确认网页能打开。
+
+## 2026-07-30 待办：Windows 开发验收机配置
+
+- 用户计划准备一台 Windows 电脑安装 Codex，用于检查配置、真实运行 Windows 安装流程，并生成或验收 Windows 安装包。
+- 已确定协作方式：Mac 主开发，Windows 实机验收，GitHub 作为唯一代码同步中心。
+- OneDrive 继续只存项目基础说明、项目管理记录和交接资料，不存运行依赖、构建缓存或本机运行目录。
+- 待 Windows 电脑可用后，需要提供一份可直接交给 Windows Codex 执行的配置提示词。
+- 该提示词应覆盖：拉取 GitHub 最新代码、安装或检查 Git/Node/Python/Chrome/Edge/tycpv CLI、运行 Windows bootstrap、注册 Native Messaging、安装本机运行副本、启动 Connector、输出扩展加载路径、跑 Windows 测试和生成安装包。
+- 建议后续落地脚本：`scripts/bootstrap-windows-dev.ps1`、`scripts/bootstrap-macos-dev.sh`、`scripts/release-check.mjs`。
+- 发布门禁保持双系统验收：Mac 通过通用功能和 macOS 更新，Windows 通过安装包、Native Helper、Connector、CLI/Python、轻量更新和文件选择等系统相关功能。
+
+## 2026-08-02 Windows 全新机器安装测试包已准备
+
+- 测试版本：`0.14.14`，Windows x64 完整安装包，构建编号 `2026072902`。
+- 下载包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.14-windows-x64-20260729.zip`。
+- SHA-256：`5079ed95d27ea00a759c31ad142c0dcdec908b50b3d4f411766ccf8b58984dc5`。
+- 校验文件：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.14-windows-x64-20260729.zip.sha256`。
+- 单独提示词：`/Users/zer0y/Downloads/天源工作台_Windows_Codex_自动安装提示词_v0.14.14.md`。
+- 安装说明：`/Users/zer0y/Downloads/天源工作台_Windows_安装说明_v0.14.14.md`。
+- 新机器必须使用完整包，不使用 `lite` 包；完整包包含 Node、Native Helper、扩展和离线 Python/CLI 回退资源。
+- 已通过 Windows ZIP 编码、Windows Release ZIP、安装器 CLI 降级、运行启动、Agent 安装提示词和 lite 包测试。
+- 这是本机测试构建，`VERSION.txt` 标记 `source_dirty=true`；暂不作为 GitHub 正式 Release。
+
+## 2026-08-02 Windows 测试反馈已修复，待实机验证 v0.14.15
+
+- 已处理反馈中的 CLI 探测卡住、误执行第三方程序、Agent `pause`/GUI 阻塞和缺少 JSON 报告问题。
+- 新增严格 CLI 白名单和已知目录解析；CLI 探测改为 5 秒 `--help`，超时终止进程树后不阻断其他工作台组件安装。
+- 新增 `install-agent.cmd`、`install.cmd /Agent` 和 JSON 安装结果；Agent 模式不自动打开浏览器或资源管理器。
+- Native Host Windows CLI 健康检查与安装器保持一致，使用 `--help` 探测，stdin 关闭时主动退出。
+- 新版本已生成并放入下载目录：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.15-windows-x64-20260802.zip`。
+- 新包 SHA-256：`b09ad643e0f794a3084a92667589302cfad9f0a084be685ddb43fdf4a963f0fd`；构建号 `2026080201`；运行指纹 `29a69ecb5aa57dd4f7a9780f7915380bef5baa5781ba3d677b34a438ab6ba2d0`。
+- 自动化回归通过：Windows 安装器安全、CLI 降级、Agent 提示词、ZIP 编码、Release ZIP、Runtime 启动、静态契约、Native Host、Agent Bridge、更新模块和打印模块。
+- 待真实 Windows 电脑用 `install-agent.cmd` 完成首次安装，重点回读 `安装检查结果.json`、退出码、CLI 探测是否在 5 秒内结束、是否启动无关程序和是否自动打开 GUI。
+- 当前仍未推送 GitHub；先完成 Windows 实机验收。
+
+## 2026-07-29 当前状态：本机与 Windows 测试包已修复到 v0.14.14
+
+- Windows 新用户测试失败现象：`1/7` 到 `4/7` 均通过，第 `5/7` 步报错 `spawnSync C:\Users\Lenovo\AppData\Local\TianyuanWorkbench\native-helper\native_host.exe EPERM`。
+- 已修复 Windows 安装器：安装开始和同步后都会自动解除下载阻止标记，减少微信、浏览器和压缩包分发导致的 exe 启动阻止。
+- 已修复本机同步脚本：复制 `native_host.exe` 后立即解除阻止，自检失败时给出 `WINDOWS_NATIVE_HOST_EXECUTION_BLOCKED` 可读错误。
+- 当前源码和本机运行副本版本均为 `0.14.14`，构建编号 `2026072902`。
+- 当前本机运行兼容指纹为 `bafc003713e99d619a2b18b1032e2a31773868853771cf871e1f6457d8cb04e8`，Connector PID `62551`。
+- 已生成 Windows 测试包：
+  - `/Users/zer0y/Downloads/tianyuan-workbench-v0.14.14-windows-x64-20260729.zip`
+  - `/Users/zer0y/Downloads/tianyuan-workbench-v0.14.14-windows-x64-lite-20260729.zip`
+- 新用户测试应发送完整包，不发送 lite 包。
+- 当前暂未推送 GitHub；等 Windows 新用户确认 `0.14.14` 可安装后再发布正式 Release。
+
+## 2026-07-29 当前状态：本机已修复到 v0.14.13
+
+- 用户截图现象：侧栏显示当前 `v0.14.11` 或 `v0.14.12`、发现新版但更新失败，状态码 `WORKBENCH_UPDATE_FAILED`。
+- 已确认根因：`0.14.12` macOS 轻量更新脚本误判 Python，只检查固定 Python.framework 3.14 路径，没有复用本机可用 `/usr/bin/python3`。
+- 已修复 `release/macos-arm64/安装.command`：新增可用 Python 探测和复用逻辑，更新模式不再因缺少固定路径而失败。
+- 当前本机运行副本：`~/.tianyuan-workbench/projects/天源评估系统/extension`，版本 `0.14.13`，构建编号 `2026072901`。
+- 当前 Native Helper：`~/.tianyuan-workbench/native-helper`，运行兼容指纹 `99106db7100efe4e33b63fb0e82694b902d280abdf88e119e52f2daaf28bf493`。
+- Connector 已启动：`/usr/local/bin/node ~/.tianyuan-workbench/native-helper/native_host.js --connector-bridge`，PID `43774`。
+- 直接更新检查结果：公开最新 `0.14.12`，当前本机 `0.14.13`，`updateAvailable=false`，`repairRequired=false`。
+- 通过验证：macOS 安装脚本语法、更新模块语法、Native Helper/更新器语法、静态扩展契约、更新检查器、更新安装器、更新清单、更新模块、macOS 轻量包和 `git diff --check`。
+- 待用户在 Chrome `chrome://extensions` 重新加载“天源工作台”，确认侧栏显示 `v0.14.13` 且不再显示 `WORKBENCH_UPDATE_FAILED`。
+- 当前暂未推送 GitHub；等用户确认本机 UI 正常后，再决定是否发布正式 `v0.14.13`。
+
+## 2026-07-28 更新按钮不可用检查与 v0.14.11 同步
+
+- 截图现象：`0.14.9` 显示发现 `v0.14.11`，但提示“未找到当前平台安装包”，导致“测试更新模块”和“更新全部组件”不可用。
+- 根因：`0.14.9` 的 Native Helper 已支持 Gitee 更新源，但侧栏前端仍只允许 `github.com` URL，Gitee 安装包 URL 被过滤为空。
+- GitHub 最新源码 `0.14.11` 已修复该问题，侧栏安全 URL 白名单已包含 Gitee 和 GitHub 相关下载域名。
+- 本地源码已快进到 `e8d11dc42ff7a1c029b3c55cb6cfaba2e48ec53b`。
+- 本机运行副本已安装到 `0.14.11`，构建编号 `2026072812`，运行兼容指纹 `1d577f005c3f39a73e59ce4bdbba0efdaca5e713bd1b3f79ff0aa0554bfac6f5`。
+- Connector 已重启，PID `83461`，Native Helper 自检通过。
+- 验证通过：更新检查器、更新安装器、更新清单、更新模块、静态扩展契约、macOS 轻量包、Windows 轻量包和 `git diff --check`。
+- 当前本机更新检查回读：最新版本 `0.14.11`，当前版本 `0.14.11`，`updateAvailable=false`。
+- 待用户在 Chrome `chrome://extensions` 对“天源工作台”点击重新加载，刷新侧栏后应显示已是最新版本。
+
+## 2026-07-28 GitHub 最新版同步到 v0.14.9
+
+- 本地源码已从 `8cc51043e8d0d64182874e4d0f6adb5b111c8baf` 快进到 GitHub `main` 最新提交 `99fcfa29cdb1b852510ea2fc9fc892626054c741`。
+- 当前版本为 `0.14.9`，构建编号 `2026072810`，发布通道 `stable`。
+- 公开 Release 已核对：`v0.14.9`，5 个资产均为 `uploaded`。
+- 本机运行副本已重新安装到 `~/.tianyuan-workbench/projects/天源评估系统/extension`。
+- Native Helper 已同步到 `~/.tianyuan-workbench/native-helper`，自检通过。
+- Connector 在线，PID `84925`，协议 `connector-agent-binding-v3`，运行兼容指纹 `468c82cd2104f9522fb9edab6c9c000cf717a52cedc8780b8657cc6b9b8185d8`。
+- 打印格式依赖通过：Python 可用，`openpyxl 3.1.5` 可用，天源 CLI `0.1.0` 可用。
+- 自动验证通过：扩展静态契约、Agent/Connector Bridge、平台适配、更新检查器、更新安装器、Windows runtime/ZIP/编码/轻量包/Agent 安装提示/CLI 降级、本地运行复制、模块化、反馈模块、打印格式页设置和 `git diff --check`。
+- 待用户在 Chrome `chrome://extensions` 对“天源工作台”点击重新加载，或重新加载未打包目录：`~/.tianyuan-workbench/projects/天源评估系统/extension`。
+- 本地仍有未跟踪用户目录 `天源 cli 安装文件/`，本轮未处理。
+- 普通 Git HTTPS 拉取在本机网络下连接 GitHub 443 超时；本次通过 GitHub API 校验同步，最终本地 `HEAD` 和 `origin/main` 已一致。
+
 ## 2026-07-28 Windows ZIP 文件名编码修复 v0.14.8
 
 - 当前开发版本：工作台 `0.14.8` / 构建 `2026072809`，Connector 保持 `0.4.2`。

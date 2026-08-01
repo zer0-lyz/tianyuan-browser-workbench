@@ -17,6 +17,9 @@ const STORAGE_CONNECTOR_SESSION_KEY = "tianyuanWorkbenchConnectorSessionId";
 const STORAGE_MCP_TOKEN_KEY = "tianyuanWorkbenchMcpToken";
 const STORAGE_LAST_BATCH_RESULT_KEY = "tianyuanWorkbenchLastBatchResult";
 const STORAGE_LAST_EXPORT_RESULT_KEY = "tianyuanWorkbenchLastExportResult";
+const MCP_CONNECT_URL = "https://mcp.zhrdc.net/connect?source=valuation";
+const CLI_LOGIN_POLL_INTERVAL_MS = 1500;
+const CLI_LOGIN_POLL_MAX_ATTEMPTS = 120;
 const COMPANY_HIERARCHY_CODE_KEYS = [
   "displayCode",
   "display_code",
@@ -149,6 +152,10 @@ const elements = {
   bindCurrentPage: document.getElementById("bindCurrentPage"),
   configureMcp: document.getElementById("configureMcp"),
   authorizeCli: document.getElementById("authorizeCli"),
+  openMcpConnectPage: document.getElementById("openMcpConnectPage"),
+  cliAuthorizationFallback: document.getElementById("cliAuthorizationFallback"),
+  cliAuthorizationLink: document.getElementById("cliAuthorizationLink"),
+  copyCliAuthorizationLink: document.getElementById("copyCliAuthorizationLink"),
   mcpTokenDialog: document.getElementById("mcpTokenDialog"),
   mcpTokenInput: document.getElementById("mcpTokenInput"),
   rememberMcpToken: document.getElementById("rememberMcpToken"),
@@ -308,6 +315,8 @@ const elements = {
 let latestPayload = null;
 let latestContext = null;
 let busy = false;
+let cliAuthBusy = false;
+let cliAuthorizationUrl = "";
 let availableSubjects = [];
 let availableCompanies = [];
 let runtimeMcpToken = "";
@@ -530,6 +539,7 @@ function setBusy(nextBusy) {
     elements.clearConnectorBinding,
     elements.configureMcp,
     elements.authorizeCli,
+    elements.openMcpConnectPage,
     elements.loadSubjects,
     elements.selectAllSubjects,
     elements.clearAllSubjects,
@@ -3092,30 +3102,173 @@ function normalizeErrorItems(items) {
     : [];
 }
 
-async function authorizeCli() {
-  setStatus("正在打开 CLI 授权页面...", "idle");
-  elements.connectionMessage.textContent = "正在启动 tycpv login...";
+async function openConnectionPage(url, label) {
   try {
-    const result = await sendNativeMessage({ action: "cli_login" });
-    if (!result?.ok) throw new Error(result?.reason || "CLI_LOGIN_FAILED");
+    await chrome.tabs.create({ url, active: true });
+    return { ok: true };
+  } catch (error) {
+    const reason = error?.message || String(error);
+    setStatus(`${label}页面打开失败：${reason}`, "error");
+    elements.connectionMessage.textContent = reason;
+    return { ok: false, reason };
+  }
+}
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+function setCliAuthorizationFallback(url = "") {
+  cliAuthorizationUrl = String(url || "");
+  if (!elements.cliAuthorizationFallback || !elements.cliAuthorizationLink) return;
+  const visible = Boolean(cliAuthorizationUrl);
+  elements.cliAuthorizationFallback.classList.toggle("hidden", !visible);
+  elements.cliAuthorizationLink.textContent = visible ? cliAuthorizationUrl : "";
+  elements.cliAuthorizationLink.href = visible ? cliAuthorizationUrl : "#";
+}
+
+async function copyCliAuthorizationLink(event) {
+  event?.stopPropagation?.();
+  if (!cliAuthorizationUrl) return;
+  try {
+    await navigator.clipboard.writeText(cliAuthorizationUrl);
+    setStatus("CLI 动态授权链接已复制", "ok");
+  } catch (error) {
+    setStatus(`复制授权链接失败：${error?.message || String(error)}`, "error");
+  }
+}
+
+async function focusOrOpenCliAuthorizationPage(url) {
+  const authorizationUrl = String(url || "").trim();
+  if (!authorizationUrl) throw new Error("CLI_AUTHORIZATION_URL_MISSING");
+  const findExisting = async () => {
+    const tabs = await chrome.tabs.query({});
+    return tabs.find((tab) => tab?.url === authorizationUrl) || null;
+  };
+  // tycpv login normally opens the URL itself. Give that browser action a moment,
+  // then focus the existing tab instead of creating a duplicate.
+  await sleep(350);
+  let tab = await findExisting();
+  if (!tab) {
+    tab = await chrome.tabs.create({ url: authorizationUrl, active: true });
+    return { ok: true, reused: false, tabId: tab.id };
+  }
+  await chrome.tabs.update(tab.id, { active: true });
+  if (tab.windowId) {
+    await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+  }
+  return { ok: true, reused: true, tabId: tab.id };
+}
+
+function updateCliStatusMessage(text, kind = "idle") {
+  elements.connectionMessage.textContent = text;
+  setStatus(text, kind);
+}
+
+async function pollCliAuthorization(sessionId) {
+  for (let attempt = 0; attempt < CLI_LOGIN_POLL_MAX_ATTEMPTS; attempt += 1) {
+    await sleep(CLI_LOGIN_POLL_INTERVAL_MS);
+    let status;
+    try {
+      status = await sendNativeMessage({ action: "cli_login_status", sessionId }, 12000);
+    } catch (error) {
+      updateCliStatusMessage(`等待 CLI 授权状态失败：${error?.message || String(error)}`, "error");
+      return false;
+    }
+    if (status?.state === "authenticated" || status?.authenticated) {
+      setConnection(elements.cliStatus, "已授权", "ok");
+      updateCliStatusMessage("CLI 授权成功，点击“启动/检查”确认连接", "ok");
+      await checkConnections();
+      return true;
+    }
+    if (status?.state === "failed" || status?.ok === false) {
+      const reason = status.reason || "CLI_LOGIN_FAILED";
+      setConnection(elements.cliStatus, "授权失败", "error");
+      updateCliStatusMessage(`CLI 授权失败：${reason}。可手动执行：tycpv login`, "error");
+      return false;
+    }
+    setConnection(elements.cliStatus, "等待授权", "warn");
+    updateCliStatusMessage("授权页已打开，等待用户完成 CLI 授权...", "idle");
+  }
+  setConnection(elements.cliStatus, "授权超时", "error");
+  updateCliStatusMessage("CLI 授权超时。可重新点击授权，或手动执行：tycpv login", "error");
+  return false;
+}
+
+async function authorizeCli() {
+  if (busy || cliAuthBusy) return;
+  cliAuthBusy = true;
+  elements.authorizeCli.disabled = true;
+  setCliAuthorizationFallback("");
+  updateCliStatusMessage("正在申请 CLI 动态授权地址...", "idle");
+  try {
+    const result = await sendNativeMessage({ action: "cli_login" }, 30000);
     latestPayload = {
-      ...result,
+      ok: Boolean(result?.ok),
+      action: "cli_login",
+      state: result?.state || "failed",
+      sessionId: result?.sessionId || null,
+      reused: Boolean(result?.reused),
+      reason: result?.reason || null,
+      manualCommand: result?.manualCommand || null,
       collectedAt: new Date().toISOString(),
+      security: { credentialsReturned: false },
     };
     elements.json.textContent = JSON.stringify(latestPayload, null, 2);
-    elements.connectionMessage.textContent = "CLI 授权页面已打开";
-    setStatus("CLI 授权页面已打开，授权完成后点“启动/检查”", "ok");
+    if (!result?.ok) {
+      setConnection(elements.cliStatus, "授权失败", "error");
+      updateCliStatusMessage(
+        `CLI 授权失败：${result?.reason || "CLI_LOGIN_FAILED"}。可手动执行：tycpv login`,
+        "error",
+      );
+      return;
+    }
+    if (result.state === "authenticated" || result.authenticated) {
+      setConnection(elements.cliStatus, "已授权", "ok");
+      updateCliStatusMessage("CLI 已授权，点击“启动/检查”确认连接", "ok");
+      await checkConnections();
+      return;
+    }
+    if (!result.authorizationUrl) throw new Error("CLI_AUTHORIZATION_URL_MISSING");
+    setCliAuthorizationFallback(result.authorizationUrl);
+    let page;
+    try {
+      page = await focusOrOpenCliAuthorizationPage(result.authorizationUrl);
+    } catch (error) {
+      page = { ok: false, reason: error?.message || String(error) };
+    }
+    setConnection(elements.cliStatus, "等待授权", "warn");
+    if (page.ok) {
+      updateCliStatusMessage(
+        page.reused
+          ? "已切换到现有 CLI 授权页，等待用户完成授权..."
+          : "真实 CLI 授权页已打开，等待用户完成授权...",
+        "idle",
+      );
+    } else {
+      updateCliStatusMessage(
+        `授权页自动打开失败：${page.reason}。请点击下方链接或手动执行：tycpv login`,
+        "warn",
+      );
+    }
+    await pollCliAuthorization(result.sessionId);
   } catch (error) {
-    const payload = {
+    const reason = error?.message || String(error);
+    latestPayload = {
       ok: false,
       action: "cli_login",
-      reason: error?.message || String(error),
+      state: "failed",
+      reason,
+      manualCommand: "tycpv login",
       collectedAt: new Date().toISOString(),
+      security: { credentialsReturned: false },
     };
-    latestPayload = payload;
-    elements.json.textContent = JSON.stringify(payload, null, 2);
-    elements.connectionMessage.textContent = payload.reason;
-    setStatus(`CLI 授权启动失败：${payload.reason}`, "error");
+    elements.json.textContent = JSON.stringify(latestPayload, null, 2);
+    setConnection(elements.cliStatus, "授权失败", "error");
+    updateCliStatusMessage(`CLI 授权失败：${reason}。可手动执行：tycpv login`, "error");
+  } finally {
+    cliAuthBusy = false;
+    elements.authorizeCli.disabled = busy;
   }
 }
 
@@ -4702,11 +4855,15 @@ async function checkConnections() {
   }
 }
 
-function openMcpTokenDialog() {
+async function openMcpTokenDialog() {
+  const page = await openConnectionPage(MCP_CONNECT_URL, "MCP 接入");
   elements.mcpTokenInput.value = "";
   elements.rememberMcpToken.checked = mcpTokenPersisted;
   elements.mcpTokenDialog.showModal();
   elements.mcpTokenInput.focus();
+  if (page.ok) {
+    setStatus("MCP 接入页已打开；完成配置后返回此面板粘贴 token", "idle");
+  }
 }
 
 async function confirmMcpToken() {
@@ -5538,6 +5695,8 @@ on(elements.bindConnectorCurrentThread, "click", bindConnectorCurrentThread);
 on(elements.clearConnectorBinding, "click", clearConnectorCodexBinding);
 on(elements.configureMcp, "click", openMcpTokenDialog);
 on(elements.authorizeCli, "click", authorizeCli);
+on(elements.copyCliAuthorizationLink, "click", copyCliAuthorizationLink);
+on(elements.openMcpConnectPage, "click", () => openConnectionPage(MCP_CONNECT_URL, "MCP 接入"));
 on(elements.confirmMcpToken, "click", confirmMcpToken);
 on(elements.clearMcpToken, "click", clearMcpToken);
 on(elements.cancelMcpToken, "click", () => elements.mcpTokenDialog.close());

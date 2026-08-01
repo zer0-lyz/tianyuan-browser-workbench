@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>天源工作台</title>
-    <link rel="stylesheet" href="./styles.css?v=20260726-compact-status-v1">
+    <link rel="stylesheet" href="./styles.css?v=20260802-cli-auth-v1">
   </head>
   <body>
     <main class="app">
@@ -168,6 +168,14 @@
             <div><dt>扩展 ID</dt><dd id="extensionId">-</dd></div>
             <div><dt>连接信息</dt><dd id="connectionMessage">-</dd></div>
           </dl>
+          <div id="cliAuthorizationFallback" class="cli-authorization-fallback hidden">
+            <div class="field-header">
+              <span>CLI 动态授权链接</span>
+              <button id="copyCliAuthorizationLink" type="button" class="tiny secondary">复制链接</button>
+            </div>
+            <a id="cliAuthorizationLink" class="external-link" href="#" target="_blank" rel="noopener noreferrer"></a>
+            <p class="section-description">如果授权页没有自动打开，可点击链接重新打开，或复制后粘贴到浏览器。</p>
+          </div>
         </section>
         <section class="section connector-section">
           <div class="section-title-row">
@@ -826,6 +834,7 @@
         <form method="dialog" class="modal-panel">
           <h2>配置 MCP</h2>
           <p>输入 MCP token。可选择仅保留在当前会话，或仅保存在此浏览器扩展的本机存储中。</p>
+          <button id="openMcpConnectPage" type="button" class="secondary tiny">打开 MCP 接入页</button>
           <label>
             <span>MCP token</span>
             <input id="mcpTokenInput" type="password" autocomplete="off" spellcheck="false" placeholder="zhmcp_...">

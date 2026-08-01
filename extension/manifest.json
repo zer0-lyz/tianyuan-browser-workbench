@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "天源浏览器工作台",
   "description": "天源页面连接、资产基础法批量处理、表格导出和打印格式工作台。",
-  "version": "0.14.12",
-  "version_name": "0.14.12",
+  "version": "0.14.17",
+  "version_name": "0.14.17",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyDJOqnEcIgphAZfXGc2sLdH2K5yL3bEmcugXnALcxKPoQ+g8O3idLRL95fIZn79wVCf8IptzM1A7s6il1OPwg0fpQ3I+NruvCz209F22qLhhzKl6i4tzcmeEg1yXXreNxfdfdDkos9wxkEZ0fl6FfI2ENT91Gq6qTT+J89jj63Ad+oAta2QOqDpeNanVCJ8fbye5HbtcL7kaEu4ocN6VoZ8Cd9/Y9ED+LVlfc/ME49TIUjNc9ON8PHRbNF+F2/Vj7HiJnSM//PTnt8f2/i8XFoBtdmGOqDxrIQNcDjSyly28SWjkzZxyYjPPMbcVR2i7WGrdtVM3I2P+/Lk7u6jmfQIDAQAB",
   "action": {
     "default_title": "天源工作台"
@@ -23,6 +23,7 @@
   "host_permissions": [
     "https://excel.zhrdc.net/ty/*",
     "https://feedback.zer0y.com/*",
+    "https://mcp.zhrdc.net/*",
     "http://127.0.0.1:8765/*",
     "http://127.0.0.1:40415/*"
   ],

@@ -29,17 +29,28 @@
 5. 使用 `.sha256` 或 `update-manifest.json` 校验 ZIP 的 SHA-256。校验不一致时立即停止，不得绕过。
 6. 必须完整解压 ZIP，不能在压缩包预览窗口中直接运行。
 
-### 3. 自动安装
+### 3. 自动安装或更新
 
-1. 执行完整解压目录中的 `install.cmd`。
-2. 等待安装程序全部步骤完成，不要手工重复安装 Node.js、Python、Native Helper、Connector 或 Codex 插件缓存。
-3. 安装失败时保留错误窗口，并读取：
+1. 先读取当前目录的 `VERSION.txt`：
+   - `package_type=lite-update` 表示这是已有安装用户的轻量更新包；
+   - 没有该字段或不是 `lite-update` 表示这是完整安装包。
+2. 完整安装包执行 `install-agent.cmd`；如果该文件不存在，执行 `install.cmd /Agent`。
+3. 轻量更新包不要直接运行普通安装模式，必须在 PowerShell 中执行：
+   ```powershell
+   $env:TIANYUAN_UPDATE_MODE = "1"
+   $env:TIANYUAN_AGENT_MODE = "1"
+   powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\install.ps1 -Agent
+   ```
+   轻量更新包要求本机已有完整工作台运行环境；如果缺少 Node、Python/openpyxl 或 CLI，应改用完整安装包。
+4. 等待安装程序全部步骤完成，不要手工重复安装 Node.js、Python、Native Helper、Connector 或 Codex 插件缓存。
+5. 安装失败时读取机器可读结果和文本报告：
+   `%LOCALAPPDATA%\TianyuanWorkbench\安装检查结果.json`
    `%LOCALAPPDATA%\TianyuanWorkbench\安装检查结果.txt`
-4. 不要通过手工复制单个文件、修改来源不明的注册表项目或关闭安全校验来拼接运行环境。
+6. 不要通过手工复制单个文件、修改来源不明的注册表项目或关闭安全校验来拼接运行环境。
 
 ### 4. 验证安装结果
 
-读取 `%LOCALAPPDATA%\TianyuanWorkbench\安装检查结果.txt`，确认：
+优先读取 `%LOCALAPPDATA%\TianyuanWorkbench\安装检查结果.json`，再读取文本报告，确认：
 
 - 扩展目录存在：
   `%LOCALAPPDATA%\TianyuanWorkbench\projects\天源评估系统\extension`
@@ -52,6 +63,7 @@
 - Chrome 和 Edge Native Messaging Host 已注册。
 - Connector Bridge 可以启动并返回健康状态。
 - 安装报告没有失败步骤。
+- JSON 中组件状态与 `manualActions` 分开判断；MCP token、CLI 授权和浏览器扩展加载不属于安装失败。
 
 ### 5. 加载浏览器扩展
 
@@ -72,9 +84,14 @@
    - 不得要求用户把 token 发送到聊天中；
    - 不得读取、复制、记录或回显 token；
    - 不得把 token 写入项目文件、GitHub、日志或截图。
-4. 如需 CLI 授权，打开授权页面，让用户本人完成账号、密码和验证码操作。
-5. 授权后重新检查 Helper、MCP、CLI 和 Connector 状态。
-6. 如果当前 Agent 支持 MCP 配置，将统一 Connector 注册到当前 Agent；如需重启 Agent，完成重启后的只读复测。
+4. 点击“配置 MCP”时，工作台会打开 MCP 接入页：
+   `https://mcp.zhrdc.net/connect?source=valuation`
+   用户本人在该页面完成配置后，回到工作台粘贴 token。
+5. 如需 CLI 授权，点击“授权 CLI”，工作台会打开 CLI 授权页：
+   `https://mcp.zhrdc.net/connect?source=valuation&tab=cli`
+   让用户本人完成账号、密码和验证码操作。
+6. 授权后重新检查 Helper、MCP、CLI 和 Connector 状态。
+7. 如果当前 Agent 支持 MCP 配置，将统一 Connector 注册到当前 Agent；如需重启 Agent，完成重启后的只读复测。
 
 ### 7. 只读验收
 
@@ -103,6 +120,6 @@
 - 仍需用户完成的操作；
 - 失败项、准确错误信息和下一步建议。
 
-安全要求：不得保存或输出 MCP token、Cookie、Authorization、密码、验证码；不得绕过 SHA-256 校验、编辑锁或浏览器安全策略。
+安全要求：不得保存或输出 MCP token、Cookie、Authorization、密码、验证码；不得绕过 SHA-256 校验、编辑锁或浏览器安全策略。CLI 探测最多等待 5 秒，超时后终止探测进程树并继续安装其他工作台组件。
 
 ## 提示词结束
