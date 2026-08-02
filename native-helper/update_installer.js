@@ -32,6 +32,17 @@ function safeReason(error) {
     .slice(0, 500);
 }
 
+function updateErrorDetails(error) {
+  const details = {};
+  if (error?.code) details.errorCode = String(error.code).slice(0, 80);
+  if (error?.stage) details.stage = String(error.stage).slice(0, 80);
+  if (error?.zipPath) details.zipPath = String(error.zipPath).slice(0, 500);
+  if (error?.destination) details.destination = String(error.destination).slice(0, 500);
+  if (error?.reason) details.reason = safeReason(error.reason);
+  if (error?.exitCode !== undefined && error?.exitCode !== null) details.exitCode = error.exitCode;
+  return details;
+}
+
 function writePrivateJson(targetPath, payload) {
   fs.mkdirSync(path.dirname(targetPath), { recursive: true, mode: 0o700 });
   const temporary = `${targetPath}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
@@ -224,6 +235,20 @@ function createWorkbenchUpdater({
   const logPath = path.join(runtimeDirectory, "workbench-update.log");
   let installBusy = false;
 
+  function createStagingRoot(mode) {
+    const shortId = randomBytes(4).toString("hex");
+    if (typeof platformAdapter.createUpdateStagingRoot === "function") {
+      return platformAdapter.createUpdateStagingRoot({ mode, shortId });
+    }
+    const root = path.join(
+      platformAdapter.runtimeRoot,
+      "updates",
+      `${mode === "test" ? "test" : "update"}-${shortId}`,
+    );
+    fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+    return root;
+  }
+
   function status(payload) {
     const next = {
       ok: payload.ok !== false,
@@ -309,11 +334,7 @@ function createWorkbenchUpdater({
       if (!update.asset?.url) throw new Error("UPDATE_ASSET_NOT_FOUND");
 
       const expected = await expectedSha256(update, { fetchImpl });
-      testRoot = path.join(
-        platformAdapter.runtimeRoot,
-        "updates",
-        `self-test-v${update.latestVersion}-${update.platform}-${updateId}`,
-      );
+      testRoot = createStagingRoot("test");
       const packagePath = path.join(
         testRoot,
         update.asset.name || "workbench-update.zip",
@@ -383,7 +404,9 @@ function createWorkbenchUpdater({
         mode: "test",
         phase: "failed",
         percent: 0,
+        message: "更新模块测试失败",
         reason,
+        ...updateErrorDetails(error),
       });
       return {
         ok: false,
@@ -391,7 +414,9 @@ function createWorkbenchUpdater({
         updateId,
         mode: "test",
         phase: "failed",
+        message: "更新模块测试失败",
         reason,
+        ...updateErrorDetails(error),
         security: security(),
       };
     } finally {
@@ -412,6 +437,8 @@ function createWorkbenchUpdater({
       };
     }
     installBusy = true;
+    let updateRoot = "";
+    let installerHandedOff = false;
     try {
       status({ updateId, phase: "checking", percent: 5, message: "正在检查官方更新" });
       const update = await updateChecker.checkGithubUpdate({
@@ -426,11 +453,7 @@ function createWorkbenchUpdater({
       if (!update.asset?.url) throw new Error("UPDATE_ASSET_NOT_FOUND");
 
       const expected = await expectedSha256(update, { fetchImpl });
-      const updateRoot = path.join(
-        platformAdapter.runtimeRoot,
-        "updates",
-        `v${update.latestVersion}-${update.platform}`,
-      );
+      updateRoot = createStagingRoot("update");
       const packagePath = path.join(updateRoot, update.asset.name || "workbench-update.zip");
       const extractRoot = path.join(updateRoot, "extracted");
       fs.rmSync(updateRoot, { recursive: true, force: true });
@@ -479,10 +502,12 @@ function createWorkbenchUpdater({
         statusPath,
         logPath,
         parentPid: process.pid,
+        cleanupPath: updateRoot,
       });
       if (!launch || !Number.isInteger(Number(launch.pid)) || Number(launch.pid) <= 0) {
         throw new Error("UPDATE_INSTALLER_NOT_STARTED");
       }
+      installerHandedOff = true;
       status({
         updateId,
         phase: "stopping_services",
@@ -507,16 +532,29 @@ function createWorkbenchUpdater({
       };
     } catch (error) {
       const reason = safeReason(error);
-      status({ ok: false, updateId, phase: "failed", percent: 0, reason });
+      status({
+        ok: false,
+        updateId,
+        phase: "failed",
+        percent: 0,
+        message: "工作台更新失败",
+        reason,
+        ...updateErrorDetails(error),
+      });
       return {
         ok: false,
         action: "install_workbench_update",
         updateId,
         phase: "failed",
+        message: "工作台更新失败",
         reason,
+        ...updateErrorDetails(error),
         security: security(),
       };
     } finally {
+      if (updateRoot && !installerHandedOff) {
+        fs.rmSync(updateRoot, { recursive: true, force: true });
+      }
       installBusy = false;
     }
   }

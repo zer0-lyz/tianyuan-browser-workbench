@@ -14,6 +14,29 @@ function createWindowsAdapter(options = {}) {
   const homeDir = options.homeDir || os.homedir();
   const localAppData = env.LOCALAPPDATA || path.join(homeDir, "AppData", "Local");
   const runtimeRoot = path.join(localAppData, "TianyuanWorkbench");
+  const WINDOWS_SAFE_PATH_LIMIT = 240;
+
+  function redactPowerShellText(value) {
+    return String(value || "")
+      .replace(/-EncodedCommand\s+\S+/gi, "-EncodedCommand [REDACTED]")
+      .replace(/bearer\s+\S+/gi, "Bearer [REDACTED]")
+      .replace(/zhmcp_[A-Za-z0-9._-]+/gi, "[REDACTED]")
+      .replace(/(authorization|cookie|password|验证码|token)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 700);
+  }
+
+  function parsePowerShellMarker(output, marker) {
+    const lines = String(output || "").split(/\r?\n/).reverse();
+    const line = lines.find((candidate) => candidate.startsWith(marker));
+    if (!line) return null;
+    try {
+      return JSON.parse(line.slice(marker.length));
+    } catch {
+      return null;
+    }
+  }
 
   function runPowerShell(script, timeout = 120000, extraEnv = {}) {
     return new Promise((resolve) => {
@@ -103,10 +126,47 @@ function createWindowsAdapter(options = {}) {
     fs.mkdirSync(destination, { recursive: true });
     const script = [
       "$ErrorActionPreference = 'Stop'",
-      `Expand-Archive -LiteralPath '${String(zipPath).replace(/'/g, "''")}' -DestinationPath '${String(destination).replace(/'/g, "''")}' -Force`,
+      "Add-Type -AssemblyName System.IO.Compression.FileSystem",
+      "$ZipPath = [System.IO.Path]::GetFullPath($env:TIANYUAN_UPDATE_ZIP_PATH)",
+      "$Destination = [System.IO.Path]::GetFullPath($env:TIANYUAN_UPDATE_DESTINATION)",
+      "$SafePathLimit = 240",
+      "$Stage = 'validating_zip'",
+      "$zip = $null",
+      "try {",
+      "  $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)",
+      "  $root = $Destination.TrimEnd([char]92) + [char]92",
+      "  $longest = ''",
+      "  $longestLength = $Destination.Length",
+      "  foreach ($entry in $zip.Entries) {",
+      "    $name = [string]$entry.FullName",
+      "    if ([string]::IsNullOrWhiteSpace($name)) { continue }",
+      "    $normalized = $name.Replace('/', [char]92)",
+      "    if ([System.IO.Path]::IsPathRooted($normalized) -or $normalized -match '^[A-Za-z]:') { throw [System.Exception]::new('UPDATE_ZIP_PATH_TRAVERSAL|' + $name) }",
+      "    $parts = $normalized.Split([char]92)",
+      "    if ($parts -contains '..') { throw [System.Exception]::new('UPDATE_ZIP_PATH_TRAVERSAL|' + $name) }",
+      "    $candidate = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($Destination, $normalized))",
+      "    if (-not $candidate.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase) -and $candidate -ne $Destination) { throw [System.Exception]::new('UPDATE_ZIP_PATH_TRAVERSAL|' + $name) }",
+      "    if ($candidate.Length -gt $longestLength) { $longest = $name; $longestLength = $candidate.Length }",
+      "    if ($candidate.Length -gt $SafePathLimit) { throw [System.Exception]::new('UPDATE_PATH_TOO_LONG|entry=' + $name + '|rootLength=' + $Destination.Length + '|targetLength=' + $candidate.Length) }",
+      "  }",
+      "  $zip.Dispose(); $zip = $null",
+      "  $Stage = 'extracting'",
+      "  Expand-Archive -LiteralPath $ZipPath -DestinationPath $Destination -Force",
+      "  $payload = [ordered]@{ ok = $true; stage = 'complete'; destination = $Destination; longestEntry = $longest; longestTargetLength = $longestLength }",
+      "  [Console]::Out.WriteLine('TIANYU_UPDATE_RESULT:' + ($payload | ConvertTo-Json -Compress))",
+      "} catch {",
+      "  if ($zip) { $zip.Dispose() }",
+      "  $raw = [string]$_.Exception.Message",
+      "  $parts = $raw.Split('|', 2)",
+      "  $errorCode = if ($parts[0] -in @('UPDATE_PATH_TOO_LONG','UPDATE_ZIP_PATH_TRAVERSAL')) { $parts[0] } else { 'UPDATE_EXTRACT_FAILED' }",
+      "  $reason = if ($parts.Length -gt 1) { $parts[1] } else { $raw }",
+      "  $payload = [ordered]@{ ok = $false; errorCode = $errorCode; stage = $Stage; message = '更新包解压失败'; reason = $reason; zipPath = $ZipPath; destination = $Destination }",
+      "  [Console]::Error.WriteLine('TIANYUAN_UPDATE_ERROR:' + ($payload | ConvertTo-Json -Compress))",
+      "  exit 1",
+      "}",
     ].join("\n");
-    await new Promise((resolve, reject) => {
-      const encoded = Buffer.from(script, "utf16le").toString("base64");
+    const encoded = Buffer.from(script, "utf16le").toString("base64");
+    const result = await new Promise((resolve) => {
       runFile("powershell.exe", [
         "-NoProfile",
         "-NonInteractive",
@@ -114,10 +174,70 @@ function createWindowsAdapter(options = {}) {
         "Bypass",
         "-EncodedCommand",
         encoded,
-      ], { timeout: 180000, windowsHide: true }, (error) =>
-        error ? reject(error) : resolve()
-      );
+      ], {
+        timeout: 180000,
+        windowsHide: true,
+        encoding: "utf8",
+        env: {
+          ...env,
+          TIANYUAN_UPDATE_ZIP_PATH: String(zipPath),
+          TIANYUAN_UPDATE_DESTINATION: String(destination),
+        },
+      }, (error, stdout, stderr) => resolve({ error, stdout, stderr }));
     });
+    const parsed = parsePowerShellMarker(result.stderr, "TIANYUAN_UPDATE_ERROR:")
+      || parsePowerShellMarker(result.stdout, "TIANYUAN_UPDATE_ERROR:");
+    if (result.error || parsed?.ok === false) {
+      const errorCode = parsed?.errorCode || "UPDATE_EXTRACT_FAILED";
+      const details = [
+        parsed?.message || "更新包解压失败",
+        parsed?.reason || "PowerShell 解压命令失败",
+        `stage=${parsed?.stage || "extracting"}`,
+        `zip=${parsed?.zipPath || zipPath}`,
+        `destination=${parsed?.destination || destination}`,
+        `stderr=${redactPowerShellText(result.stderr)}`,
+        `stdout=${redactPowerShellText(result.stdout)}`,
+      ].filter((value) => !value.endsWith("="));
+      const failure = new Error(`${errorCode}:${details.join("; ")}`.slice(0, 1800));
+      failure.code = errorCode;
+      failure.stage = parsed?.stage || "extracting";
+      failure.zipPath = parsed?.zipPath || String(zipPath);
+      failure.destination = parsed?.destination || String(destination);
+      failure.reason = parsed?.reason || redactPowerShellText(result.stderr) || redactPowerShellText(result.error?.message);
+      failure.stdout = redactPowerShellText(result.stdout);
+      failure.stderr = redactPowerShellText(result.stderr);
+      failure.exitCode = result.error?.code || null;
+      throw failure;
+    }
+    const success = parsePowerShellMarker(result.stdout, "TIANYUAN_UPDATE_RESULT:");
+    if (!success?.ok) {
+      const failure = new Error(`UPDATE_EXTRACT_FAILED:解压过程未返回成功结果; stage=extracting; stderr=${redactPowerShellText(result.stderr)}`);
+      failure.code = "UPDATE_EXTRACT_FAILED";
+      failure.stage = "extracting";
+      throw failure;
+    }
+    return success;
+  }
+
+  function createUpdateStagingRoot({ mode = "update", shortId = "" } = {}) {
+    const id = String(shortId || Math.random().toString(16).slice(2, 10))
+      .replace(/[^a-z0-9]/gi, "")
+      .slice(0, 12) || "work";
+    const bases = [
+      path.join(localAppData, "TianyuanUpdate"),
+      env.TEMP || env.TMP || os.tmpdir(),
+    ];
+    let lastError = null;
+    for (const base of bases) {
+      const candidate = path.join(base, id);
+      try {
+        fs.mkdirSync(candidate, { recursive: true, mode: 0o700 });
+        return candidate;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw new Error(`UPDATE_STAGING_DIRECTORY_FAILED:${mode}:${lastError?.code || "UNKNOWN"}`);
   }
 
   function launchWorkbenchInstaller({
@@ -125,6 +245,7 @@ function createWindowsAdapter(options = {}) {
     statusPath,
     logPath,
     parentPid,
+    cleanupPath = "",
   }) {
     const runnerPath = path.join(path.dirname(statusPath), "run-update.ps1");
     const quote = (value) => String(value).replace(/'/g, "''");
@@ -134,13 +255,15 @@ function createWindowsAdapter(options = {}) {
       "$RunnerPid = $PID",
       `$StatusPath = '${quote(statusPath)}'`,
       `$LogPath = '${quote(logPath)}'`,
+      `$CleanupPath = '${quote(cleanupPath)}'`,
       "$InstallerPid = $RunnerPid",
+      "$Utf8NoBom = [System.Text.UTF8Encoding]::new($false)",
       "function Protect-UpdateMessage([string]$Message) { return ($Message -replace '(?i)(bearer\\s+)[^\\s]+', '$1[REDACTED]' -replace '(?i)(authorization|cookie|password|验证码|token)\\s*[:=]\\s*[^\\s,;]+', '$1=[REDACTED]') }",
       "function Write-UpdateStatus([string]$Phase, [int]$Percent, [string]$Message, [string]$Reason = '', [int]$ExitCode = 0) {",
       "  $payload = [ordered]@{ ok = $Phase -ne 'failed'; action = 'workbench_update'; phase = $Phase; percent = $Percent; message = $Message; reason = (Protect-UpdateMessage $Reason); exitCode = $ExitCode; installerPid = $InstallerPid; updatedAt = [DateTime]::UtcNow.ToString('o'); logPath = $LogPath; security = @{ credentialsReturned = $false; tokenUsed = $false } }",
       "  New-Item -ItemType Directory -Path (Split-Path -Parent $StatusPath) -Force | Out-Null",
       "  $temporary = \"$StatusPath.tmp-$PID\"",
-      "  $payload | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $temporary -Encoding UTF8",
+      "  [System.IO.File]::WriteAllText($temporary, (($payload | ConvertTo-Json -Depth 6) + [Environment]::NewLine), $Utf8NoBom)",
       "  Move-Item -LiteralPath $temporary -Destination $StatusPath -Force",
       "}",
       "$LogDirectory = Split-Path -Parent $LogPath",
@@ -161,6 +284,7 @@ function createWindowsAdapter(options = {}) {
       "if (-not (Test-Path -LiteralPath $StatusPath)) { throw 'UPDATE_COMPLETION_STATUS_MISSING' }",
       "$final = Get-Content -LiteralPath $StatusPath -Raw -Encoding UTF8 | ConvertFrom-Json",
       "if ($final.phase -notin @('complete')) { throw 'UPDATE_COMPLETION_STATUS_MISSING' }",
+      "if ($CleanupPath -and (Test-Path -LiteralPath $CleanupPath)) { Remove-Item -LiteralPath $CleanupPath -Recurse -Force -ErrorAction SilentlyContinue }",
       "exit 0",
       "",
       "trap {",
@@ -169,6 +293,7 @@ function createWindowsAdapter(options = {}) {
       "  if ($existing -and $existing.phase -eq 'failed' -and $existing.reason) { $reason = Protect-UpdateMessage ([string]$existing.reason) }",
       "  $failedPercent = 0; if ($existing -and $existing.percent) { $failedPercent = [int]$existing.percent }",
       "  try { Write-UpdateStatus 'failed' $failedPercent '工作台更新失败' $reason ([int]($LASTEXITCODE)) } catch {}",
+      "  if ($CleanupPath -and (Test-Path -LiteralPath $CleanupPath)) { Remove-Item -LiteralPath $CleanupPath -Recurse -Force -ErrorAction SilentlyContinue }",
       "  exit 1",
       "}",
     ].join("\r\n"), "utf8");
@@ -343,6 +468,7 @@ function createWindowsAdapter(options = {}) {
     createCredentialReference,
     diagnostics,
     listenerPids,
+    createUpdateStagingRoot,
     extractZip,
     launchWorkbenchInstaller,
     resolveCredentialReference,

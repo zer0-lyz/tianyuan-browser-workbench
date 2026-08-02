@@ -24,6 +24,7 @@ const result = adapter.launchWorkbenchInstaller({
   statusPath,
   logPath,
   parentPid: 43211,
+  cleanupPath: path.join(root, "staging-update"),
 });
 const script = fs.readFileSync(result.runnerPath, "utf8");
 
@@ -35,6 +36,9 @@ assert.match(script, /stopping_services/);
 assert.match(script, /UPDATE_COMPLETION_STATUS_MISSING/);
 assert.match(script, /installerPid/);
 assert.match(script, /updatedAt/);
+assert.match(script, /UTF8Encoding\]::new\(\$false\)/);
+assert.match(script, /CleanupPath/);
+assert.match(script, /Remove-Item -LiteralPath \$CleanupPath/);
 assert.match(script, /trap/);
 
 fs.rmSync(root, { recursive: true, force: true });
