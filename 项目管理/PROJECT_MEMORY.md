@@ -1,5 +1,14 @@
 # 天源浏览器工作台项目长期记忆
 
+## 2026-08-02 Windows 更新解压稳定性规则 v0.14.20
+
+- Windows 更新的暂存目录必须短且位于当前用户本地运行目录，优先使用 `%LOCALAPPDATA%\\TianyuanUpdate\\<短随机ID>`，不能把版本号、平台名和完整 updateId 拼进目录名。
+- ZIP 解压必须先检查内部条目：禁止 `..`、绝对路径、盘符路径和规范化后越出目标根目录；目标路径超过 240 字符时返回 `UPDATE_PATH_TOO_LONG`，不要让 `Expand-Archive` 直接失败。
+- PowerShell 解压失败必须结构化回传 `errorCode`、`stage`、`reason`、`zipPath`、`destination`、stderr 和退出码，并做敏感信息脱敏；前端不得展示 `EncodedCommand`。
+- Windows PowerShell 5.1 的 `Set-Content -Encoding UTF8` 可能写入 BOM，更新状态必须使用无 BOM UTF-8、临时文件和原子替换。
+- 正式更新在把暂存目录交给后台安装器后由 runner 清理；安装器未启动或前置阶段失败时由 Node 更新器清理。测试模式始终不修改正式安装目录。
+- v0.14.20 / build `2026080208` 对应源码提交 `261f0526f95ca0aa583372e9d17f44dcabc0f824`，Windows 完整包 SHA-256 为 `0a15166c1d590d6e310cb046713bd2d1e684af0c4795f68f05d2fac4b77a7e16`，Lite 包 SHA-256 为 `4345bb12f20e05529af96932487c8c52630495c7a5fb3b3abe3006d5adb567a8`。
+
 更新时间：2026-08-02 CST
 
 ## 2026-08-02 v0.14.19 Windows 明细表一页宽修复
