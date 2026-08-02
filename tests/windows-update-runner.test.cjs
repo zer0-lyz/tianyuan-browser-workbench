@@ -36,6 +36,8 @@ assert.match(script, /stopping_services/);
 assert.match(script, /UPDATE_COMPLETION_STATUS_MISSING/);
 assert.match(script, /installerPid/);
 assert.match(script, /updatedAt/);
+assert.match(script, /errorCode/);
+assert.match(script, /UPDATE_RUNNER_FAILED/);
 assert.match(script, /UTF8Encoding\]::new\(\$false\)/);
 assert.match(script, /CleanupPath/);
 assert.match(script, /Remove-Item -LiteralPath \$CleanupPath/);
