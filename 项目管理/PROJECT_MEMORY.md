@@ -7,7 +7,7 @@
 - PowerShell 解压失败必须结构化回传 `errorCode`、`stage`、`reason`、`zipPath`、`destination`、stderr 和退出码，并做敏感信息脱敏；前端不得展示 `EncodedCommand`。
 - Windows PowerShell 5.1 的 `Set-Content -Encoding UTF8` 可能写入 BOM，更新状态必须使用无 BOM UTF-8、临时文件和原子替换。
 - 正式更新在把暂存目录交给后台安装器后由 runner 清理；安装器未启动或前置阶段失败时由 Node 更新器清理。测试模式始终不修改正式安装目录。
-- v0.14.20 / build `2026080208` 对应源码提交 `261f0526f95ca0aa583372e9d17f44dcabc0f824`，Windows 完整包 SHA-256 为 `0a15166c1d590d6e310cb046713bd2d1e684af0c4795f68f05d2fac4b77a7e16`，Lite 包 SHA-256 为 `4345bb12f20e05529af96932487c8c52630495c7a5fb3b3abe3006d5adb567a8`。
+- v0.14.20 / build `2026080208` 对应源码提交 `2a725e2707a70c2b3473a7f13c9936c534dd6aee`，运行指纹为 `b5f28cb293a3cd09fced0d9df122ad529b1c9fa7391617abd3e8f1d2be0f3a9f`；Windows 完整包 SHA-256 为 `3d18b3c756675be37e58a452411d48041c188859b005ac4db91ffb7799faef80`，Lite 包 SHA-256 为 `bd12d75fe6201f6e49b4cc68bc5501e7a820c7dec5ca9c72dab7b202061e55b7`。
 
 更新时间：2026-08-02 CST
 
