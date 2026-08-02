@@ -1,5 +1,34 @@
 # 天源浏览器工作台任务日志
 
+## 2026-08-02 Windows 更新包解压失败修复与 v0.14.20 构建
+
+### 任务目标
+
+修复 Windows 更新测试在解压阶段因长路径失败、错误只显示 `Command failed`、状态可能带 BOM 或暂存目录残留的问题，并重新构建发布修复版本。
+
+### 执行动作
+
+- 修改 `native-helper/platform/windows.js`：短暂存目录、ZIP 条目安全校验、240 字符安全路径阈值、PowerShell stdout/stderr/退出码捕获、结构化错误码和脱敏。
+- 修改 `native-helper/update_installer.js`：测试/正式模式共用短暂存目录，错误状态写入 `errorCode`、`stage`、路径和原因，未交接安装器时清理暂存目录。
+- 修改 Windows runner：状态使用无 BOM UTF-8 原子写入，后台安装成功/失败后清理交接的暂存目录。
+- 新增 `tests/windows-update-extract.test.cjs`，扩展 runner 回归断言。
+- 版本升级到 `0.14.20` / build `2026080208`。
+- 提交并推送源码：`261f0526f95ca0aa583372e9d17f44dcabc0f824`。
+
+### 验证
+
+- `node --test tests/*.cjs tests/*.mjs`：23/23 通过。
+- 包内回读确认 `version=0.14.20`、`build_number=2026080208`、`source_dirty=false`、提交号和运行指纹一致。
+- 完整包 SHA-256：`0a15166c1d590d6e310cb046713bd2d1e684af0c4795f68f05d2fac4b77a7e16`。
+- Lite 包 SHA-256：`4345bb12f20e05529af96932487c8c52630495c7a5fb3b3abe3006d5adb567a8`。
+- 真实 Windows 安装、PowerShell 5.1、文件占用和更新后 Connector 恢复仍待用户验收。
+
+### 输出
+
+- 完整包：`/Users/zer0y/.tianyuan-workbench/releases/tianyuan-workbench-v0.14.20-windows-x64-20260802.zip`。
+- Lite 包：`/Users/zer0y/.tianyuan-workbench/releases/tianyuan-workbench-v0.14.20-windows-x64-lite-20260802.zip`。
+- 测试证据：`docs/test-evidence/2026-08-02-windows-update-extract-v0.14.20.md`。
+
 ## 2026-08-02 Windows 自动更新卡 82% 修复 v0.14.18
 
 - 任务目标：修复 Windows 从 `v0.14.16`/`v0.14.17` 更新时下载解压成功、安装阶段卡在 82%，实际版本不变的问题。

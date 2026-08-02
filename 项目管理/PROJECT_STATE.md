@@ -1,5 +1,17 @@
 # 天源浏览器工作台项目状态
 
+## 2026-08-02 Windows 更新解压修复 v0.14.20（待 GitHub Release 与 Windows 实机验收）
+
+- 已修复 Windows 更新包因长暂存路径导致 `Expand-Archive` 解压失败的问题：测试和正式更新统一使用 `LOCALAPPDATA\\TianyuanUpdate\\<短随机ID>` 暂存目录。
+- 解压前读取 ZIP 条目，拦截 `..`、绝对路径、盘符路径和规范化路径穿越；目标路径超过 240 字符返回 `UPDATE_PATH_TOO_LONG`，危险条目返回 `UPDATE_ZIP_PATH_TRAVERSAL`。
+- PowerShell 解压现在捕获 stdout、stderr、退出码、阶段、ZIP 路径和目标目录，错误经过脱敏后回写状态，不再只显示 `Command failed` 或 `EncodedCommand`。
+- Windows runner 使用无 BOM UTF-8 原子写入状态文件；更新成功或失败后清理暂存目录，失败不会停留在假安装状态。
+- 版本：`0.14.20`，构建号 `2026080208`；源码提交：`261f0526f95ca0aa583372e9d17f44dcabc0f824`。
+- 运行指纹：`1d4d38b6450b3253926a975f09a08d4cfbd0e145413a2c32351ea621866848d6`。
+- Windows 完整包：`/Users/zer0y/.tianyuan-workbench/releases/tianyuan-workbench-v0.14.20-windows-x64-20260802.zip`，SHA-256：`0a15166c1d590d6e310cb046713bd2d1e684af0c4795f68f05d2fac4b77a7e16`。
+- Windows Lite 包：`/Users/zer0y/.tianyuan-workbench/releases/tianyuan-workbench-v0.14.20-windows-x64-lite-20260802.zip`，SHA-256：`4345bb12f20e05529af96932487c8c52630495c7a5fb3b3abe3006d5adb567a8`。
+- 本机自动化回归 `23/23` 通过；真实 Windows 10/11、PowerShell 5.1、进程占用和安装升级仍需用户实机验收。
+
 ## 2026-08-02 Windows 明细表一页宽修复 v0.14.19（已发布，待 Windows 实机验收）
 
 - 明细表打印脚本已改为 `fitToPage=1`、`autoPageBreaks=0`、`fitToWidth=1`、`fitToHeight=0`，清除固定缩放比例，解决 Windows 打印设置仍显示“无打印缩放”的问题。
