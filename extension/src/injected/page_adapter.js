@@ -42,8 +42,8 @@
   }
 
   function parseRoute() {
-    const operationMatch = location.pathname.match(/\/ty\/operation\/([^/]+)/);
-    const draftMatch = location.pathname.match(/\/ty\/operation\/([^/]+)\/([^/]+)\/asset-based-approach\/draft/);
+    const operationMatch = location.pathname.match(/\/ty\/operation\/(?:review\/)?([^/]+)/);
+    const draftMatch = location.pathname.match(/\/ty\/operation\/(?:review\/)?([^/]+)\/([^/]+)\/asset-based-approach\/draft/);
     const params = new URLSearchParams(location.search);
     return {
       isTianyuanOperationRoute: Boolean(operationMatch),

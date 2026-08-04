@@ -99,6 +99,7 @@ assert.equal(sidepanel.includes("batchCleanupState.running"), true);
 assert.equal(sidepanel.includes("async function inspectBatchCleanupTarget"), true);
 assert.equal(sidepanel.includes("batchCleanupState.running = true;"), true);
 assert.equal(adapter.includes("BATCH_UPLOAD_ROW_ALREADY_HAS_INDEX"), true);
+assert.equal(adapter.includes("(?:review\\/)?([^/]+)"), true);
 assert.equal(adapter.includes("click_upload_dialog_save_once"), true);
 assert.equal(adapter.includes("clearAuditAttachments"), true);
 assert.equal(adapter.includes("CLEAR_ATTACHMENTS_INDEX_VALUE_MISMATCH"), true);
