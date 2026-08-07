@@ -203,6 +203,12 @@ const PRINT_FORMAT_SCRIPTS = Object.freeze({
     "adjust_appraisal_declaration_print.py",
   ),
 });
+const LINK_RESTORE_SCRIPT = path.join(
+  PRINT_SKILLS_DIR,
+  "asset-link-restore",
+  "scripts",
+  "restore_links.py",
+);
 const PRINT_OUTPUT_MODES = new Set(["overwrite", "copy_in_source", "new_directory"]);
 
 function getToken() {
@@ -1347,7 +1353,7 @@ function listBatchUploadDirectory(input = {}) {
 }
 
 async function choosePrintOutputDirectory() {
-  const result = await chooseDirectory("选择打印版文件的存放位置");
+  const result = await chooseDirectory("选择处理后文件的存放位置");
   return {
     ...result,
     action: "print_output_directory_selected",
@@ -1411,6 +1417,18 @@ function uniquePrintTarget(directory, sourcePath) {
   let index = 2;
   while (fs.existsSync(target)) {
     target = path.join(directory, `${stem}-打印版 (${index})${extension}`);
+    index += 1;
+  }
+  return target;
+}
+
+function uniqueLinkRestoreTarget(directory, sourcePath) {
+  const extension = path.extname(sourcePath);
+  const stem = path.basename(sourcePath, extension);
+  let target = path.join(directory, `${stem}-链接恢复${extension}`);
+  let index = 2;
+  while (fs.existsSync(target)) {
+    target = path.join(directory, `${stem}-链接恢复 (${index})${extension}`);
     index += 1;
   }
   return target;
@@ -1631,6 +1649,200 @@ async function runPrintFormat(message, emit) {
       phase: "failed",
       percent: 0,
       formatType,
+      outputMode,
+      reason: error?.message || String(error),
+      results,
+      security: { credentialsReturned: false },
+    });
+  }
+}
+
+function runPythonLinkRestoreScript(workbookPath, onLine) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(PYTHON_BIN, [LINK_RESTORE_SCRIPT, workbookPath], {
+      env: {
+        ...process.env,
+        PYTHONUNBUFFERED: "1",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const logLines = [];
+    const consume = (line, stream) => {
+      const text = String(line || "").trim();
+      if (!text) return;
+      logLines.push({ stream, text });
+      onLine?.(text, stream);
+    };
+    readline.createInterface({ input: child.stdout }).on("line", (line) => consume(line, "stdout"));
+    readline.createInterface({ input: child.stderr }).on("line", (line) => consume(line, "stderr"));
+    child.on("error", reject);
+    child.on("close", (code, signal) => {
+      if (code === 0) {
+        resolve({ code, signal: signal || null, logLines });
+      } else {
+        const error = new Error("LINK_RESTORE_SCRIPT_FAILED");
+        error.exitCode = code;
+        error.signal = signal || null;
+        error.logLines = logLines;
+        reject(error);
+      }
+    });
+  });
+}
+
+async function runLinkRestore(message, emit) {
+  const outputMode = String(message?.outputMode || "");
+  const results = [];
+  try {
+    if (!fs.existsSync(LINK_RESTORE_SCRIPT)) throw new Error("LINK_RESTORE_SCRIPT_NOT_FOUND");
+    if (!PRINT_OUTPUT_MODES.has(outputMode)) throw new Error("LINK_RESTORE_OUTPUT_MODE_INVALID");
+    const sourceFiles = collectWorkbookFiles(message.inputPaths);
+    const outputDir = outputMode === "new_directory"
+      ? validateExportDirectory(message.outputDir)
+      : "";
+    emit({
+      ok: true,
+      event: "progress",
+      phase: "ready",
+      percent: 3,
+      current: 0,
+      total: sourceFiles.length,
+      message: `已发现 ${sourceFiles.length} 个工作簿`,
+    });
+
+    for (let index = 0; index < sourceFiles.length; index += 1) {
+      const sourcePath = sourceFiles[index];
+      const destinationDirectory = outputMode === "new_directory"
+        ? outputDir
+        : path.dirname(sourcePath);
+      const finalPath = outputMode === "overwrite"
+        ? sourcePath
+        : uniqueLinkRestoreTarget(destinationDirectory, sourcePath);
+      const tempInput = path.join(
+        path.dirname(sourcePath),
+        `.${path.basename(sourcePath, path.extname(sourcePath))}.tianyuan-link-${randomUUID()}${path.extname(sourcePath)}`,
+      );
+      const startPercent = 5 + Math.round(index / sourceFiles.length * 90);
+      emit({
+        ok: true,
+        event: "progress",
+        phase: "processing",
+        percent: startPercent,
+        current: index + 1,
+        total: sourceFiles.length,
+        sourcePath,
+        outputPath: finalPath,
+        message: `正在恢复 ${path.basename(sourcePath)}`,
+      });
+
+      fs.copyFileSync(sourcePath, tempInput);
+      try {
+        const scriptResult = await runPythonLinkRestoreScript(tempInput, (text, stream) => emit({
+          ok: true,
+          event: "progress",
+          phase: "processing",
+          percent: Math.min(94, startPercent + 2),
+          current: index + 1,
+          total: sourceFiles.length,
+          sourcePath,
+          outputPath: finalPath,
+          message: text,
+          stream,
+        }));
+        const generatedPath = path.join(
+          path.dirname(tempInput),
+          `${path.basename(tempInput, path.extname(tempInput))}_链接恢复${path.extname(tempInput)}`,
+        );
+        if (!fs.existsSync(generatedPath)) throw new Error("LINK_RESTORE_OUTPUT_NOT_FOUND");
+        const reportTempPath = path.join(
+          path.dirname(tempInput),
+          `${path.basename(tempInput, path.extname(tempInput))}_链接恢复对比报告.xlsx`,
+        );
+        const reportFinalPath = path.join(
+          destinationDirectory,
+          `${path.basename(sourcePath, path.extname(sourcePath))}_链接恢复对比报告.xlsx`,
+        );
+        fs.renameSync(generatedPath, tempInput);
+        await verifyWorkbookArchive(tempInput);
+        if (fs.existsSync(reportTempPath)) {
+          if (fs.existsSync(reportFinalPath)) fs.unlinkSync(reportFinalPath);
+          fs.renameSync(reportTempPath, reportFinalPath);
+        }
+        replaceProcessedFile(tempInput, finalPath);
+        results.push({
+          ok: true,
+          sourcePath,
+          outputPath: finalPath,
+          reportPath: fs.existsSync(reportFinalPath) ? reportFinalPath : null,
+          overwritten: outputMode === "overwrite",
+          logLines: scriptResult.logLines,
+          archiveVerified: true,
+        });
+        emit({
+          ok: true,
+          event: "progress",
+          phase: "verified",
+          percent: 5 + Math.round((index + 1) / sourceFiles.length * 90),
+          current: index + 1,
+          total: sourceFiles.length,
+          sourcePath,
+          outputPath: finalPath,
+          message: `已完成并校验 ${path.basename(finalPath)}`,
+        });
+      } catch (error) {
+        for (const candidate of [
+          tempInput,
+          `${tempInput}_链接恢复.xlsx`,
+          `${tempInput}_链接恢复对比报告.xlsx`,
+        ]) {
+          if (fs.existsSync(candidate)) fs.unlinkSync(candidate);
+        }
+        results.push({
+          ok: false,
+          sourcePath,
+          outputPath: finalPath,
+          reason: error?.message || String(error),
+          exitCode: error?.exitCode ?? null,
+          logLines: error?.logLines || [],
+        });
+        emit({
+          ok: false,
+          event: "progress",
+          phase: "file_failed",
+          percent: 5 + Math.round((index + 1) / sourceFiles.length * 90),
+          current: index + 1,
+          total: sourceFiles.length,
+          sourcePath,
+          outputPath: finalPath,
+          message: `${path.basename(sourcePath)} 恢复失败`,
+        });
+      }
+    }
+
+    const successCount = results.filter((item) => item.ok).length;
+    const finalOk = successCount === results.length;
+    emit({
+      ok: finalOk,
+      event: "complete",
+      phase: finalOk ? "completed" : "completed_with_errors",
+      percent: 100,
+      action: "batch_link_restore",
+      outputMode,
+      outputDir: outputDir || null,
+      total: results.length,
+      successCount,
+      failedCount: results.length - successCount,
+      results,
+      reason: finalOk ? null : "LINK_RESTORE_BATCH_PARTIAL_FAILURE",
+      security: { credentialsReturned: false },
+    });
+  } catch (error) {
+    emit({
+      ok: false,
+      event: "complete",
+      phase: "failed",
+      percent: 0,
+      action: "batch_link_restore",
       outputMode,
       reason: error?.message || String(error),
       results,
@@ -2260,6 +2472,7 @@ async function runSelfTest() {
     ok: fs.existsSync(PYTHON_BIN)
       && fs.existsSync(PRINT_FORMAT_SCRIPTS.detail)
       && fs.existsSync(PRINT_FORMAT_SCRIPTS.declaration)
+      && fs.existsSync(LINK_RESTORE_SCRIPT)
       && platform.supported,
     service: "tianyuan-native-host",
     platform: process.platform,
@@ -2269,6 +2482,7 @@ async function runSelfTest() {
     printScriptsAvailable: {
       detail: fs.existsSync(PRINT_FORMAT_SCRIPTS.detail),
       declaration: fs.existsSync(PRINT_FORMAT_SCRIPTS.declaration),
+      linkRestore: fs.existsSync(LINK_RESTORE_SCRIPT),
     },
     cli,
     security: { credentialsReturned: false },
@@ -2315,6 +2529,10 @@ if (process.argv.includes("--connector-bridge")) {
     }
     if (message?.action === "run_print_format") {
       runPrintFormat(message, writeMessage);
+      return;
+    }
+    if (message?.action === "run_link_restore") {
+      runLinkRestore(message, writeMessage);
       return;
     }
     handle(message)
