@@ -76,6 +76,7 @@ const elements = {
   openExportDeclare: document.getElementById("openExportDeclare"),
   openFormatDetail: document.getElementById("openFormatDetail"),
   openFormatDeclaration: document.getElementById("openFormatDeclaration"),
+  openLinkRestore: document.getElementById("openLinkRestore"),
   backFromConnections: document.getElementById("backFromConnections"),
   backFromSave: document.getElementById("backFromSave"),
   backFromExit: document.getElementById("backFromExit"),
@@ -85,6 +86,7 @@ const elements = {
   backFromExportDeclare: document.getElementById("backFromExportDeclare"),
   backFromFormatDetail: document.getElementById("backFromFormatDetail"),
   backFromFormatDeclaration: document.getElementById("backFromFormatDeclaration"),
+  backFromLinkRestore: document.getElementById("backFromLinkRestore"),
   pageHome: document.getElementById("page-home"),
   pageConnections: document.getElementById("page-connections"),
   pageBatchSave: document.getElementById("page-batch-save"),
@@ -95,6 +97,7 @@ const elements = {
   pageExportDeclare: document.getElementById("page-export-declare"),
   pageFormatDetail: document.getElementById("page-format-detail"),
   pageFormatDeclaration: document.getElementById("page-format-declaration"),
+  pageLinkRestore: document.getElementById("page-link-restore"),
   scopeSection: document.getElementById("scopeSection"),
   supportSection: document.getElementById("supportSection"),
   saveScopeMount: document.getElementById("saveScopeMount"),
@@ -147,6 +150,17 @@ const elements = {
   declarationPrintProgressPercent: document.getElementById("declarationPrintProgressPercent"),
   runDetailPrintFormat: document.getElementById("runDetailPrintFormat"),
   runDeclarationPrintFormat: document.getElementById("runDeclarationPrintFormat"),
+  chooseLinkRestoreFiles: document.getElementById("chooseLinkRestoreFiles"),
+  chooseLinkRestoreFolder: document.getElementById("chooseLinkRestoreFolder"),
+  linkRestoreInputSummary: document.getElementById("linkRestoreInputSummary"),
+  linkRestoreOutputMode: document.getElementById("linkRestoreOutputMode"),
+  linkRestoreOutputDirectoryWrap: document.getElementById("linkRestoreOutputDirectoryWrap"),
+  linkRestoreOutputPath: document.getElementById("linkRestoreOutputPath"),
+  chooseLinkRestoreOutputPath: document.getElementById("chooseLinkRestoreOutputPath"),
+  linkRestoreProgressBar: document.getElementById("linkRestoreProgressBar"),
+  linkRestoreProgressText: document.getElementById("linkRestoreProgressText"),
+  linkRestoreProgressPercent: document.getElementById("linkRestoreProgressPercent"),
+  runLinkRestore: document.getElementById("runLinkRestore"),
   checkConnections: document.getElementById("checkConnections"),
   startConnector: document.getElementById("startConnector"),
   bindCurrentPage: document.getElementById("bindCurrentPage"),
@@ -370,6 +384,7 @@ const moduleScopeStates = Object.fromEntries(
 const printTaskStates = {
   detail: { inputPaths: [] },
   declaration: { inputPaths: [] },
+  link: { inputPaths: [] },
 };
 
 const CORE_ROUTE_LABELS = {
@@ -480,6 +495,7 @@ function setBusy(nextBusy) {
     elements.openExportDeclare,
     elements.openFormatDetail,
     elements.openFormatDeclaration,
+    elements.openLinkRestore,
     elements.backFromConnections,
     elements.backFromSave,
     elements.backFromExit,
@@ -489,6 +505,7 @@ function setBusy(nextBusy) {
     elements.backFromExportDeclare,
     elements.backFromFormatDetail,
     elements.backFromFormatDeclaration,
+    elements.backFromLinkRestore,
     elements.refresh,
     elements.copyJson,
     elements.runBatchSave,
@@ -3432,6 +3449,19 @@ function printFormatUi(formatType) {
       progressPercent: elements.detailPrintProgressPercent,
     };
   }
+  if (formatType === "link") {
+    return {
+      route: "link-restore",
+      label: "明细表公式恢复",
+      inputSummary: elements.linkRestoreInputSummary,
+      outputMode: elements.linkRestoreOutputMode,
+      outputDirectoryWrap: elements.linkRestoreOutputDirectoryWrap,
+      outputPath: elements.linkRestoreOutputPath,
+      progressBar: elements.linkRestoreProgressBar,
+      progressText: elements.linkRestoreProgressText,
+      progressPercent: elements.linkRestoreProgressPercent,
+    };
+  }
   return {
     route: "format-declaration",
     label: "申报表打印格式",
@@ -3552,9 +3582,10 @@ async function runPrintFormat(formatType) {
     appendTaskLog(`开始执行${ui.label}`);
     appendTaskLog(`输入范围：${inputPaths.length} 项；输出方式=${outputMode}`);
     setStatus(`正在执行${ui.label}...`, "idle");
+    const nativeAction = formatType === "link" ? "run_link_restore" : "run_print_format";
 
     const result = await streamNativeMessage({
-      action: "run_print_format",
+      action: nativeAction,
       formatType,
       inputPaths,
       outputMode,
@@ -3566,7 +3597,7 @@ async function runPrintFormat(formatType) {
 
     const payload = {
       ...result,
-      action: "batch_print_format",
+      action: formatType === "link" ? "batch_link_restore" : "batch_print_format",
       startedAt,
       finishedAt: new Date().toISOString(),
     };
@@ -3588,7 +3619,7 @@ async function runPrintFormat(formatType) {
   } catch (error) {
     const payload = {
       ok: false,
-      action: "batch_print_format",
+      action: formatType === "link" ? "batch_link_restore" : "batch_print_format",
       formatType,
       reason: error?.message || String(error),
       startedAt,
@@ -5631,6 +5662,7 @@ on(elements.openExportDetail, "click", () => navigateToRoute("export-detail"));
 on(elements.openExportDeclare, "click", () => navigateToRoute("export-declare"));
 on(elements.openFormatDetail, "click", () => navigateToRoute("format-detail"));
 on(elements.openFormatDeclaration, "click", () => navigateToRoute("format-declaration"));
+on(elements.openLinkRestore, "click", () => navigateToRoute("link-restore"));
 on(elements.backFromConnections, "click", () => navigateToRoute("home"));
 on(elements.backFromSave, "click", () => navigateToRoute("home"));
 on(elements.backFromExit, "click", () => navigateToRoute("home"));
@@ -5640,6 +5672,7 @@ on(elements.backFromExportDetail, "click", () => navigateToRoute("home"));
 on(elements.backFromExportDeclare, "click", () => navigateToRoute("home"));
 on(elements.backFromFormatDetail, "click", () => navigateToRoute("home"));
 on(elements.backFromFormatDeclaration, "click", () => navigateToRoute("home"));
+on(elements.backFromLinkRestore, "click", () => navigateToRoute("home"));
 window.addEventListener("hashchange", () => {
   renderRoute(window.location.hash.slice(1) || "home");
 });
@@ -5813,6 +5846,11 @@ on(elements.chooseDetailPrintOutputPath, "click", () => choosePrintOutputDirecto
 on(elements.chooseDeclarationPrintOutputPath, "click", () => choosePrintOutputDirectory("declaration"));
 on(elements.runDetailPrintFormat, "click", () => runPrintFormat("detail"));
 on(elements.runDeclarationPrintFormat, "click", () => runPrintFormat("declaration"));
+on(elements.chooseLinkRestoreFiles, "click", () => choosePrintInputs("link", "files"));
+on(elements.chooseLinkRestoreFolder, "click", () => choosePrintInputs("link", "directory"));
+on(elements.chooseLinkRestoreOutputPath, "click", () => choosePrintOutputDirectory("link"));
+on(elements.runLinkRestore, "click", () => runPrintFormat("link"));
+on(elements.linkRestoreOutputMode, "change", () => updatePrintOutputMode("link"));
 on(elements.detailPrintOutputMode, "change", () => updatePrintOutputMode("detail"));
 on(elements.declarationPrintOutputMode, "change", () => updatePrintOutputMode("declaration"));
 on(elements.loadSubjects, "click", loadSubjectList);
