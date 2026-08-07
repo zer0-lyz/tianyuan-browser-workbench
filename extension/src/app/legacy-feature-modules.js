@@ -98,4 +98,14 @@ export const legacyFeatureModules = [
     scope: { companies: false, subjects: false },
     mounts: { support: "declarationPrintSupportMount" },
   }),
+  legacyFeature({
+    id: "link-restore",
+    route: "link-restore",
+    displayName: "明细表公式恢复",
+    entryElementId: "openLinkRestore",
+    pageElementId: "page-link-restore",
+    usesLegacyScope: true,
+    scope: { companies: false, subjects: false },
+    mounts: { support: "linkRestoreSupportMount" },
+  }),
 ];

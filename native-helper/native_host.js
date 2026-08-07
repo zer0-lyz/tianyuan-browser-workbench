@@ -52,6 +52,17 @@ const updateInstallerFactory = (() => {
     }
   }
 })();
+const fileArchiveFactory = (() => {
+  try {
+    return require("./file-archive.js");
+  } catch (cause) {
+    try {
+      return createRequire(path.join(path.dirname(process.execPath), "native_host.js"))("./file-archive.js");
+    } catch {
+      throw cause;
+    }
+  }
+})();
 const platformAdapter = (() => {
   try {
     return require("./platform/index.js");
@@ -113,6 +124,11 @@ const workbenchUpdater = updateInstallerFactory.createWorkbenchUpdater({
   updateChecker,
   platformAdapter,
   runtimeDirectory: processLauncher.runtimeDirectory(),
+});
+const fileArchive = fileArchiveFactory.createFileArchiveService({
+  runtimeDirectory: process.env.TIANYUAN_FILE_ARCHIVE_RUNTIME_DIR || processLauncher.runtimeDirectory(),
+  platformAdapter,
+  selfLaunchSpec: (args) => processLauncher.selfLaunchSpec(args),
 });
 
 function firstExistingPath(values, fallback) {
@@ -207,6 +223,12 @@ const PRINT_FORMAT_SCRIPTS = Object.freeze({
     "adjust_appraisal_declaration_print.py",
   ),
 });
+const LINK_RESTORE_SCRIPT = path.join(
+  PRINT_SKILLS_DIR,
+  "asset-link-restore",
+  "scripts",
+  "restore_links.py",
+);
 const PRINT_OUTPUT_MODES = new Set(["overwrite", "copy_in_source", "new_directory"]);
 
 function getToken() {
@@ -1297,7 +1319,22 @@ async function startConnectorBridgeAction({ forceRestart = false } = {}) {
 
 function readMessages(onMessage) {
   let buffer = Buffer.alloc(0);
-  process.stdin.on("end", () => process.exit(0));
+  let inputEnded = false;
+  let pendingRequests = 0;
+  let exitScheduled = false;
+
+  function maybeExit() {
+    if (!inputEnded || pendingRequests > 0 || exitScheduled) return;
+    exitScheduled = true;
+    setImmediate(() => process.exit(0));
+  }
+
+  process.stdin.on("end", () => {
+    // Chrome may close stdin immediately after sending a one-shot message.
+    // Keep the host alive until the async handler has written its response.
+    inputEnded = true;
+    maybeExit();
+  });
   process.stdin.on("data", (chunk) => {
     buffer = Buffer.concat([buffer, chunk]);
     while (buffer.length >= 4) {
@@ -1305,11 +1342,15 @@ function readMessages(onMessage) {
       if (buffer.length < 4 + length) return;
       const raw = buffer.slice(4, 4 + length).toString("utf8");
       buffer = buffer.slice(4 + length);
-      onMessage(JSON.parse(raw));
+      pendingRequests += 1;
+      Promise.resolve()
+        .then(() => onMessage(JSON.parse(raw)))
+        .catch(() => {})
+        .finally(() => {
+          pendingRequests = Math.max(0, pendingRequests - 1);
+          maybeExit();
+        });
     }
-  });
-  process.stdin.on("end", () => {
-    process.exit(0);
   });
 }
 
@@ -1657,7 +1698,7 @@ function listBatchUploadDirectory(input = {}) {
 }
 
 async function choosePrintOutputDirectory() {
-  const result = await chooseDirectory("选择打印版文件的存放位置");
+  const result = await chooseDirectory("选择处理后文件的存放位置");
   return {
     ...result,
     action: "print_output_directory_selected",
@@ -1721,6 +1762,18 @@ function uniquePrintTarget(directory, sourcePath) {
   let index = 2;
   while (fs.existsSync(target)) {
     target = path.join(directory, `${stem}-打印版 (${index})${extension}`);
+    index += 1;
+  }
+  return target;
+}
+
+function uniqueLinkRestoreTarget(directory, sourcePath) {
+  const extension = path.extname(sourcePath);
+  const stem = path.basename(sourcePath, extension);
+  let target = path.join(directory, `${stem}-链接恢复${extension}`);
+  let index = 2;
+  while (fs.existsSync(target)) {
+    target = path.join(directory, `${stem}-链接恢复 (${index})${extension}`);
     index += 1;
   }
   return target;
@@ -1949,6 +2002,200 @@ async function runPrintFormat(message, emit) {
   }
 }
 
+function runPythonLinkRestoreScript(workbookPath, onLine) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(PYTHON_BIN, [LINK_RESTORE_SCRIPT, workbookPath], {
+      env: {
+        ...process.env,
+        PYTHONUNBUFFERED: "1",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const logLines = [];
+    const consume = (line, stream) => {
+      const text = String(line || "").trim();
+      if (!text) return;
+      logLines.push({ stream, text });
+      onLine?.(text, stream);
+    };
+    readline.createInterface({ input: child.stdout }).on("line", (line) => consume(line, "stdout"));
+    readline.createInterface({ input: child.stderr }).on("line", (line) => consume(line, "stderr"));
+    child.on("error", reject);
+    child.on("close", (code, signal) => {
+      if (code === 0) {
+        resolve({ code, signal: signal || null, logLines });
+      } else {
+        const error = new Error("LINK_RESTORE_SCRIPT_FAILED");
+        error.exitCode = code;
+        error.signal = signal || null;
+        error.logLines = logLines;
+        reject(error);
+      }
+    });
+  });
+}
+
+async function runLinkRestore(message, emit) {
+  const outputMode = String(message?.outputMode || "");
+  const results = [];
+  try {
+    if (!fs.existsSync(LINK_RESTORE_SCRIPT)) throw new Error("LINK_RESTORE_SCRIPT_NOT_FOUND");
+    if (!PRINT_OUTPUT_MODES.has(outputMode)) throw new Error("LINK_RESTORE_OUTPUT_MODE_INVALID");
+    const sourceFiles = collectWorkbookFiles(message.inputPaths);
+    const outputDir = outputMode === "new_directory"
+      ? validateExportDirectory(message.outputDir)
+      : "";
+    emit({
+      ok: true,
+      event: "progress",
+      phase: "ready",
+      percent: 3,
+      current: 0,
+      total: sourceFiles.length,
+      message: `已发现 ${sourceFiles.length} 个工作簿`,
+    });
+
+    for (let index = 0; index < sourceFiles.length; index += 1) {
+      const sourcePath = sourceFiles[index];
+      const destinationDirectory = outputMode === "new_directory"
+        ? outputDir
+        : path.dirname(sourcePath);
+      const finalPath = outputMode === "overwrite"
+        ? sourcePath
+        : uniqueLinkRestoreTarget(destinationDirectory, sourcePath);
+      const tempInput = path.join(
+        path.dirname(sourcePath),
+        `.${path.basename(sourcePath, path.extname(sourcePath))}.tianyuan-link-${randomUUID()}${path.extname(sourcePath)}`,
+      );
+      const startPercent = 5 + Math.round(index / sourceFiles.length * 90);
+      emit({
+        ok: true,
+        event: "progress",
+        phase: "processing",
+        percent: startPercent,
+        current: index + 1,
+        total: sourceFiles.length,
+        sourcePath,
+        outputPath: finalPath,
+        message: `正在恢复 ${path.basename(sourcePath)}`,
+      });
+
+      fs.copyFileSync(sourcePath, tempInput);
+      try {
+        const scriptResult = await runPythonLinkRestoreScript(tempInput, (text, stream) => emit({
+          ok: true,
+          event: "progress",
+          phase: "processing",
+          percent: Math.min(94, startPercent + 2),
+          current: index + 1,
+          total: sourceFiles.length,
+          sourcePath,
+          outputPath: finalPath,
+          message: text,
+          stream,
+        }));
+        const generatedPath = path.join(
+          path.dirname(tempInput),
+          `${path.basename(tempInput, path.extname(tempInput))}_链接恢复${path.extname(tempInput)}`,
+        );
+        if (!fs.existsSync(generatedPath)) throw new Error("LINK_RESTORE_OUTPUT_NOT_FOUND");
+        const reportTempPath = path.join(
+          path.dirname(tempInput),
+          `${path.basename(tempInput, path.extname(tempInput))}_链接恢复对比报告.xlsx`,
+        );
+        const reportFinalPath = path.join(
+          destinationDirectory,
+          `${path.basename(sourcePath, path.extname(sourcePath))}_链接恢复对比报告.xlsx`,
+        );
+        fs.renameSync(generatedPath, tempInput);
+        await verifyWorkbookArchive(tempInput);
+        if (fs.existsSync(reportTempPath)) {
+          if (fs.existsSync(reportFinalPath)) fs.unlinkSync(reportFinalPath);
+          fs.renameSync(reportTempPath, reportFinalPath);
+        }
+        replaceProcessedFile(tempInput, finalPath);
+        results.push({
+          ok: true,
+          sourcePath,
+          outputPath: finalPath,
+          reportPath: fs.existsSync(reportFinalPath) ? reportFinalPath : null,
+          overwritten: outputMode === "overwrite",
+          logLines: scriptResult.logLines,
+          archiveVerified: true,
+        });
+        emit({
+          ok: true,
+          event: "progress",
+          phase: "verified",
+          percent: 5 + Math.round((index + 1) / sourceFiles.length * 90),
+          current: index + 1,
+          total: sourceFiles.length,
+          sourcePath,
+          outputPath: finalPath,
+          message: `已完成并校验 ${path.basename(finalPath)}`,
+        });
+      } catch (error) {
+        for (const candidate of [
+          tempInput,
+          `${tempInput}_链接恢复.xlsx`,
+          `${tempInput}_链接恢复对比报告.xlsx`,
+        ]) {
+          if (fs.existsSync(candidate)) fs.unlinkSync(candidate);
+        }
+        results.push({
+          ok: false,
+          sourcePath,
+          outputPath: finalPath,
+          reason: error?.message || String(error),
+          exitCode: error?.exitCode ?? null,
+          logLines: error?.logLines || [],
+        });
+        emit({
+          ok: false,
+          event: "progress",
+          phase: "file_failed",
+          percent: 5 + Math.round((index + 1) / sourceFiles.length * 90),
+          current: index + 1,
+          total: sourceFiles.length,
+          sourcePath,
+          outputPath: finalPath,
+          message: `${path.basename(sourcePath)} 恢复失败`,
+        });
+      }
+    }
+
+    const successCount = results.filter((item) => item.ok).length;
+    const finalOk = successCount === results.length;
+    emit({
+      ok: finalOk,
+      event: "complete",
+      phase: finalOk ? "completed" : "completed_with_errors",
+      percent: 100,
+      action: "batch_link_restore",
+      outputMode,
+      outputDir: outputDir || null,
+      total: results.length,
+      successCount,
+      failedCount: results.length - successCount,
+      results,
+      reason: finalOk ? null : "LINK_RESTORE_BATCH_PARTIAL_FAILURE",
+      security: { credentialsReturned: false },
+    });
+  } catch (error) {
+    emit({
+      ok: false,
+      event: "complete",
+      phase: "failed",
+      percent: 0,
+      action: "batch_link_restore",
+      outputMode,
+      reason: error?.message || String(error),
+      results,
+      security: { credentialsReturned: false },
+    });
+  }
+}
+
 function validateExportDirectory(value) {
   const raw = String(value || "").trim();
   if (!raw || raw.includes("\0") || !path.isAbsolute(raw)) {
@@ -2024,6 +2271,7 @@ function cliExportFailure(logLines) {
 }
 
 function runCliExport(message, emit) {
+  return new Promise((resolve) => {
   let exportConfig;
   try {
     exportConfig = CLI_EXPORT_COMMANDS[String(message?.exportType || "")];
@@ -2054,6 +2302,7 @@ function runCliExport(message, emit) {
       if (completed) return;
       completed = true;
       emit(payload);
+      resolve(payload);
     }
 
     emit({
@@ -2133,15 +2382,18 @@ function runCliExport(message, emit) {
       });
     });
   } catch (error) {
-    emit({
+    const payload = {
       ok: false,
       event: "complete",
       phase: "failed",
       percent: 0,
       reason: error?.message || String(error),
       security: { credentialsReturned: false },
-    });
+    };
+    emit(payload);
+    resolve(payload);
   }
+  });
 }
 
 function parseSseOrJson(text) {
@@ -2535,6 +2787,57 @@ async function handle(message) {
   if (message?.action === "select_print_output_directory") {
     return await choosePrintOutputDirectory();
   }
+  if (message?.action === "detect_file_archive_apps") {
+    return await fileArchive.detect();
+  }
+  if (message?.action === "list_file_archive_conversations") {
+    return fileArchive.listConversations(message.appType === "wecom" ? "wecom" : "wechat");
+  }
+  if (message?.action === "get_file_archive_conversation_bindings") {
+    return fileArchive.getConversationBindings(message.appType === "wecom" ? "wecom" : "wechat");
+  }
+  if (message?.action === "inspect_file_archive_active_conversation") {
+    return await fileArchive.inspectActiveConversation();
+  }
+  if (message?.action === "select_file_archive_conversation_directory") {
+    const appType = message.appType === "wecom" ? "wecom" : "wechat";
+    const selected = await platformAdapter.chooseDirectory("选择所选会话的导出目录");
+    const outputDirectory = selected.paths?.[0] || "";
+    if (!selected.ok || !outputDirectory) {
+      return { ...selected, action: "file_archive_conversation_directory_selected", security: { credentialsReturned: false } };
+    }
+    const conversationIds = Array.isArray(message.conversationIds)
+      ? message.conversationIds.map((value) => String(value || "").trim()).filter(Boolean)
+      : [];
+    return fileArchive.saveConversationBindings({
+      appType,
+      bindings: conversationIds.map((conversationId) => ({ conversationId, outputDirectory })),
+    });
+  }
+  if (message?.action === "save_file_archive_conversation_bindings") {
+    return fileArchive.saveConversationBindings({
+      appType: message.appType === "wecom" ? "wecom" : "wechat",
+      bindings: Array.isArray(message.bindings) ? message.bindings : [],
+    });
+  }
+  if (message?.action === "select_file_archive_output_directory") {
+    return await fileArchive.selectOutputDirectory();
+  }
+  if (message?.action === "start_file_archive") {
+    return await fileArchive.start(message.config || {});
+  }
+  if (message?.action === "stop_file_archive") {
+    return await fileArchive.stop();
+  }
+  if (message?.action === "pause_file_archive") {
+    return await fileArchive.pause(message.paused !== false);
+  }
+  if (message?.action === "scan_file_archive") {
+    return await fileArchive.scan();
+  }
+  if (message?.action === "get_file_archive_status") {
+    return fileArchive.status();
+  }
   if (message?.action === "get_project_companies") {
     const projectId = parseNumericId(message.projectId, "projectId");
     const raw = await callTool("get_project_companies", { projectId });
@@ -2573,6 +2876,7 @@ async function runSelfTest() {
     ok: fs.existsSync(PYTHON_BIN)
       && fs.existsSync(PRINT_FORMAT_SCRIPTS.detail)
       && fs.existsSync(PRINT_FORMAT_SCRIPTS.declaration)
+      && fs.existsSync(LINK_RESTORE_SCRIPT)
       && platform.supported,
     service: "tianyuan-native-host",
     platform: process.platform,
@@ -2582,6 +2886,7 @@ async function runSelfTest() {
     printScriptsAvailable: {
       detail: fs.existsSync(PRINT_FORMAT_SCRIPTS.detail),
       declaration: fs.existsSync(PRINT_FORMAT_SCRIPTS.declaration),
+      linkRestore: fs.existsSync(LINK_RESTORE_SCRIPT),
     },
     cli,
     security: { credentialsReturned: false },
@@ -2620,17 +2925,20 @@ if (process.argv.includes("--connector-bridge")) {
       })}\n`);
       process.exitCode = 1;
     });
+} else if (process.argv.includes("--file-archive-daemon")) {
+  fileArchive.runDaemon();
 } else {
   readMessages((message) => {
     if (message?.action === "run_cli_export") {
-      runCliExport(message, writeMessage);
-      return;
+      return runCliExport(message, writeMessage);
     }
     if (message?.action === "run_print_format") {
-      runPrintFormat(message, writeMessage);
-      return;
+      return runPrintFormat(message, writeMessage);
     }
-    handle(message)
+    if (message?.action === "run_link_restore") {
+      return runLinkRestore(message, writeMessage);
+    }
+    return handle(message)
       .then((payload) => {
         writeMessage(payload);
         scheduleUpdateHostShutdown(message, payload);
