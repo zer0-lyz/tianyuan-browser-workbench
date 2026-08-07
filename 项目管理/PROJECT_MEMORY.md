@@ -2,6 +2,19 @@
 
 更新时间：2026-07-28 CST
 
+## 2026-08-07 明细表公式恢复模块（asset-link-restore）
+
+- 新模块“明细表公式恢复”（功能 7，路由 `link-restore`）接入外部分享包
+  `/Users/lin/Downloads/asset-link-restore-分享包`，源码迁入 `skills/asset-link-restore/`。
+- 核心 `restore_links.py` 仅依赖 openpyxl（本机工作台 Python 3.14 + openpyxl 3.1.5 实测通过），
+  重建四层链接：叶子合计 → 二级汇总 → 分类汇总表 → 2-分类汇总 → 1-汇总表(÷10000)。
+- Native Host 新增 `run_link_restore`，复用打印格式批处理机制（递归收集、临时文件 + zip 校验、
+  原子替换、逐文件进度）；副本命名 `<原名>-链接恢复.xlsx`，报告 `<原名>_链接恢复对比报告.xlsx`。
+- 安装链路：`native-helper/install_native_host.sh` 与 `scripts/install-local-runtime.mjs`
+  （Windows 经 install-local-runtime 写入 print-format-skills）都会复制该 skill。
+- 覆盖模式先处理随机临时文件再原子替换；对比报告“不一致”需人工核实，不视为自动成功。
+- 全量回归 37/37 通过；合成工作簿端到端烟测 18/18 公式一致。真实天源导出文件待用户本机验收。
+
 ## 2026-07-28 v0.14.8 Windows ZIP 文件名编码修复
 
 - 工作台版本升级为 `0.14.8`，构建编号 `2026072809`；Connector 保持 `0.4.2`。
