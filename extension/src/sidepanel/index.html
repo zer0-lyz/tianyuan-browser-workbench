@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>天源工作台</title>
-    <link rel="stylesheet" href="./styles.css?v=20260802-cli-auth-v1">
+      <link rel="stylesheet" href="./styles.css?v=20260803-file-archive-v1">
   </head>
   <body>
     <main class="app">
@@ -53,7 +53,7 @@
             <h2>功能模块</h2>
             <p>选择一个功能开始处理</p>
           </div>
-          <span id="moduleCountBadge" class="badge">8 个模块</span>
+          <span id="moduleCountBadge" class="badge">9 个模块</span>
         </div>
         <div class="module-grid">
           <button id="openBatchSave" type="button" class="module-card">
@@ -137,6 +137,27 @@
             <strong>申报表打印格式</strong>
             <small>批量生成适合打印的资产评估申报表</small>
           </button>
+          <button id="openLinkRestore" type="button" class="module-card">
+            <span class="module-icon module-icon-link-restore" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path class="ph-duotone" d="M10.5 6.75h-5.25V3Z"></path>
+                <path d="m8.53 12.53 3 3a.75.75 0 0 0 1.06 0l3-3a.75.75 0 1 0-1.06-1.06l-1.72 1.72V7.5h-1.5v5.69l-1.72-1.72a.75.75 0 1 0-1.06 1.06m7.22-5.28h1.5V4.5h1.5v2.75h-1.5V7.5h-1.5zm-9.5 0h1.5v2.75h-1.5zm10.5 5.5h1.5v2.75h-1.5zm-9.5 0h1.5v2.75h-1.5z"></path>
+                <path d="M20.03 7.72l-5.25-5.25a.75.75 0 0 0-.53-.22h-9A1.5 1.5 0 0 0 3.75 3.75v16.5a1.5 1.5 0 0 0 1.5 1.5h13.5a1.5 1.5 0 0 0 1.5-1.5v-12a.75.75 0 0 0-.22-.53M15 4.81 17.69 7.5H15ZM18.75 19.5H5.25V3.75H13.5v4.5a.75.75 0 0 0 .75.75h4.5Z"></path>
+              </svg>
+            </span>
+            <strong>明细表公式恢复</strong>
+            <small>恢复明细表丢失的跨表汇总链接，重建四层公式</small>
+          </button>
+          <button id="openFileArchive" type="button" class="module-card">
+            <span class="module-icon module-icon-archive" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path class="ph-duotone" d="M4.5 6.75h15v12h-15z"></path>
+                <path d="M7.5 4.5h9a.75.75 0 0 1 .75.75v1.5h-1.5v-.75h-7.5v.75h-1.5v-1.5a.75.75 0 0 1 .75-.75m-3 2.25h15a.75.75 0 0 1 .75.75v12A1.5 1.5 0 0 1 18.75 21h-13.5a1.5 1.5 0 0 1-1.5-1.5v-12a.75.75 0 0 1 .75-.75m.75 1.5V19.5h13.5V8.25Zm3 3h1.5v1.5h-1.5Zm3 0h4.5v1.5h-4.5Zm-3 3h1.5v1.5h-1.5Zm3 0h4.5v1.5h-4.5Z"></path>
+              </svg>
+            </span>
+            <strong>微信文件归档</strong>
+            <small>监听微信或企业微信下载文件，复制并校验到本机目录</small>
+          </button>
         </div>
         <div class="home-note">
           <span>当前页面</span>
@@ -146,6 +167,7 @@
 
       <section id="page-updates" class="route-page hidden" data-route="updates"></section>
       <section id="page-feedback" class="route-page hidden" data-route="feedback"></section>
+      <section id="page-file-archive" class="route-page hidden" data-route="file-archive"></section>
 
       <section id="page-connections" class="route-page hidden" data-route="connections">
         <div class="page-heading">
@@ -759,6 +781,56 @@
           </div>
         </section>
         <div id="declarationPrintSupportMount" class="page-mount"></div>
+      </section>
+
+      <section id="page-link-restore" class="route-page hidden" data-route="link-restore">
+        <div class="page-heading">
+          <div>
+            <h2>明细表公式恢复</h2>
+            <p>支持选择多个文件或整个文件夹批量处理</p>
+          </div>
+          <button id="backFromLinkRestore" type="button" class="secondary">功能中心</button>
+        </div>
+        <section class="section print-format-panel">
+          <div class="section-title-row feature-title">
+            <h2>恢复设置</h2>
+            <span class="badge">功能 7</span>
+          </div>
+          <div class="file-source-field">
+            <span>输入文件</span>
+            <div class="button-row source-buttons">
+              <button id="chooseLinkRestoreFiles" type="button" class="secondary">选择文件</button>
+              <button id="chooseLinkRestoreFolder" type="button" class="secondary">选择文件夹</button>
+            </div>
+            <div id="linkRestoreInputSummary" class="selection-summary">尚未选择文件</div>
+          </div>
+          <label class="field-block">
+            <span>输出方式</span>
+            <select id="linkRestoreOutputMode">
+              <option value="copy_in_source">在源文件夹创建恢复副本</option>
+              <option value="overwrite">覆盖源文件</option>
+              <option value="new_directory">保存到新的位置</option>
+            </select>
+          </label>
+          <div id="linkRestoreOutputDirectoryWrap" class="directory-field hidden">
+            <span>新的存放位置</span>
+            <div class="directory-row">
+              <input id="linkRestoreOutputPath" type="text" readonly placeholder="请选择本机文件夹">
+              <button id="chooseLinkRestoreOutputPath" type="button" class="secondary">选择</button>
+            </div>
+          </div>
+          <div class="export-progress" aria-live="polite">
+            <div class="progress-heading">
+              <span id="linkRestoreProgressText">等待执行</span>
+              <strong id="linkRestoreProgressPercent">0%</strong>
+            </div>
+            <progress id="linkRestoreProgressBar" max="100" value="0"></progress>
+          </div>
+          <div class="task-actions">
+            <button id="runLinkRestore" type="button">执行恢复</button>
+          </div>
+        </section>
+        <div id="linkRestoreSupportMount" class="page-mount"></div>
       </section>
 
       <section id="scopeSection" class="section scope-section shared-panel hidden">

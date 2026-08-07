@@ -1,5 +1,60 @@
 # 天源浏览器工作台项目长期记忆
 
+## 2026-08-07 明细表公式恢复模块（asset-link-restore）
+
+- 新模块“明细表公式恢复”（功能 7，路由 `link-restore`）接入外部分享包
+  `/Users/lin/Downloads/asset-link-restore-分享包`，源码迁入 `skills/asset-link-restore/`。
+- 核心 `restore_links.py` 仅依赖 openpyxl（本机工作台 Python 3.14 + openpyxl 3.1.5 实测通过），
+  重建四层链接：叶子合计 → 二级汇总 → 分类汇总表 → 2-分类汇总 → 1-汇总表(÷10000)。
+- Native Host 新增 `run_link_restore`，复用打印格式批处理机制（递归收集、临时文件 + zip 校验、
+  原子替换、逐文件进度）；副本命名 `<原名>-链接恢复.xlsx`，报告 `<原名>_链接恢复对比报告.xlsx`。
+- 安装链路：`native-helper/install_native_host.sh` 与 `scripts/install-local-runtime.mjs`
+  （Windows 经 install-local-runtime 写入 print-format-skills）都会复制该 skill。
+- 覆盖模式先处理随机临时文件再原子替换；对比报告“不一致”需人工核实，不视为自动成功。
+- 全量回归 37/37 通过；合成工作簿端到端烟测 18/18 公式一致。真实天源导出文件待用户本机验收。
+
+## 2026-08-04 侧栏初始化稳定性
+
+- 文件归档模块的 Native Messaging 检测和会话加载必须异步执行，不能阻塞侧栏整体初始化；连接失败只能显示模块级错误，不能让所有路由保持隐藏。
+- 本机运行副本同步后，需在 Chrome 扩展管理页重新加载 `/Users/zer0y/.tianyuan-workbench/projects/天源评估系统/extension`。
+
+## 2026-08-04 微信/企业微信文件归档第二阶段
+
+- 新增 `native-helper/file-archive-conversations.js` 适配器边界，以及会话清单、搜索、多选、目录绑定和来源匹配接口。
+- 只接受精确文件路径 + 会话 ID + 已确认目录绑定的高置信度匹配；未绑定、低置信度或无法关联时继续进入来源未知待确认目录。
+- 本机微信和企业微信会话数据库探测结果均为加密或专有格式，不解密、不读取聊天正文、不注入进程、不修改客户端包；面板会明确显示暂时无法可靠加载会话。
+- 运行态会话绑定文件为 `~/.tianyuan-workbench/native-helper/file-archive-conversation-bindings.json`，不写入 token、Cookie、Authorization、密码或消息正文。
+
+
+## 2026-08-03 微信/企业微信文件归档 MVP
+
+- 新功能采用独立 `file-archive` 模块，沿用 Chrome MV3 侧栏 + Native Messaging + 本机后台守护进程架构。
+- 监听和运行态仅写入 `~/.tianyuan-workbench/native-helper/`；OneDrive 项目目录只保留源码、说明、决策、测试证据和项目管理文件。
+- macOS 微信已知源目录为 `~/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/<account>/msg/file/`；企业微信使用独立候选目录扫描，不假设与微信同构。
+- 文件处理顺序为：发现 -> 稳定等待 -> SHA-256 -> 未知来源待确认归档 -> 复制 -> 目标文件大小和 SHA-256 回读 -> 完成。
+- 第一阶段不能可靠从下载目录解析联系人/群聊 ID；不得猜测来源或自动归档到指定群。后续只有找到稳定消息元数据或官方接口并通过低风险实测，才能开放会话绑定。
+- 不保存微信登录密码、授权 token、Cookie、Authorization、消息正文或不必要的聊天内容；默认只复制，不移动、不删除原文件。
+- 全量回归 `29/29` 通过；当前 macOS Native Messaging 直连检测返回微信和企业微信目录检测成功。真实文件测试尚未执行。
+- 当前 Mac 本机运行副本已同步到 `/Users/zer0y/.tianyuan-workbench/projects/天源评估系统/extension` 和 `/Users/zer0y/.tianyuan-workbench/native-helper/`；本机 runtimeBuildId 为 `72eb49fd50612ea6b16d0ba8f17436ba72e8c9df47b781eff021192dde374100`。
+
+## 2026-08-02 Native Messaging 超时修复 v0.14.21 构建
+
+- 产品版本为 `0.14.21`，构建号为 `2026080209`；本轮只生成本地 Windows 包，未提交、未推送 GitHub。
+- Native Host 在 stdin 关闭后会等待 pending 异步请求完成再退出；更新检查分段超时和总超时逻辑已进入完整包与 Lite 包。
+- 运行指纹：`23ddb6d579b3f2a1a5178f2d0a02dd2810f64f0775579827f232a6095ef35b03`。
+- Windows 完整包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.21-windows-x64-20260802.zip`；SHA-256：`c1a4e8ed98639329bad9a1ec94254b2fd5eb5cfe183cea19ebfbe08c30aaa526`。
+- Windows Lite 包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.21-windows-x64-lite-20260802.zip`；SHA-256：`ff368944b6dc5e1175a6b6f8dccfcf25217de3d29a98f636554dac62e5832bb7`。
+- 完整包包含 Node、Python、CLI 安装器和 `native_host.exe`；Lite 包要求已有运行时，不含上述完整运行时。
+- Windows 实机验收重点：重新加载 Native Host 后点击“检查更新”，确认不再出现 `NATIVE_HELPER_TIMEOUT`；通过后再发布 GitHub Release。
+
+## 2026-08-02 Native Messaging 异步回包规则
+
+- Native Host 不能在 `stdin` 结束时立即 `process.exit(0)`；Chrome 的一次性 Native Messaging 请求可能在发送消息后关闭输入流，但 Helper 仍需等待异步动作完成并写出带长度前缀的回包。
+- `readMessages()` 必须跟踪 pending 请求：输入结束只表示不再接收新消息，只有所有处理 Promise 完成后才能退出。
+- 更新检查必须优先返回权威 GitHub `releases/latest/download/update-manifest.json` 的结果；镜像清单即使没有更新也不能遮蔽 GitHub 权威源。
+- 更新检查需要分段网络超时和总操作超时，前端等待时间必须高于 Helper 总上限，以便显示 `UPDATE_CHECK_TIMEOUT`，不能只显示 `NATIVE_HELPER_TIMEOUT`。
+- v0.14.21 已将该修复编入本地 Windows 完整包和 Lite 包；GitHub 发布仍需 Windows 实机验收后决定。
+
 ## 2026-08-02 Windows 更新解压稳定性规则 v0.14.20
 
 - Windows 更新的暂存目录必须短且位于当前用户本地运行目录，优先使用 `%LOCALAPPDATA%\\TianyuanUpdate\\<短随机ID>`，不能把版本号、平台名和完整 updateId 拼进目录名。
@@ -579,3 +634,15 @@
 - 新增机器可读报告 `%LOCALAPPDATA%\TianyuanWorkbench\安装检查结果.json`，将组件安装结果与浏览器加载、MCP token、CLI 授权等 `manualActions` 分开。
 - 当前 Windows 测试包：`/Users/zer0y/Downloads/tianyuan-workbench-v0.14.15-windows-x64-20260802.zip`，SHA-256 为 `b09ad643e0f794a3084a92667589302cfad9f0a084be685ddb43fdf4a963f0fd`。
 - tycpv CLI 本体源码不在当前仓库；因此 `--version` 本身未能直接修改，当前边界是工作台侧安全探测和超时隔离，拿到 CLI 源码后再补 CLI 本体修复。
+
+## 2026-08-04 扩展模块启动隔离规则
+
+- 侧栏首屏必须先渲染可用壳层，再初始化可选功能模块；不能让某个功能模块的 Native Messaging、网络或存储等待阻塞整个面板。
+- 模块注册表采用并行初始化；单模块初始化异常时自动禁用该模块、释放其监听资源并保留其他路由和功能。
+- Chrome 记忆路由可能恢复到尚未完成初始化的功能页；初始化前应暂时显示首页，初始化完成后再恢复请求路由。
+
+## 2026-08-04 macOS 辅助功能会话读取边界
+
+- 当前会话读取只访问前台微信/企业微信窗口的可见无正文界面属性，不读取数据库、不解密、不注入进程。
+- 窗口标题或焦点控件标签只能作为低置信度可见标识，不能直接视为稳定会话 ID；面板必须要求人工确认。
+- 只有在实际读取到明确会话标识后，才可继续设计当前会话绑定；无法读取时继续使用来源未知待确认模式。
