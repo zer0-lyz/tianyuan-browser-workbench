@@ -641,7 +641,11 @@ function main() {
   copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), path.join(runtimeProjectRoot, "plugins", "tianyuan-browser-connector"));
   copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), userPluginRoot);
   copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), codexPluginRoot);
-  for (const skillName of ["appraisal-detail-print-format", "appraisal-declaration-print-format"]) {
+  for (const skillName of [
+    "appraisal-detail-print-format",
+    "appraisal-declaration-print-format",
+    "asset-link-restore",
+  ]) {
     copyDir(path.join(repoRoot, "skills", skillName), path.join(printSkillsRoot, skillName));
   }
 
