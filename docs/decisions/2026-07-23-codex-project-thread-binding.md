@@ -16,7 +16,8 @@
 
 1. 浏览器面板启动 Connector 并绑定当前天源页面。
 2. 面板从本机 Connector Platform 加载 Codex 项目和对话列表。
-3. 用户选择项目、绑定范围和对话。
+3. 用户选择项目和对话；选择对话即绑定该对话，不指定对话即绑定整个项目。
+4. 不提供“自动绑定当前对话”假设；扩展无法可靠取得 Codex 前台选中的 thread 时，必须让用户明确选择。
 4. 面板保存绑定并显示 Binding ID。
 5. Codex MCP 先调用 `tianyuan.connection_status`，再复用返回的 `sessionId + bindingId`。
 6. 解除绑定后，Codex 只能看到未绑定状态，不能读取页面上下文。

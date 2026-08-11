@@ -7,6 +7,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { createPlatformAdapter } = require("./platform/index.js");
+const { filterRetainedCatalog, readCodexCatalog } = require("./codex_catalog.js");
 
 const platformAdapter = createPlatformAdapter();
 
@@ -91,8 +92,14 @@ function createBridge(options = {}) {
   const sourcesPath = options.sourcesPath || process.env.TIANYUAN_CONNECTOR_AGENT_SOURCES_PATH || path.join(runtimeRoot, "native-helper", "agent-sources.json");
   const configDir = options.configDir || process.env.TIANYUAN_CONNECTOR_AGENT_CONFIG_DIR || path.join(runtimeRoot, "agent-sources");
   const codexStatePath = options.codexStatePath || process.env.TIANYUAN_CODEX_GLOBAL_STATE_PATH || path.join(home, ".codex", ".codex-global-state.json");
+  const codexHome = options.codexHome || process.env.CODEX_HOME || path.join(home, ".codex");
+  const projectsPath = options.projectsPath || process.env.OFFICE_CONNECTOR_PROJECTS || path.join(home, ".local", "share", "office-connector", "runtime", "config", "projects.local.json");
+  const threadsPath = options.threadsPath || process.env.OFFICE_CONNECTOR_THREADS || path.join(home, ".local", "share", "office-connector", "runtime", "config", "threads.local.json");
+  const processesPath = options.processesPath || path.join(codexHome, "process_manager", "chat_processes.json");
+  const sqlitePath = options.sqlitePath || path.join(codexHome, "sqlite", "codex-dev.db");
   const workbuddyDbPath = options.workbuddyDbPath || process.env.TIANYUAN_WORKBUDDY_DB_PATH || path.join(home, ".workbuddy", "workbuddy.db");
   const compatibilityPath = options.compatibilityPath || process.env.TIANYUAN_CONNECTOR_RUNTIME_COMPATIBILITY_PATH || path.join(__dirname, "runtime-compat.json");
+  const officeBridgeUrl = options.officeBridgeUrl || process.env.OFFICE_CONNECTOR_BRIDGE_URL || "http://127.0.0.1:40115";
   const platformUrl = process.env.TIANYUAN_CONNECTOR_PLATFORM_URL || "http://127.0.0.1:40315";
   const sessions = new Map(); const actions = new Map(); const bindings = new Map(); const sources = new Map();
   let loaded = false; let migrated = false;
@@ -337,11 +344,52 @@ function createBridge(options = {}) {
     return source;
   }
   async function codexCatalog() {
-    try { const response = await fetch(`${platformUrl}/api/catalog`); const payload = await response.json(); if (response.ok && payload?.ok) return { projects: Array.isArray(payload.projects) ? payload.projects : [], threads: Array.isArray(payload.threads) ? payload.threads : [], updatedAt: payload.updatedAt || null, source: "connector-platform" }; } catch { /* local fallback */ }
-    const state = readJson(codexStatePath, {}); const projects = new Map(); const add = (item = {}) => { const projectId = limited(item.projectId || item.id, 200); if (!projectId) return; const projectPath = normalizePath(item.projectPath || item.path || item.cwd || item.rootPaths?.[0]); projects.set(projectId, { projectId, projectName: limited(item.projectName || item.name || path.basename(projectPath) || projectId, 200), projectPath, path: projectPath, updatedAt: Number(item.updatedAt || 0) || null }); };
-    for (const value of Object.values(state["local-projects"] || {})) add(value); for (const value of Object.values(state["thread-project-assignments"] || {})) add(value);
-    const threads = Object.entries(state["thread-project-assignments"] || {}).map(([threadId, item]) => { const project = projects.get(String(item?.projectId || "")); if (!threadId || !project) return null; return { threadId, title: limited(item?.title || item?.threadTitle || `Codex 对话 ${threadId.slice(0, 8)}`, 300), projectId: project.projectId, projectName: project.projectName, projectPath: normalizePath(item?.cwd || item?.path || project.projectPath), cwd: normalizePath(item?.cwd || item?.path || project.projectPath), recencyAt: project.updatedAt }; }).filter(Boolean);
-    return { projects: [...projects.values()], threads, updatedAt: now(), source: "local-codex-state" };
+    try {
+      const response = await fetch(`${platformUrl}/api/catalog`);
+      const payload = await response.json();
+      if (response.ok && payload?.ok && (payload.projects?.length || payload.threads?.length)) {
+        return filterRetainedCatalog({
+          projects: Array.isArray(payload.projects) ? payload.projects : [],
+          threads: Array.isArray(payload.threads) ? payload.threads : [],
+          updatedAt: payload.updatedAt || null,
+          source: "connector-platform",
+          diagnostics: payload.diagnostics || null,
+        }, { projectsPath, threadsPath });
+      }
+    } catch {
+      // Fall through to the Connector Suite bridge.
+    }
+    try {
+      const [projectsResponse, threadsResponse] = await Promise.all([
+        fetch(`${officeBridgeUrl}/api/projects`),
+        fetch(`${officeBridgeUrl}/api/threads`),
+      ]);
+      const projectsPayload = await projectsResponse.json();
+      const threadsPayload = await threadsResponse.json();
+      if (projectsResponse.ok && threadsResponse.ok && projectsPayload?.ok && threadsPayload?.ok
+        && (projectsPayload.projects?.length || threadsPayload.threads?.length)) {
+        return filterRetainedCatalog({
+          projects: Array.isArray(projectsPayload.projects) ? projectsPayload.projects : [],
+          threads: Array.isArray(threadsPayload.threads) ? threadsPayload.threads : [],
+          updatedAt: new Date().toISOString(),
+          source: "connector-suite-bridge",
+          diagnostics: {
+            projects: projectsPayload.diagnostics || null,
+            threads: threadsPayload.diagnostics || null,
+          },
+        }, { projectsPath, threadsPath });
+      }
+    } catch {
+      // Fall through to the same local metadata sources used by Connector Suite.
+    }
+    return filterRetainedCatalog(readCodexCatalog({
+      codexHome,
+      codexStatePath,
+      projectsPath,
+      threadsPath,
+      processesPath,
+      sqlitePath,
+    }), { projectsPath, threadsPath });
   }
 
   function sqliteRows(query) {
@@ -431,6 +479,7 @@ function createBridge(options = {}) {
       if (req.method === "GET" && url.pathname === "/api/sessions") { const agent = isBrowser(req) ? null : identity(req, true); const result = [...sessions.values()].filter((session) => !agent || bindingsFor(session.binding).some((binding) => binding.agentId === agent.agentId && binding.providerId === agent.providerId && binding.installationId === agent.installationId)).map((session) => publicSession(session, agent)); return json(res, 200, { ok: true, sessions: result }, origin); }
       if (req.method === "POST" && parts.length === 4 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "heartbeat") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const input = await body(req); session.lastSeenAt = now(); if (input.binding) session.binding = safePage(input.binding); if (input.context) session.context = safeContext(input.context); return json(res, 200, { ok: true, session: publicSession(session) }, origin); }
       if (req.method === "POST" && parts.length === 4 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "agent-bindings") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const binding = createBinding(session, await body(req)); return json(res, 200, { ok: true, binding: publicBinding(binding), session: publicSession(session) }, origin); }
+      if (req.method === "DELETE" && parts.length === 5 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "agent-bindings") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const binding = bindings.get(parts[4]); if (!binding || binding.pageKey !== pageKey(session.binding)) throw error("AGENT_BINDING_MISMATCH", 404); bindings.delete(binding.bindingId); cancelControllerActions(binding.bindingId); saveBindings(); syncSession(session); return json(res, 200, { ok: true, cleared: true, bindingId: binding.bindingId, session: publicSession(session) }, origin); }
       if (req.method === "POST" && parts.length === 6 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "agent-bindings" && parts[5] === "access") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const input = await body(req); const previous = bindings.get(parts[4]); if (!previous || previous.pageKey !== pageKey(session.binding)) throw error("AGENT_BINDING_MISMATCH", 404); const changed = createBinding(session, { ...previous, ...input, bindingId: previous.bindingId, providerId: previous.providerId, installationId: previous.installationId, agentId: previous.agentId }); return json(res, 200, { ok: true, binding: publicBinding(changed), session: publicSession(session) }, origin); }
       if (req.method === "POST" && parts.length === 4 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "binding") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const input = await body(req); const source = [...sources.values()].find((item) => item.providerId === "codex"); if (!source) throw error("AGENT_NOT_REGISTERED", 409); const binding = createBinding(session, { ...input, providerId: "codex", installationId: source.installationId, agentId: source.agentId, workspaceId: input.projectId, workspaceName: input.projectName, workspacePath: input.projectPath, conversationId: input.threadId, conversationTitle: input.threadTitle, scope: input.scope === "project" ? "workspace" : "conversation", accessMode: input.accessMode || "control" }); return json(res, 200, { ok: true, binding: codexCompatibility(binding), agentBinding: publicBinding(binding), session: publicSession(session) }, origin); }
       if (req.method === "POST" && parts.length === 5 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "binding" && parts[4] === "current-thread") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const input = await body(req); const catalog = await codexCatalog(); const candidate = catalog.threads.find((thread) => (input.projectId && thread.projectId === input.projectId) || (input.projectPath && normalizePath(thread.projectPath) === normalizePath(input.projectPath))) || null; if (!candidate) throw error("CURRENT_THREAD_NOT_FOUND", 404); const source = [...sources.values()].find((item) => item.providerId === "codex"); if (!source) throw error("AGENT_NOT_REGISTERED", 409); const binding = createBinding(session, { providerId: "codex", installationId: source.installationId, workspaceId: candidate.projectId, workspaceName: candidate.projectName, workspacePath: candidate.projectPath, conversationId: candidate.threadId, conversationTitle: candidate.title, scope: "conversation", accessMode: "control", confirmControlTransfer: input.confirmControlTransfer }); return json(res, 200, { ok: true, binding: codexCompatibility(binding), agentBinding: publicBinding(binding), thread: candidate, session: publicSession(session) }, origin); }

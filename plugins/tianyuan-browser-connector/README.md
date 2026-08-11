@@ -53,3 +53,5 @@ Connector 不提供任意浏览器点击、任意 URL、任意 JavaScript 或绕
 ## 更新
 
 工作台 `0.13.0` 起，“更新全部组件”会把 Connector 同步到 `~/plugins/tianyuan-browser-connector` 和 `~/.codex/plugins/cache/personal/tianyuan-browser-connector/0.4.2`。已启动的 Codex 或 WorkBuddy MCP 进程不会热替换；更新后仍显示旧版本时，需要重启对应 Agent。
+
+Codex 项目与对话绑定现在优先复用本机 Connector Platform 目录；平台不可用时回退读取 Connector Suite 的项目/对话注册表、Codex SQLite 目录、进程元数据和会话元数据。侧栏会显示具体项目和对话数量及目录来源，用户选择并确认后才建立绑定。

@@ -30,6 +30,17 @@ const connectorBridge = (() => {
     }
   }
 })();
+const codexCatalog = (() => {
+  try {
+    return require("./codex_catalog.js");
+  } catch (cause) {
+    try {
+      return createRequire(path.join(path.dirname(process.execPath), "native_host.js"))("./codex_catalog.js");
+    } catch {
+      throw cause;
+    }
+  }
+})();
 const updateChecker = (() => {
   try {
     return require("./update_checker.js");
@@ -76,6 +87,12 @@ const CONNECTOR_PROTOCOL_VERSION = "connector-agent-binding-v3";
 const CONNECTOR_PLATFORM_URL = process.env.TIANYUAN_CONNECTOR_PLATFORM_URL || "http://127.0.0.1:40315";
 const CODEX_GLOBAL_STATE_PATH = process.env.TIANYUAN_CODEX_GLOBAL_STATE_PATH
   || path.join(os.homedir(), ".codex", ".codex-global-state.json");
+const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+const CODEX_PROJECTS_PATH = process.env.OFFICE_CONNECTOR_PROJECTS
+  || path.join(os.homedir(), ".local", "share", "office-connector", "runtime", "config", "projects.local.json");
+const CODEX_THREADS_PATH = process.env.OFFICE_CONNECTOR_THREADS
+  || path.join(os.homedir(), ".local", "share", "office-connector", "runtime", "config", "threads.local.json");
+const OFFICE_CONNECTOR_BRIDGE_URL = process.env.OFFICE_CONNECTOR_BRIDGE_URL || "http://127.0.0.1:40115";
 const CONNECTOR_BINDINGS_PATH = process.env.TIANYUAN_CONNECTOR_BINDINGS_PATH
   || path.join(os.homedir(), ".tianyuan-workbench", "native-helper", "connector-bindings.json");
 const CONNECTOR_ACTION_TTL_MS = 5 * 60 * 1000;
@@ -387,84 +404,51 @@ async function connectorFetchCodexCatalog() {
     const response = await fetch(`${CONNECTOR_PLATFORM_URL}/api/catalog`);
     if (!response.ok) throw new Error(`CODEX_CATALOG_HTTP_${response.status}`);
     const payload = await response.json();
-    if (!payload?.ok) throw new Error(payload?.reason || "CODEX_CATALOG_UNAVAILABLE");
-    return {
+    if (!payload?.ok || (!payload.projects?.length && !payload.threads?.length)) {
+      throw new Error(payload?.reason || "CODEX_CATALOG_UNAVAILABLE");
+    }
+    return codexCatalog.filterRetainedCatalog({
       projects: Array.isArray(payload.projects) ? payload.projects : [],
       threads: Array.isArray(payload.threads) ? payload.threads : [],
       updatedAt: payload.updatedAt || null,
       source: "connector-platform",
-    };
+      diagnostics: payload.diagnostics || null,
+    }, { projectsPath: CODEX_PROJECTS_PATH, threadsPath: CODEX_THREADS_PATH });
+  } catch {
+    // Fall through to the Connector Suite bridge.
+  }
+  try {
+    const [projectsResponse, threadsResponse] = await Promise.all([
+      fetch(`${OFFICE_CONNECTOR_BRIDGE_URL}/api/projects`),
+      fetch(`${OFFICE_CONNECTOR_BRIDGE_URL}/api/threads`),
+    ]);
+    const projectsPayload = await projectsResponse.json();
+    const threadsPayload = await threadsResponse.json();
+    if (projectsResponse.ok && threadsResponse.ok && projectsPayload?.ok && threadsPayload?.ok
+      && (projectsPayload.projects?.length || threadsPayload.threads?.length)) {
+      return codexCatalog.filterRetainedCatalog({
+        projects: Array.isArray(projectsPayload.projects) ? projectsPayload.projects : [],
+        threads: Array.isArray(threadsPayload.threads) ? threadsPayload.threads : [],
+        updatedAt: new Date().toISOString(),
+        source: "connector-suite-bridge",
+        diagnostics: {
+          projects: projectsPayload.diagnostics || null,
+          threads: threadsPayload.diagnostics || null,
+        },
+      }, { projectsPath: CODEX_PROJECTS_PATH, threadsPath: CODEX_THREADS_PATH });
+    }
   } catch {
     return connectorReadLocalCodexCatalog();
   }
 }
 
 function connectorReadLocalCodexCatalog() {
-  let state;
-  try {
-    state = JSON.parse(fs.readFileSync(CODEX_GLOBAL_STATE_PATH, "utf8"));
-  } catch (error) {
-    throw new Error(`CODEX_LOCAL_CATALOG_UNAVAILABLE: ${error?.message || error}`);
-  }
-
-  const projectsById = new Map();
-  const addProject = (input = {}) => {
-    const projectId = String(input.projectId || input.id || "").trim();
-    if (!projectId) return;
-    const projectPath = String(
-      input.projectPath || input.path || input.cwd || input.rootPaths?.[0] || "",
-    ).trim().replace(/[\\/]+$/, "");
-    const projectName = String(input.projectName || input.name || "").trim()
-      || path.basename(projectPath)
-      || projectId;
-    const previous = projectsById.get(projectId);
-    projectsById.set(projectId, {
-      projectId,
-      projectName,
-      projectPath,
-      path: projectPath,
-      updatedAt: Number(input.updatedAt || previous?.updatedAt || 0) || null,
-    });
-  };
-
-  for (const project of Object.values(state["local-projects"] || {})) addProject(project);
-
-  const assignments = state["thread-project-assignments"] || {};
-  for (const assignment of Object.values(assignments)) addProject({
-    projectId: assignment?.projectId,
-    projectPath: assignment?.cwd || assignment?.path,
-    projectName: assignment?.projectName,
-  });
-
-  const threads = Object.entries(assignments)
-    .map(([threadId, assignment]) => {
-      const projectId = String(assignment?.projectId || "").trim();
-      if (!threadId || !projectId) return null;
-      const project = projectsById.get(projectId);
-      const projectPath = String(
-        assignment?.cwd || assignment?.path || project?.projectPath || "",
-      ).trim().replace(/[\\/]+$/, "");
-      return {
-        threadId,
-        title: String(assignment?.title || assignment?.threadTitle || "").trim()
-          || `Codex 对话 ${threadId.slice(0, 8)}`,
-        projectId,
-        projectName: project?.projectName || path.basename(projectPath) || projectId,
-        projectPath,
-        cwd: projectPath,
-        recencyAt: project?.updatedAt || null,
-      };
-    })
-    .filter(Boolean)
-    .sort((a, b) => Number(b.recencyAt || 0) - Number(a.recencyAt || 0));
-
-  return {
-    projects: [...projectsById.values()]
-      .sort((a, b) => String(a.projectName).localeCompare(String(b.projectName), "zh-CN")),
-    threads,
-    updatedAt: new Date().toISOString(),
-    source: "local-codex-state",
-  };
+  return codexCatalog.filterRetainedCatalog(codexCatalog.readCodexCatalog({
+    codexHome: CODEX_HOME,
+    codexStatePath: CODEX_GLOBAL_STATE_PATH,
+    projectsPath: CODEX_PROJECTS_PATH,
+    threadsPath: CODEX_THREADS_PATH,
+  }), { projectsPath: CODEX_PROJECTS_PATH, threadsPath: CODEX_THREADS_PATH });
 }
 
 function connectorApplyCodexBinding(session, binding) {
