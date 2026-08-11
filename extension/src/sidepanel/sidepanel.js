@@ -179,14 +179,16 @@ const elements = {
   connectorLastSeen: document.getElementById("connectorLastSeen"),
   connectorCodexBindingStatus: document.getElementById("connectorCodexBindingStatus"),
   connectorBindingId: document.getElementById("connectorBindingId"),
-  refreshConnectorCatalog: document.getElementById("refreshConnectorCatalog"),
+  refreshConnectorCatalog: document.getElementById("refreshAgentBindingCatalog"),
+  agentBindingProviderSelect: document.getElementById("agentBindingProviderSelect"),
+  codexAgentBindingFields: document.getElementById("codexAgentBindingFields"),
+  workbuddyAgentBindingFields: document.getElementById("workbuddyAgentBindingFields"),
   connectorProjectSelect: document.getElementById("connectorProjectSelect"),
   connectorProjectPicker: document.getElementById("connectorProjectPicker"),
   connectorProjectPickerButton: document.getElementById("connectorProjectPickerButton"),
   connectorProjectPickerMenu: document.getElementById("connectorProjectPickerMenu"),
   connectorProjectFilter: document.getElementById("connectorProjectFilter"),
   connectorProjectPickerList: document.getElementById("connectorProjectPickerList"),
-  connectorBindingScope: document.getElementById("connectorBindingScope"),
   connectorThreadField: document.getElementById("connectorThreadField"),
   connectorThreadSelect: document.getElementById("connectorThreadSelect"),
   connectorThreadPicker: document.getElementById("connectorThreadPicker"),
@@ -194,11 +196,13 @@ const elements = {
   connectorThreadPickerMenu: document.getElementById("connectorThreadPickerMenu"),
   connectorThreadFilter: document.getElementById("connectorThreadFilter"),
   connectorThreadPickerList: document.getElementById("connectorThreadPickerList"),
-  saveConnectorBinding: document.getElementById("saveConnectorBinding"),
-  bindConnectorCurrentThread: document.getElementById("bindConnectorCurrentThread"),
-  clearConnectorBinding: document.getElementById("clearConnectorBinding"),
-  connectorBindingFeedback: document.getElementById("connectorBindingFeedback"),
+  saveConnectorBinding: document.getElementById("saveAgentBinding"),
+  clearConnectorBinding: document.getElementById("clearAgentBinding"),
+  connectorBindingFeedback: document.getElementById("agentBindingFeedback"),
   refreshAgentSources: document.getElementById("refreshAgentSources"),
+  agentConnectionStatus: document.getElementById("agentConnectionStatus"),
+  agentConnectionSummary: document.getElementById("agentConnectionSummary"),
+  agentControlSummary: document.getElementById("agentControlSummary"),
   agentSourceList: document.getElementById("agentSourceList"),
   agentBindingList: document.getElementById("agentBindingList"),
   manualAgentDisplayName: document.getElementById("manualAgentDisplayName"),
@@ -207,6 +211,11 @@ const elements = {
   workbuddyProjectSelect: document.getElementById("workbuddyProjectSelect"),
   workbuddyThreadField: document.getElementById("workbuddyThreadField"),
   workbuddyThreadSelect: document.getElementById("workbuddyThreadSelect"),
+  workbuddyAccessSelect: document.getElementById("agentBindingAccessSelect"),
+  saveWorkBuddyBinding: document.getElementById("saveAgentBinding"),
+  clearWorkBuddyBinding: document.getElementById("clearAgentBinding"),
+  workbuddyBindingFeedback: document.getElementById("agentBindingFeedback"),
+  agentBindingAccessSelect: document.getElementById("agentBindingAccessSelect"),
   manualAgentWorkspaceId: document.getElementById("manualAgentWorkspaceId"),
   manualAgentWorkspaceName: document.getElementById("manualAgentWorkspaceName"),
   manualAgentConversationId: document.getElementById("manualAgentConversationId"),
@@ -333,6 +342,8 @@ let connectorCatalog = { projects: [], threads: [], updatedAt: null };
 let workbuddyCatalog = { projects: [], threads: [], updatedAt: null };
 let connectorAgentSources = [];
 let connectorBindingFormDirty = false;
+let workbuddyBindingFormDirty = false;
+let selectedAgentBindingProvider = "codex";
 let connectorActionBusy = false;
 let confirmedSubjectCodes = null;
 let mcpSubjectListLoaded = false;
@@ -538,12 +549,10 @@ function setBusy(nextBusy) {
     elements.connectorProjectSelect,
     elements.connectorProjectPickerButton,
     elements.connectorProjectFilter,
-    elements.connectorBindingScope,
     elements.connectorThreadSelect,
     elements.connectorThreadPickerButton,
     elements.connectorThreadFilter,
     elements.saveConnectorBinding,
-    elements.bindConnectorCurrentThread,
     elements.clearConnectorBinding,
     elements.configureMcp,
     elements.authorizeCli,
@@ -3577,6 +3586,53 @@ function currentControlBinding(session = connectorSession) {
   return (session?.agentBindings || []).find((binding) => binding.accessMode === "control") || null;
 }
 
+function agentIdentityKey(value = {}) {
+  return [
+    value.agentId || "",
+    value.providerId || "",
+    value.installationId || "",
+    value.scope || "",
+    value.workspaceId || "",
+    value.conversationId || "",
+    value.pageKey || "",
+  ].join("|");
+}
+
+function uniqueAgentBindings(bindings = []) {
+  const selected = new Map();
+  for (const binding of bindings) {
+    const key = agentIdentityKey(binding);
+    const previous = selected.get(key);
+    if (!previous
+      || (binding.accessMode === "control" && previous.accessMode !== "control")
+      || String(binding.updatedAt || "") > String(previous.updatedAt || "")) {
+      selected.set(key, binding);
+    }
+  }
+  return [...selected.values()].sort((left, right) => {
+    if (left.accessMode !== right.accessMode) return left.accessMode === "control" ? -1 : 1;
+    return agentBindingLabel(left).localeCompare(agentBindingLabel(right), "zh-CN");
+  });
+}
+
+function renderAgentConnectionSummary(session = connectorSession) {
+  if (!elements.agentConnectionStatus) return;
+  const sources = connectorAgentSources.filter((source) => !source.local && source.providerId !== LOCAL_SCRIPT_PROVIDER_ID);
+  const connected = sources.filter((source) => source.connection?.mcpConnected);
+  const control = currentControlBinding(session);
+  const sessionOnline = session?.status === "online";
+  elements.agentConnectionStatus.textContent = sessionOnline ? "页面已连接" : "页面未连接";
+  elements.agentConnectionStatus.dataset.state = sessionOnline ? "ok" : "warn";
+  elements.agentConnectionSummary.textContent = [
+    `Connector：${sessionOnline ? "在线" : "未连接"}`,
+    `Agent：${connected.length}/${sources.length} 已连接`,
+    "扩展脚本：已就绪",
+  ].join(" · ");
+  elements.agentControlSummary.textContent = control
+    ? `当前页面控制者：${agentBindingLabel(control)}`
+    : "当前页面控制者：暂无，仅可执行只读操作";
+}
+
 async function ensureLocalScriptSource() {
   const result = await connectorFetch("/api/agent-sources/local", {
     method: "POST",
@@ -3624,12 +3680,16 @@ function codexControlBinding(session = connectorSession) {
 function renderAgentSources() {
   if (!elements.agentSourceList) return;
   elements.agentSourceList.innerHTML = "";
-  if (!connectorAgentSources.length) {
-    elements.agentSourceList.innerHTML = '<div class="empty-list">未发现已注册来源</div>';
+  const sources = connectorAgentSources.filter((source) =>
+    !source.local && source.providerId !== LOCAL_SCRIPT_PROVIDER_ID
+  );
+  if (!sources.length) {
+    elements.agentSourceList.innerHTML = '<div class="empty-list">暂无外部 Agent 来源</div>';
+    renderAgentConnectionSummary();
     return;
   }
-  for (const source of connectorAgentSources) {
-    const currentBinding = (connectorSession?.agentBindings || []).find((binding) =>
+  for (const source of sources) {
+    const currentBinding = uniqueAgentBindings(connectorSession?.agentBindings || []).find((binding) =>
       binding.agentId === source.agentId
       && binding.providerId === source.providerId
       && binding.installationId === source.installationId
@@ -3639,30 +3699,28 @@ function renderAgentSources() {
     const name = document.createElement("strong");
     name.textContent = source.displayName || source.providerId || "未命名来源";
     const meta = document.createElement("span");
-    const mcpStatus = source.local
-      ? "本机脚本已就绪"
-      : (source.connection?.mcpConnected ? "MCP 已连接" : "MCP 未连接");
+    const mcpStatus = source.connection?.mcpConnected ? "已连接" : "未连接";
     const bindingStatus = currentBinding
       ? `当前页${currentBinding.accessMode === "control" ? "控制" : "只读"}`
       : "未绑定当前页";
-    meta.textContent = `${mcpStatus} · ${bindingStatus}${source.manual ? " · 手动来源" : ""}`;
+    meta.textContent = `${mcpStatus} · ${bindingStatus}`;
     const activity = document.createElement("small");
-    activity.textContent = source.local
-      ? "扩展身份已验证"
-      : (source.connection?.mcpConnected
-        ? `最后活动 ${source.connection.lastSeenSecondsAgo ?? 0} 秒前`
-        : (source.lastSeenAt ? "最后活动已超时" : "等待 MCP 启动"));
+    activity.textContent = source.connection?.mcpConnected
+      ? `最近活动 ${source.connection.lastSeenSecondsAgo ?? 0} 秒前`
+      : (source.lastSeenAt ? "最近未连接" : "等待 MCP 启动");
     row.append(name, meta, activity);
     elements.agentSourceList.appendChild(row);
   }
+  renderAgentConnectionSummary();
 }
 
 function renderAgentBindings(session) {
   if (!elements.agentBindingList) return;
   elements.agentBindingList.innerHTML = "";
-  const bindings = Array.isArray(session?.agentBindings) ? session.agentBindings : [];
+  const bindings = uniqueAgentBindings(Array.isArray(session?.agentBindings) ? session.agentBindings : []);
   if (!bindings.length) {
     elements.agentBindingList.innerHTML = '<div class="empty-list">当前页面尚未绑定 Agent</div>';
+    renderAgentConnectionSummary(session);
     return;
   }
   for (const binding of bindings) {
@@ -3681,6 +3739,7 @@ function renderAgentBindings(session) {
     row.append(text, actions);
     elements.agentBindingList.appendChild(row);
   }
+  renderAgentConnectionSummary(session);
 }
 
 async function loadAgentSources() {
@@ -3702,6 +3761,15 @@ async function loadAgentSources() {
 
 function selectedWorkBuddyProject() {
   return workbuddyCatalog.projects.find((item) => String(item.projectId) === elements.workbuddyProjectSelect.value) || null;
+}
+
+function workbuddySource() {
+  return connectorAgentSources.find((source) => source.providerId === "workbuddy") || null;
+}
+
+function currentWorkBuddyBinding(session = connectorSession) {
+  return uniqueAgentBindings(session?.agentBindings || [])
+    .find((binding) => binding.providerId === "workbuddy") || null;
 }
 
 function workbuddyProjectThreads(project = selectedWorkBuddyProject()) {
@@ -3726,10 +3794,41 @@ function applySelectedWorkBuddyBinding() {
   elements.manualAgentConversationTitle.value = thread?.title || "";
 }
 
+function workbuddyBindingPayload() {
+  const project = selectedWorkBuddyProject();
+  const threadId = elements.workbuddyThreadSelect.value;
+  const thread = workbuddyCatalog.threads.find((item) => String(item.threadId || item.id || "") === threadId) || null;
+  const source = workbuddySource();
+  return {
+    providerId: source?.providerId || "workbuddy",
+    agentId: source?.agentId || "",
+    installationId: source?.installationId || "",
+    displayName: source?.displayName || "WorkBuddy",
+    workspaceId: project?.projectId || "",
+    workspaceName: project?.projectName || "",
+    workspacePath: project?.projectPath || project?.path || "",
+    conversationId: thread?.threadId || thread?.id || "",
+    conversationTitle: thread?.title || "",
+    scope: threadId ? "conversation" : "workspace",
+    accessMode: elements.workbuddyAccessSelect.value,
+    manualBinding: false,
+  };
+}
+
+function renderWorkBuddyBindingForm(binding = currentWorkBuddyBinding()) {
+  if (!elements.workbuddyProjectSelect || workbuddyBindingFormDirty) return;
+  elements.workbuddyProjectSelect.value = binding?.workspaceId || "";
+  renderWorkBuddyThreadOptions();
+  elements.workbuddyThreadSelect.value = binding?.conversationId || "";
+  if (selectedAgentBindingProvider === "workbuddy") {
+    elements.agentBindingAccessSelect.value = binding?.accessMode === "read" ? "read" : "control";
+  }
+}
+
 function renderWorkBuddyCatalog() {
   const hasProjects = workbuddyCatalog.projects.length > 0;
-  elements.workbuddyProjectField.classList.toggle("hidden", !hasProjects);
-  elements.workbuddyThreadField.classList.toggle("hidden", !hasProjects);
+  elements.workbuddyProjectSelect.disabled = !hasProjects;
+  elements.workbuddyThreadSelect.disabled = !hasProjects;
   elements.workbuddyProjectSelect.innerHTML = "";
   const projectPlaceholder = document.createElement("option");
   projectPlaceholder.value = "";
@@ -3747,6 +3846,7 @@ function renderWorkBuddyCatalog() {
   threadPlaceholder.value = "";
   threadPlaceholder.textContent = hasProjects ? "请选择 WorkBuddy 对话" : "请先加载项目";
   elements.workbuddyThreadSelect.appendChild(threadPlaceholder);
+  renderWorkBuddyBindingForm();
 }
 
 function renderWorkBuddyThreadOptions() {
@@ -3774,13 +3874,91 @@ async function loadWorkBuddyCatalog({ silent = false } = {}) {
       updatedAt: catalog.updatedAt || null,
     };
     renderWorkBuddyCatalog();
-    elements.manualAgentFeedback.textContent = `已加载 ${workbuddyCatalog.projects.length} 个 WorkBuddy 项目、${workbuddyCatalog.threads.length} 个对话，请选择后确认绑定。`;
+    elements.workbuddyBindingFeedback.textContent = `已加载 ${workbuddyCatalog.projects.length} 个项目、${workbuddyCatalog.threads.length} 个对话。选择后保存绑定。`;
     return catalog;
   } catch (error) {
     workbuddyCatalog = { projects: [], threads: [], updatedAt: null };
     renderWorkBuddyCatalog();
-    if (!silent) elements.manualAgentFeedback.textContent = `WorkBuddy 项目/对话暂不可用：${error.message}`;
+    if (!silent) elements.workbuddyBindingFeedback.textContent = `WorkBuddy 项目/对话暂不可用：${error.message}`;
     return null;
+  }
+}
+
+async function saveWorkBuddyBinding() {
+  const payload = workbuddyBindingPayload();
+  if (!payload.workspaceId) {
+    elements.workbuddyBindingFeedback.textContent = "请先选择 WorkBuddy 项目。";
+    return;
+  }
+  const source = workbuddySource();
+  if (!source) {
+    elements.workbuddyBindingFeedback.textContent = "WorkBuddy 来源尚未注册，请先启动 WorkBuddy MCP 或使用高级手动绑定。";
+    return;
+  }
+  let confirmControlTransfer = "";
+  if (payload.accessMode === "control" && !window.confirm("确认将当前页面控制权交给 WorkBuddy？旧控制者尚未执行的任务会取消。")) return;
+  if (payload.accessMode === "control") confirmControlTransfer = "确认切换控制权";
+  setBusy(true);
+  elements.workbuddyBindingFeedback.textContent = "正在检查页面连接并保存 WorkBuddy 绑定...";
+  try {
+    const session = await ensureCurrentPageConnectorSession();
+    const existing = currentWorkBuddyBinding(session);
+    const result = await connectorFetch(`/api/sessions/${encodeURIComponent(session.sessionId)}/agent-bindings`, {
+      method: "POST",
+      body: JSON.stringify({ ...payload, bindingId: existing?.bindingId || "", confirmControlTransfer }),
+    });
+    workbuddyBindingFormDirty = false;
+    renderConnectorSession(result.session);
+    elements.workbuddyBindingFeedback.textContent = payload.scope === "workspace"
+      ? "已绑定整个 WorkBuddy 项目"
+      : "已绑定指定 WorkBuddy 对话";
+    setStatus("WorkBuddy 绑定已保存", "ok");
+  } catch (error) {
+    if (error.message === "CONTROL_TRANSFER_CONFIRMATION_REQUIRED" && window.confirm("当前页面已有其他 Agent 控制者。确认切换给 WorkBuddy？旧控制者尚未执行的任务会取消。")) {
+      try {
+        const retry = await connectorFetch(`/api/sessions/${encodeURIComponent(connectorSessionId)}/agent-bindings`, {
+          method: "POST",
+          body: JSON.stringify({ ...payload, bindingId: currentWorkBuddyBinding()?.bindingId || "", confirmControlTransfer: "确认切换控制权" }),
+        });
+        workbuddyBindingFormDirty = false;
+        renderConnectorSession(retry.session);
+        elements.workbuddyBindingFeedback.textContent = "控制权已切换给 WorkBuddy，旧控制者队列已取消";
+        setStatus("WorkBuddy 控制权已切换", "ok");
+        return;
+      } catch (retryError) {
+        error = retryError;
+      }
+    }
+    elements.workbuddyBindingFeedback.textContent = `WorkBuddy 绑定失败：${error.message}`;
+    setStatus(`WorkBuddy 绑定失败：${error.message}`, "error");
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function clearWorkBuddyBinding() {
+  const binding = currentWorkBuddyBinding();
+  if (!connectorSessionId || !binding?.bindingId) {
+    elements.workbuddyBindingFeedback.textContent = "当前页面尚未绑定 WorkBuddy。";
+    return;
+  }
+  if (!window.confirm("确认解除当前页面的 WorkBuddy 绑定？")) return;
+  setBusy(true);
+  elements.workbuddyBindingFeedback.textContent = "正在解除 WorkBuddy 绑定...";
+  try {
+    const result = await connectorFetch(
+      `/api/sessions/${encodeURIComponent(connectorSessionId)}/agent-bindings/${encodeURIComponent(binding.bindingId)}`,
+      { method: "DELETE" },
+    );
+    workbuddyBindingFormDirty = false;
+    renderConnectorSession(result.session);
+    elements.workbuddyBindingFeedback.textContent = "已解除 WorkBuddy 绑定";
+    setStatus("WorkBuddy 绑定已解除", "ok");
+  } catch (error) {
+    elements.workbuddyBindingFeedback.textContent = `解除 WorkBuddy 绑定失败：${error.message}`;
+    setStatus(`解除 WorkBuddy 绑定失败：${error.message}`, "error");
+  } finally {
+    setBusy(false);
   }
 }
 
@@ -3875,6 +4053,7 @@ function renderConnectorSession(session) {
     renderAgentBindings(null);
     renderAgentSources();
     if (!connectorBindingFormDirty) resetConnectorBindingForm();
+    renderAgentBindingProvider();
     return;
   }
   const binding = session.binding || {};
@@ -3898,6 +4077,8 @@ function renderConnectorSession(session) {
   if (!connectorBindingFormDirty) renderConnectorBindingForm(codexBinding);
   renderAgentBindings(session);
   renderAgentSources();
+  renderWorkBuddyBindingForm(currentWorkBuddyBinding(session));
+  renderAgentBindingProvider();
   renderConnectorCapabilities(session.capabilities || connectorProtocol?.capabilities || {});
 }
 
@@ -3927,7 +4108,6 @@ async function connectorFetch(path, options = {}) {
 function resetConnectorBindingForm() {
   elements.connectorProjectSelect.innerHTML = '<option value="">请选择 Codex 项目</option>';
   elements.connectorThreadSelect.innerHTML = '<option value="">请先选择项目</option>';
-  elements.connectorBindingScope.value = "thread";
   elements.connectorThreadField.classList.remove("hidden");
 }
 
@@ -4007,19 +4187,6 @@ function renderConnectorProjectPicker() {
       .some((value) => String(value || "").toLowerCase().includes(filter));
   });
   elements.connectorProjectPickerList.innerHTML = "";
-  const emptyButton = document.createElement("button");
-  emptyButton.type = "button";
-  emptyButton.className = `picker-option ${selected ? "" : "selected"}`;
-  emptyButton.innerHTML = '<span class="picker-option-title">不绑定项目</span><span class="picker-option-meta">仅保留页面连接</span>';
-  emptyButton.addEventListener("click", () => {
-    elements.connectorProjectSelect.value = "";
-    elements.connectorThreadSelect.value = "";
-    connectorBindingFormDirty = true;
-    renderConnectorThreadOptions();
-    renderConnectorProjectPicker();
-    closeConnectorPickers();
-  });
-  elements.connectorProjectPickerList.appendChild(emptyButton);
   for (const project of items) {
     const button = document.createElement("button");
     button.type = "button";
@@ -4057,7 +4224,7 @@ function renderConnectorThreadPicker() {
   const emptyButton = document.createElement("button");
   emptyButton.type = "button";
   emptyButton.className = `picker-option ${selected ? "" : "selected"}`;
-  emptyButton.innerHTML = '<span class="picker-option-title">不绑定对话</span><span class="picker-option-meta">仅绑定项目或页面</span>';
+  emptyButton.innerHTML = '<span class="picker-option-title">不指定对话</span><span class="picker-option-meta">绑定整个项目</span>';
   emptyButton.addEventListener("click", () => {
     elements.connectorThreadSelect.value = "";
     connectorBindingFormDirty = true;
@@ -4123,7 +4290,6 @@ function renderConnectorBindingForm(binding) {
   if (!binding) {
     if (!connectorBindingFormDirty) {
       elements.connectorProjectSelect.value = "";
-      elements.connectorBindingScope.value = "thread";
       renderConnectorThreadOptions();
       elements.connectorThreadSelect.value = "";
       renderConnectorProjectPicker();
@@ -4134,9 +4300,11 @@ function renderConnectorBindingForm(binding) {
   if (binding.projectId && connectorCatalog.projects.some((item) => item.projectId === binding.projectId)) {
     elements.connectorProjectSelect.value = binding.projectId;
   }
-  elements.connectorBindingScope.value = binding.scope === "project" ? "project" : "thread";
   renderConnectorThreadOptions();
   elements.connectorThreadSelect.value = binding.threadId || "";
+  if (selectedAgentBindingProvider === "codex") {
+    elements.agentBindingAccessSelect.value = binding.accessMode === "read" ? "read" : "control";
+  }
   renderConnectorProjectPicker();
   renderConnectorThreadPicker();
 }
@@ -4150,12 +4318,17 @@ async function loadConnectorCatalog() {
       updatedAt: catalog.updatedAt || null,
     };
     renderConnectorCatalog();
-    elements.connectorBindingFeedback.textContent = `已加载 ${connectorCatalog.projects.length} 个项目、${connectorCatalog.threads.length} 个对话`;
+    const sourceLabel = ["codex-sidebar-catalog", "connector-suite-registry", "connector-suite-bridge", "connector-platform"].includes(catalog.source)
+      ? "统一 Connector Suite 目录"
+      : "本机统一目录回退";
+    elements.connectorBindingFeedback.textContent = connectorCatalog.projects.length || connectorCatalog.threads.length
+      ? `已加载 ${connectorCatalog.projects.length} 个项目、${connectorCatalog.threads.length} 个对话（${sourceLabel}）`
+      : "统一目录暂未发现项目或对话，请先在 Codex 中打开项目后刷新";
     return catalog;
   } catch (error) {
     connectorCatalog = { projects: [], threads: [], updatedAt: null };
     renderConnectorCatalog();
-    elements.connectorBindingFeedback.textContent = `项目/对话列表暂不可用：${error.message}`;
+    elements.connectorBindingFeedback.textContent = `项目/对话列表暂不可用：${error.message}。请确认 Connector Suite 或 Codex 已启动后刷新`;
     return null;
   }
 }
@@ -4164,14 +4337,47 @@ function connectorBindingPayload() {
   const project = selectedConnectorProject();
   const threadId = elements.connectorThreadSelect.value;
   const thread = connectorCatalog.threads.find((item) => (item.threadId || item.id) === threadId);
+  const scope = threadId ? "thread" : "project";
   return {
     projectId: project?.projectId || "",
     projectName: project?.projectName || project?.label || "",
     projectPath: project?.projectPath || project?.path || "",
-    threadId: elements.connectorBindingScope.value === "project" ? "" : threadId,
-    threadTitle: elements.connectorBindingScope.value === "project" ? "" : (thread?.title || ""),
-    scope: elements.connectorBindingScope.value,
+    threadId,
+    threadTitle: thread?.title || "",
+    scope,
+    accessMode: elements.agentBindingAccessSelect.value,
   };
+}
+
+function renderAgentBindingProvider() {
+  const provider = elements.agentBindingProviderSelect?.value || selectedAgentBindingProvider || "codex";
+  selectedAgentBindingProvider = provider;
+  elements.codexAgentBindingFields?.classList.toggle("hidden", provider !== "codex");
+  elements.workbuddyAgentBindingFields?.classList.toggle("hidden", provider !== "workbuddy");
+  if (provider === "codex") {
+    const binding = connectorSession?.codexBinding || null;
+    elements.agentBindingAccessSelect.value = binding?.accessMode === "read" ? "read" : "control";
+    if (!connectorBindingFormDirty) renderConnectorBindingForm(binding);
+  } else {
+    const binding = currentWorkBuddyBinding();
+    elements.agentBindingAccessSelect.value = binding?.accessMode === "read" ? "read" : "control";
+    if (!workbuddyBindingFormDirty) renderWorkBuddyBindingForm(binding);
+  }
+}
+
+async function refreshSelectedAgentCatalog() {
+  if (selectedAgentBindingProvider === "workbuddy") return loadWorkBuddyCatalog();
+  return loadConnectorCatalog();
+}
+
+async function saveSelectedAgentBinding() {
+  if (selectedAgentBindingProvider === "workbuddy") return saveWorkBuddyBinding();
+  return saveConnectorCodexBinding();
+}
+
+async function clearSelectedAgentBinding() {
+  if (selectedAgentBindingProvider === "workbuddy") return clearWorkBuddyBinding();
+  return clearConnectorCodexBinding();
 }
 
 function setConnectorBindingFeedback(text, kind = "idle") {
@@ -4243,11 +4449,6 @@ async function saveConnectorCodexBinding() {
     setStatus("请先选择 Codex 项目", "warn");
     return;
   }
-  if (payload.scope === "thread" && !payload.threadId) {
-    setConnectorBindingFeedback("请先选择 Codex 对话，或改为整个项目。", "warn");
-    setStatus("请先选择 Codex 对话，或改为项目范围", "warn");
-    return;
-  }
   setBusy(true);
   setConnectorBindingFeedback("正在检查页面连接并保存绑定...", "idle");
   try {
@@ -4259,8 +4460,8 @@ async function saveConnectorCodexBinding() {
     connectorBindingFormDirty = false;
     renderConnectorSession(result.session);
     setConnectorBindingFeedback(payload.scope === "project"
-      ? "已绑定当前 Codex 项目，同项目对话可使用"
-      : "已绑定当前 Codex 对话，其他对话不能使用", "ok");
+      ? "已绑定整个 Codex 项目"
+      : "已绑定指定 Codex 对话", "ok");
     setStatus("Codex 绑定已保存", "ok");
   } catch (error) {
     if (error.message === "CONTROL_TRANSFER_CONFIRMATION_REQUIRED" && window.confirm("当前页面已有其他 Agent 控制者。确认切换给 Codex？旧控制者尚未执行的任务会取消。")) {
@@ -4279,47 +4480,6 @@ async function saveConnectorCodexBinding() {
     }
     setConnectorBindingFeedback(`绑定失败：${error.message}`, "error");
     setStatus(`Codex 绑定失败：${error.message}`, "error");
-  } finally {
-    setBusy(false);
-  }
-}
-
-async function bindConnectorCurrentThread() {
-  const payload = connectorBindingPayload();
-  if (!payload.projectId) {
-    setConnectorBindingFeedback("请先选择 Codex 项目。", "warn");
-    setStatus("请先选择 Codex 项目", "warn");
-    return;
-  }
-  setBusy(true);
-  setConnectorBindingFeedback("正在自动连接页面并查找当前对话...", "idle");
-  try {
-    await ensureCurrentPageConnectorSession();
-    const result = await connectorFetch(`/api/sessions/${encodeURIComponent(connectorSessionId)}/binding/current-thread`, {
-      method: "POST",
-      body: JSON.stringify({ ...payload, scope: "thread" }),
-    });
-    connectorBindingFormDirty = false;
-    renderConnectorSession(result.session);
-    setConnectorBindingFeedback(`已绑定当前对话：${result.thread?.title || result.binding?.threadId || "Codex 对话"}`, "ok");
-    setStatus("当前 Codex 对话绑定成功", "ok");
-  } catch (error) {
-    if (error.message === "CONTROL_TRANSFER_CONFIRMATION_REQUIRED" && window.confirm("当前页面已有其他 Agent 控制者。确认切换给 Codex？旧控制者尚未执行的任务会取消。")) {
-      try {
-        const result = await connectorFetch(`/api/sessions/${encodeURIComponent(connectorSessionId)}/binding/current-thread`, {
-          method: "POST",
-          body: JSON.stringify({ ...payload, scope: "thread", confirmControlTransfer: "确认切换控制权" }),
-        });
-        connectorBindingFormDirty = false;
-        renderConnectorSession(result.session);
-        setConnectorBindingFeedback("控制权已切换给 Codex，旧控制者队列已取消", "ok");
-        return;
-      } catch (retryError) {
-        error = retryError;
-      }
-    }
-    setConnectorBindingFeedback(`绑定当前对话失败：${error.message}`, "error");
-    setStatus(`绑定当前对话失败：${error.message}`, "error");
   } finally {
     setBusy(false);
   }
@@ -5532,15 +5692,27 @@ on(elements.refresh, "click", refreshAll);
 on(elements.checkConnections, "click", checkConnections);
 on(elements.startConnector, "click", startConnector);
 on(elements.bindCurrentPage, "click", bindCurrentPage);
-on(elements.refreshConnectorCatalog, "click", loadConnectorCatalog);
+on(elements.refreshConnectorCatalog, "click", refreshSelectedAgentCatalog);
 on(elements.refreshAgentSources, "click", loadAgentSources);
-on(elements.loadWorkBuddyCatalog, "click", () => loadWorkBuddyCatalog());
 on(elements.addManualAgent, "click", addManualAgent);
+on(elements.agentBindingProviderSelect, "change", async () => {
+  selectedAgentBindingProvider = elements.agentBindingProviderSelect.value || "codex";
+  renderAgentBindingProvider();
+  await refreshSelectedAgentCatalog();
+});
 on(elements.workbuddyProjectSelect, "change", () => {
+  workbuddyBindingFormDirty = true;
   renderWorkBuddyThreadOptions();
   applySelectedWorkBuddyBinding();
 });
-on(elements.workbuddyThreadSelect, "change", applySelectedWorkBuddyBinding);
+on(elements.workbuddyThreadSelect, "change", () => {
+  workbuddyBindingFormDirty = true;
+  applySelectedWorkBuddyBinding();
+});
+on(elements.agentBindingAccessSelect, "change", () => {
+  if (selectedAgentBindingProvider === "workbuddy") workbuddyBindingFormDirty = true;
+  else connectorBindingFormDirty = true;
+});
 on(elements.connectorProjectPickerButton, "click", () => openConnectorPicker("project"));
 on(elements.connectorThreadPickerButton, "click", () => openConnectorPicker("thread"));
 on(elements.connectorProjectFilter, "input", renderConnectorProjectPicker);
@@ -5558,17 +5730,12 @@ on(elements.connectorProjectSelect, "change", () => {
   renderConnectorThreadOptions();
   renderConnectorProjectPicker();
 });
-on(elements.connectorBindingScope, "change", () => {
-  connectorBindingFormDirty = true;
-  elements.connectorThreadField.classList.toggle("hidden", elements.connectorBindingScope.value === "project");
-});
 on(elements.connectorThreadSelect, "change", () => {
   connectorBindingFormDirty = true;
   renderConnectorThreadPicker();
 });
-on(elements.saveConnectorBinding, "click", saveConnectorCodexBinding);
-on(elements.bindConnectorCurrentThread, "click", bindConnectorCurrentThread);
-on(elements.clearConnectorBinding, "click", clearConnectorCodexBinding);
+on(elements.saveConnectorBinding, "click", saveSelectedAgentBinding);
+on(elements.clearConnectorBinding, "click", clearSelectedAgentBinding);
 on(elements.configureMcp, "click", openMcpTokenDialog);
 on(elements.authorizeCli, "click", authorizeCli);
 on(elements.confirmMcpToken, "click", confirmMcpToken);

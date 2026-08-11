@@ -200,75 +200,79 @@
             <div><dt>Codex 兼容绑定</dt><dd id="connectorCodexBindingStatus">未绑定</dd></div>
             <div><dt>Binding ID</dt><dd id="connectorBindingId">-</dd></div>
           </dl>
-          <details class="codex-binding-panel" open>
-            <summary>Codex 项目与对话绑定</summary>
-            <div class="codex-binding-form">
-              <div class="field-header">
-                <span>选择项目</span>
-                <button id="refreshConnectorCatalog" type="button" class="tiny">刷新</button>
-              </div>
-              <select id="connectorProjectSelect">
-                <option value="">加载项目列表...</option>
-              </select>
-              <div class="connector-picker" id="connectorProjectPicker">
-                <button id="connectorProjectPickerButton" class="picker-button" type="button">
-                  <span class="picker-title">加载项目列表...</span>
-                </button>
-                <div id="connectorProjectPickerMenu" class="picker-menu hidden">
-                  <input id="connectorProjectFilter" type="text" placeholder="搜索项目名称或路径">
-                  <div id="connectorProjectPickerList" class="picker-list"></div>
+          <details class="agent-binding-panel" open>
+            <summary>绑定 Agent</summary>
+            <div class="agent-binding-form">
+              <label class="field-block">
+                <span>选择 Agent 工具</span>
+                <select id="agentBindingProviderSelect">
+                  <option value="codex">Codex</option>
+                  <option value="workbuddy">WorkBuddy</option>
+                </select>
+              </label>
+              <div id="codexAgentBindingFields" class="agent-binding-fields">
+                <div class="field-header">
+                  <span>选择 Codex 项目和对话</span>
+                  <button id="refreshAgentBindingCatalog" type="button" class="tiny">刷新</button>
                 </div>
+                <select id="connectorProjectSelect">
+                  <option value="">加载项目列表...</option>
+                </select>
+                <div class="connector-picker" id="connectorProjectPicker">
+                  <button id="connectorProjectPickerButton" class="picker-button" type="button">
+                    <span class="picker-title">加载项目列表...</span>
+                  </button>
+                  <div id="connectorProjectPickerMenu" class="picker-menu hidden">
+                    <input id="connectorProjectFilter" type="text" placeholder="搜索项目名称或路径">
+                    <div id="connectorProjectPickerList" class="picker-list"></div>
+                  </div>
+                </div>
+                <label class="field-block" id="connectorThreadField">
+                  <span>选择对话（可不选，不选即绑定整个项目）</span>
+                  <select id="connectorThreadSelect">
+                    <option value="">请先选择项目</option>
+                  </select>
+                  <div class="connector-picker" id="connectorThreadPicker">
+                    <button id="connectorThreadPickerButton" class="picker-button" type="button">
+                      <span class="picker-title">请先选择项目</span>
+                    </button>
+                    <div id="connectorThreadPickerMenu" class="picker-menu hidden">
+                      <input id="connectorThreadFilter" type="text" placeholder="搜索对话标题">
+                      <div id="connectorThreadPickerList" class="picker-list"></div>
+                    </div>
+                  </div>
+                </label>
+              </div>
+              <div id="workbuddyAgentBindingFields" class="agent-binding-fields hidden">
+                <div class="field-header">
+                  <span>选择 WorkBuddy 项目和对话</span>
+                  <button id="loadWorkBuddyCatalog" type="button" class="tiny">刷新</button>
+                </div>
+                <label class="field-block" id="workbuddyProjectField">
+                  <span>选择项目</span>
+                  <select id="workbuddyProjectSelect"><option value="">请先刷新项目</option></select>
+                </label>
+                <label class="field-block" id="workbuddyThreadField">
+                  <span>选择对话（可不选，不选即绑定整个项目）</span>
+                  <select id="workbuddyThreadSelect"><option value="">请先选择项目</option></select>
+                </label>
               </div>
               <label class="field-block">
-                <span>绑定范围</span>
-                <select id="connectorBindingScope">
-                  <option value="thread">仅当前对话（推荐）</option>
-                  <option value="project">整个项目</option>
+                <span>权限</span>
+                <select id="agentBindingAccessSelect">
+                  <option value="read">只读</option>
+                  <option value="control">控制</option>
                 </select>
-              </label>
-              <label class="field-block" id="connectorThreadField">
-                <span>选择对话</span>
-                <select id="connectorThreadSelect">
-                  <option value="">请先选择项目</option>
-                </select>
-                <div class="connector-picker" id="connectorThreadPicker">
-                  <button id="connectorThreadPickerButton" class="picker-button" type="button">
-                    <span class="picker-title">请先选择项目</span>
-                  </button>
-                  <div id="connectorThreadPickerMenu" class="picker-menu hidden">
-                    <input id="connectorThreadFilter" type="text" placeholder="搜索对话标题">
-                    <div id="connectorThreadPickerList" class="picker-list"></div>
-                  </div>
-                </div>
               </label>
               <div class="button-row binding-actions">
-                <button id="saveConnectorBinding" type="button" class="tiny">保存绑定</button>
-                <button id="bindConnectorCurrentThread" type="button" class="tiny secondary">绑定当前对话</button>
-                <button id="clearConnectorBinding" type="button" class="tiny secondary">解除绑定</button>
+                <button id="saveAgentBinding" type="button" class="tiny">绑定</button>
+                <button id="clearAgentBinding" type="button" class="tiny secondary">解除绑定</button>
               </div>
-              <p id="connectorBindingFeedback" class="binding-feedback">未绑定 Codex 项目或对话时，Codex 不能控制当前页面。</p>
-            </div>
-          </details>
-          <details class="agent-control-panel" open>
-            <summary>Agent 控制者管理</summary>
-            <div class="agent-control-body">
-              <div class="field-header">
-                <span>已注册来源</span>
-                <button id="refreshAgentSources" type="button" class="tiny">刷新</button>
-              </div>
-              <div id="agentSourceList" class="agent-list"><div class="empty-list">启动 Connector 后显示来源</div></div>
-              <p class="binding-feedback">本机脚本来源由浏览器扩展自动注册；执行写入前会请求当前页面控制权。</p>
-              <div class="field-header"><span>当前页面权限</span></div>
-              <div id="agentBindingList" class="agent-list"><div class="empty-list">当前页面尚未绑定 Agent</div></div>
+              <p id="agentBindingFeedback" class="binding-feedback">请选择 Agent、项目和对话后绑定。</p>
               <details class="manual-agent-panel">
-                <summary>添加 WorkBuddy 手动来源</summary>
+                <summary>高级：手动绑定（无目录时）</summary>
                 <div class="form-grid">
                   <label><span>显示名称</span><input id="manualAgentDisplayName" type="text" value="WorkBuddy"></label>
-                  <div class="button-row">
-                    <button id="loadWorkBuddyCatalog" type="button" class="tiny secondary">自动加载 WorkBuddy 项目/对话</button>
-                  </div>
-                  <label class="field-block hidden" id="workbuddyProjectField"><span>选择 WorkBuddy 项目</span><select id="workbuddyProjectSelect"><option value="">请先加载项目</option></select></label>
-                  <label class="field-block hidden" id="workbuddyThreadField"><span>选择 WorkBuddy 对话</span><select id="workbuddyThreadSelect"><option value="">请先选择项目</option></select></label>
                   <label><span>工作区标识</span><input id="manualAgentWorkspaceId" type="text" placeholder="本机可见标识"></label>
                   <label><span>工作区名称</span><input id="manualAgentWorkspaceName" type="text" placeholder="可选"></label>
                   <label><span>对话标识</span><input id="manualAgentConversationId" type="text" placeholder="可选"></label>
@@ -276,9 +280,29 @@
                   <label><span>绑定范围</span><select id="manualAgentScope"><option value="conversation">对话</option><option value="workspace">工作区</option></select></label>
                   <label><span>权限</span><select id="manualAgentAccess"><option value="read">只读</option><option value="control">控制</option></select></label>
                 </div>
-                <div class="button-row"><button id="addManualAgent" type="button" class="tiny">确认选择并绑定</button></div>
-                <p id="manualAgentFeedback" class="binding-feedback">可自动读取 WorkBuddy 本机项目/对话元数据；无法读取时仍可手动填写。只读取标识、名称、路径和时间，不读取对话正文。</p>
+                <div class="button-row"><button id="addManualAgent" type="button" class="tiny">确认手动绑定</button></div>
+                <p id="manualAgentFeedback" class="binding-feedback">仅在无法读取 Agent 项目目录时使用；不读取对话正文。</p>
               </details>
+            </div>
+          </details>
+          <details class="agent-control-panel" open>
+            <summary>Agent 连接与权限</summary>
+            <div class="agent-control-body">
+              <div class="agent-status-card">
+                <div class="agent-status-heading">
+                  <strong>当前连接</strong>
+                  <span id="agentConnectionStatus" class="inline-status">等待检查</span>
+                </div>
+                <p id="agentConnectionSummary">正在读取 Connector 状态...</p>
+                <p id="agentControlSummary" class="binding-feedback">当前页面控制者：暂无</p>
+              </div>
+              <div class="field-header">
+                <span>Agent 连接状态</span>
+                <button id="refreshAgentSources" type="button" class="tiny">刷新</button>
+              </div>
+              <div id="agentSourceList" class="agent-list"><div class="empty-list">启动 Connector 后显示 Agent</div></div>
+              <div class="field-header"><span>当前页面绑定</span></div>
+              <div id="agentBindingList" class="agent-list"><div class="empty-list">当前页面尚未绑定 Agent</div></div>
             </div>
           </details>
           <details class="capability-panel">
