@@ -50,7 +50,11 @@ async function run() {
   const mac = createPlatformAdapter({
     platform: "darwin",
     homeDir: path.join(tempRoot, "mac-home"),
-    execFile(_command, _args, _options, callback) {
+    execFile(_command, args, _options, callback) {
+      if (args?.[0] === "-e" && String(args?.[1] || "").includes("frontProcessName")) {
+        callback(null, "ok\twechat\tWeChat\t测试群\t\n");
+        return;
+      }
       callback(null, "/Users/test/Exports/\n");
     },
     execFileSync(command, args) {
@@ -68,6 +72,10 @@ async function run() {
   assert.equal(mac.runtimeRoot, path.join(tempRoot, "mac-home", ".tianyuan-workbench"));
   const macSelection = await mac.chooseDirectory("选择目录");
   assert.deepEqual(macSelection.paths, ["/Users/test/Exports/"]);
+  const activeConversation = await mac.inspectActiveConversation();
+  assert.equal(activeConversation.available, true);
+  assert.equal(activeConversation.appType, "wechat");
+  assert.equal(activeConversation.conversationName, "测试群");
   const macReference = mac.createCredentialReference({
     service: "com.tianyuan.test",
     account: "connector",

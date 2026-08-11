@@ -466,6 +466,15 @@ function createWindowsAdapter(options = {}) {
     cliFallback: "tycpv.cmd",
     chooseDirectory,
     chooseWorkbookFiles,
+    async inspectActiveConversation() {
+      return {
+        ok: false,
+        available: false,
+        reason: "ACCESSIBILITY_CONVERSATION_UNSUPPORTED_PLATFORM",
+        message: "当前测试入口只支持 macOS 辅助功能读取。",
+        security: common.security(),
+      };
+    },
     createCredentialReference,
     diagnostics,
     listenerPids,

@@ -61,6 +61,12 @@ Native Messaging 额外支持：
 - `select_print_workbook_directory`：选择文件夹并递归发现 `.xlsx`、`.xlsm` 工作簿。
 - `select_print_output_directory`：选择打印版文件的新存放位置。
 - `run_print_format`：批量执行明细表或申报表打印格式调整，并持续返回文件级进度。
+- `detect_file_archive_apps`：检测 macOS 微信和企业微信的已知下载目录，不读取聊天正文。
+- `select_file_archive_output_directory`：使用 macOS 原生目录选择器选择归档目录。
+- `start_file_archive` / `pause_file_archive` / `stop_file_archive`：启动、暂停/恢复和停止本机文件归档守护任务。
+- `scan_file_archive` / `get_file_archive_status`：刷新来源检测并读取归档状态、计数和最近文件。
+- `list_file_archive_conversations` / `get_file_archive_conversation_bindings`：读取会话清单和本地目录绑定；只接受可靠的非正文元数据来源。
+- `select_file_archive_conversation_directory` / `save_file_archive_conversation_bindings`：为已确认的联系人或群聊绑定导出目录。
 
 ## 安全规则
 
@@ -73,3 +79,5 @@ Native Messaging 额外支持：
 - 打印版副本使用 `-打印版` 后缀；名称冲突时自动增加序号。
 - 文件夹批处理会跳过临时文件、备份文件和已生成的打印版，最多处理 500 个工作簿。
 - Helper 不执行底稿保存、附件上传或线上落库。
+- 文件归档第一阶段不能可靠识别联系人或群聊来源；未知来源只进入待确认目录，不会自动归档到指定会话。
+- 第二阶段不会解密微信或企业微信数据库。当前应用数据库为加密格式时，接口返回“不可用”状态；只有精确文件路径、会话 ID 和已确认目录绑定同时存在时，才允许高置信度自动归档。

@@ -52,9 +52,12 @@ const NATIVE_RUNTIME_BACKUP_FILES = [
   "native_host.js",
   "native_host_bootstrap.js",
   "connector_bridge.js",
+  "codex_catalog.js",
   "process_launcher.js",
   "update_checker.js",
   "update_installer.js",
+  "file-archive.js",
+  "file-archive-conversations.js",
   "update-sources.json",
   "runtime-config.json",
   "com.tianyuan.workbench.helper.json",
@@ -635,7 +638,7 @@ function main() {
   copyDir(
     path.join(repoRoot, "native-helper"),
     path.join(runtimeProjectRoot, "native-helper"),
-    ["native_host.js", "native_host_bootstrap.js", "connector_bridge.js", "process_launcher.js", "update_checker.js", "update_installer.js", "update-sources.json"],
+    ["native_host.js", "native_host_bootstrap.js", "connector_bridge.js", "codex_catalog.js", "process_launcher.js", "update_checker.js", "update_installer.js", "file-archive.js", "file-archive-conversations.js", "update-sources.json"],
   );
   copyDir(path.join(repoRoot, "skills"), path.join(runtimeProjectRoot, "skills"));
   copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), path.join(runtimeProjectRoot, "plugins", "tianyuan-browser-connector"));
@@ -653,9 +656,12 @@ function main() {
   copyFileAtomic(path.join(repoRoot, "native-helper", "native_host.js"), path.join(nativeRuntimeRoot, "native_host.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "native_host_bootstrap.js"), path.join(nativeRuntimeRoot, "native_host_bootstrap.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "connector_bridge.js"), path.join(nativeRuntimeRoot, "connector_bridge.js"));
+  copyFileAtomic(path.join(repoRoot, "native-helper", "codex_catalog.js"), path.join(nativeRuntimeRoot, "codex_catalog.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "process_launcher.js"), path.join(nativeRuntimeRoot, "process_launcher.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "update_checker.js"), path.join(nativeRuntimeRoot, "update_checker.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "update_installer.js"), path.join(nativeRuntimeRoot, "update_installer.js"));
+  copyFileAtomic(path.join(repoRoot, "native-helper", "file-archive.js"), path.join(nativeRuntimeRoot, "file-archive.js"));
+  copyFileAtomic(path.join(repoRoot, "native-helper", "file-archive-conversations.js"), path.join(nativeRuntimeRoot, "file-archive-conversations.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "update-sources.json"), path.join(nativeRuntimeRoot, "update-sources.json"));
   const packagedNativeHostExe = path.join(repoRoot, "native-helper", "native_host.exe");
   if (isWindows && fs.existsSync(packagedNativeHostExe)) {

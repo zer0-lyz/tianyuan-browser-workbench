@@ -559,7 +559,8 @@ details.status-card,
 .module-icon-detail,
 .module-icon-declare,
 .module-icon-print-detail,
-.module-icon-print-declare {
+.module-icon-print-declare,
+.module-icon-archive {
   background:
     radial-gradient(circle at 30% 18%, rgb(255 255 255 / 0.96), transparent 38%),
     linear-gradient(180deg, #ffffff 0%, #f3f6f9 100%);
@@ -1371,6 +1372,36 @@ pre {
   gap: 9px;
 }
 
+.agent-status-card {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--surface-muted);
+}
+
+.agent-status-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.agent-status-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.agent-status-heading .inline-status[data-state="ok"] {
+  color: var(--success);
+}
+
+.agent-status-heading .inline-status[data-state="warn"] {
+  color: var(--warning);
+}
+
 .agent-list {
   display: grid;
   gap: 6px;
@@ -1401,10 +1432,6 @@ pre {
   font-size: 11px;
 }
 
-.hidden {
-  display: none !important;
-}
-
 .cli-authorization-fallback {
   display: grid;
   gap: 7px;
@@ -1421,6 +1448,10 @@ pre {
   font-size: 11px;
   line-height: 1.4;
   overflow-wrap: anywhere;
+}
+
+.hidden {
+  display: none !important;
 }
 
 @media (min-width: 720px) {

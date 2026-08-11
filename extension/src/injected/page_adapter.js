@@ -1,5 +1,5 @@
 (() => {
-  const ADAPTER_VERSION = "2026-07-24-page-tree-mirror-v29-replaceable-listeners";
+  const ADAPTER_VERSION = "2026-08-11-page-tree-mirror-v31";
   const ADAPTER_STATE_KEY = "__tianyuanWorkbenchPageAdapterState";
   const REQUEST_TYPE = `TIANYUAN_WORKBENCH_GET_CONTEXT:${ADAPTER_VERSION}`;
   const RESPONSE_TYPE = `TIANYUAN_WORKBENCH_CONTEXT_RESULT:${ADAPTER_VERSION}`;
@@ -15,7 +15,10 @@
   }
 
   function isVisible(element) {
-    return Boolean(element && (element.offsetWidth || element.offsetHeight || element.getClientRects().length));
+    if (!element) return false;
+    const style = window.getComputedStyle?.(element);
+    if (style && (style.display === "none" || style.visibility === "hidden")) return false;
+    return Boolean(element.offsetWidth || element.offsetHeight || element.getClientRects().length);
   }
 
   function colName(index) {
@@ -336,11 +339,14 @@
     const structuredItems = [];
     const seen = new Set();
 
+    function cleanSubjectText(value) {
+      return String(value || "")
+        .trim();
+    }
     function pushItem(text, depth, leaf, element, pathKey = "", pathTexts = [], subjectCode = "") {
-      const cleanedText = String(text || "").trim();
+      const cleanedText = cleanSubjectText(text);
       if (!cleanedText || cleanedText.length > 40 || /[：:]/.test(cleanedText)) return;
       if (excludedText.has(cleanedText)) return;
-      if (!subjectNamePattern.test(cleanedText)) return;
       const key = pathKey || `${cleanedText}|${depth}|${leaf ? 1 : 0}`;
       if (seen.has(key)) return;
       seen.add(key);
@@ -357,6 +363,7 @@
         leaf,
         path: pathTexts.join("/"),
         subjectCode: /^C\d+(?:-\d+)*$/.test(subjectCode) ? subjectCode : "",
+        displayed: true,
       });
     }
 
@@ -421,7 +428,7 @@
       const label = content?.querySelector?.(".el-tree-node__label")
         || nodeElement.querySelector?.(":scope > .el-tree-node__content .el-tree-node__label")
         || nodeElement.querySelector?.(".el-tree-node__content .el-tree-node__label");
-      const text = readNodeText(nodeElement, content, label, component);
+      const text = cleanSubjectText(readNodeText(nodeElement, content, label, component));
       const childContainer = nodeElement.querySelector?.(":scope > .el-tree-node__children") || nodeElement.querySelector?.(".el-tree-node__children");
       const childNodes = childContainer ? [...childContainer.children].filter((child) => child.classList?.contains("el-tree-node")) : [];
       const componentChildren = arrayFromTreeChildren(component?.node?.childNodes || component?.childNodes).filter(Boolean);
@@ -452,7 +459,7 @@
     const candidates = [...document.querySelectorAll(".el-tree-node__content, .el-tree-node__label, [role='treeitem'], li, .subject-tree span, span, div")]
       .filter(isVisible)
       .map((element) => {
-        const text = textOf(element);
+        const text = cleanSubjectText(textOf(element));
         const rect = element.getBoundingClientRect();
         const active = Boolean(
           element.closest(".is-current,.is-active") ||
@@ -466,7 +473,8 @@
         if (!item.text || item.text.length > 40 || /[：:]/.test(item.text)) return false;
         if (excludedText.has(item.text)) return false;
         if (item.left > 360) return false;
-        return subjectNamePattern.test(item.text);
+        return subjectNamePattern.test(item.text)
+          || /(原材料|产成品|库存商品|在产品|半成品|周转材料|开发支出|商誉|长期股权投资|交易性金融资产|其他债权投资|债权投资|使用权资产)/.test(item.text);
       });
 
     const fallbackSeen = new Set();
@@ -487,6 +495,7 @@
         ...item,
         depth,
         leaf: !(next && next.left > item.left),
+        displayed: true,
       };
     });
   }
@@ -523,18 +532,26 @@
 
   async function expandSubjectTreeForCollection() {
     let clicked = 0;
+    const rootContainers = [".el-tree", "[role='tree']", ".subject-tree"]
+      .flatMap((selector) => [...document.querySelectorAll(selector)])
+      .filter(isVisible);
     for (let round = 0; round < 10; round += 1) {
-      const toggles = [...document.querySelectorAll(".el-tree-node__expand-icon,[class*='tree-node'][class*='expand'],[role='treeitem'] .el-icon-caret-right")]
+      const toggles = [...new Set(rootContainers.flatMap((container) => [
+        ...container.querySelectorAll(".el-tree-node__expand-icon,[class*='tree-node'][class*='expand'],[role='treeitem'] .el-icon-caret-right"),
+      ]))]
         .filter(isVisible)
         .filter((element) => {
           const rect = element.getBoundingClientRect();
           if (rect.left > 340) return false;
           const className = String(element.className || "");
-          if (/is-leaf|expanded/.test(className)) return false;
+          if (/is-leaf/.test(className)) return false;
           const node = element.closest?.(".el-tree-node,[role='treeitem'],li");
           const nodeText = textOf(node);
           if (!nodeText || nodeText.length > 120) return false;
-          return /(资产|负债|权益|货币|长期|短期|应收|应付|存货|金融|现金|银行|其他|股权|薪酬)/.test(nodeText);
+          const expanded = node?.classList?.contains("is-expanded")
+            || node?.getAttribute?.("aria-expanded") === "true"
+            || element.getAttribute?.("aria-expanded") === "true";
+          return !expanded;
         });
       if (!toggles.length) break;
       for (const toggle of toggles.slice(0, 40)) {
@@ -3175,8 +3192,9 @@
       return result;
     }
 
+    installUploadNetworkMonitor();
+    const networkStart = window.__tianyuanWorkbenchUploadNetworkLog.length;
     clickElement(saveButton);
-    result.security.writesPerformed = true;
     result.steps.push({ ok: true, step: "click_save", buttonText: textOf(saveButton) });
     await sleep(1800);
 
@@ -3188,13 +3206,29 @@
     }
 
     await sleep(2500);
+    await sleep(500);
     const after = collectContext();
     const bodyText = document.body?.innerText || "";
-    const saveSuccess = bodyText.includes("保存成功");
+    const messages = getPageMessages();
+    const saveNetwork = networkEvidenceSince(networkStart)
+      .filter((item) => /assignment_draft\/save/.test(item.url || ""));
+    const saveNetworkSuccess = saveNetwork.some((item) => item.status >= 200 && item.status < 300 && item.businessSuccess);
+    const saveSuccessTextFound = bodyText.includes("保存成功") || messages.some((message) => message.includes("保存成功"));
     result.after = after;
-    result.messages = getPageMessages();
-    result.saveSuccessTextFound = saveSuccess;
-    result.ok = true;
+    result.messages = messages;
+    result.saveNetwork = saveNetwork.map((item) => ({
+      method: item.method,
+      url: item.url,
+      status: item.status,
+      businessSuccess: item.businessSuccess,
+      businessCode: item.businessCode,
+      businessMessage: item.businessMessage,
+    }));
+    result.saveSuccessTextFound = saveSuccessTextFound;
+    result.saveNetworkSuccess = saveNetworkSuccess;
+    result.security.writesPerformed = Boolean(saveNetworkSuccess || saveSuccessTextFound);
+    result.ok = result.security.writesPerformed;
+    result.reason = result.ok ? null : "DRAFT_SAVE_SUCCESS_EVIDENCE_NOT_FOUND";
     return result;
   }
 
@@ -3271,7 +3305,6 @@
     }
 
     clickElement(exitButton);
-    result.security.writesPerformed = true;
     result.steps.push({ ok: true, step: "click_exit_edit", buttonText: textOf(exitButton) });
     await sleep(1200);
 
@@ -3287,8 +3320,11 @@
     const bodyText = document.body?.innerText || "";
     result.after = after;
     result.messages = getPageMessages();
-    result.exitSuccessTextFound = /退出编辑成功|退出成功|操作成功/.test(bodyText);
-    result.ok = true;
+    result.exitSuccessTextFound = /退出编辑成功|退出成功|操作成功/.test(bodyText)
+      || result.messages.some((message) => /退出编辑成功|退出成功|操作成功/.test(message));
+    result.security.writesPerformed = result.exitSuccessTextFound;
+    result.ok = result.exitSuccessTextFound;
+    result.reason = result.ok ? null : "EXIT_EDIT_SUCCESS_EVIDENCE_NOT_FOUND";
     return result;
   }
 
@@ -3336,6 +3372,12 @@
     };
     if (!targetPath) return { ...result, reason: "PATH_EMPTY" };
 
+    // A fresh draft route can restore the subject tree with all parents
+    // collapsed. Expand it before matching a path so every selected subject
+    // gets a real navigation attempt during batch execution.
+    const expandedClickCount = await expandSubjectTreeForCollection();
+    result.expandedClickCount = expandedClickCount;
+
     function directNodeText(node) {
       const content = node?.querySelector?.(":scope > .el-tree-node__content")
         || node?.querySelector?.(".el-tree-node__content");
@@ -3355,6 +3397,15 @@
       return parts.join("/");
     }
 
+    function normalizePath(value) {
+      return String(value || "")
+        .split("/")
+        .map((part) => part.replace(/\s+/g, "").trim())
+        .filter(Boolean)
+        .join("/");
+    }
+
+    const normalizedTargetPath = normalizePath(targetPath);
     function findMatch() {
       return [...document.querySelectorAll(".el-tree-node")]
         .filter(isVisible)
@@ -3364,7 +3415,10 @@
           content: node.querySelector?.(":scope > .el-tree-node__content")
             || node.querySelector?.(".el-tree-node__content"),
         }))
-        .find((item) => item.path === targetPath || item.path.endsWith(`/${targetPath}`));
+        .find((item) => {
+          const normalizedPath = normalizePath(item.path);
+          return normalizedPath === normalizedTargetPath || normalizedPath.endsWith(`/${normalizedTargetPath}`);
+        });
     }
 
     let match = findMatch();

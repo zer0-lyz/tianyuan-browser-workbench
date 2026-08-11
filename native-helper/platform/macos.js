@@ -39,6 +39,86 @@ function createMacOSAdapter(options = {}) {
     ].join("\n"));
   }
 
+  async function inspectActiveConversation() {
+    const script = [
+      "tell application \"System Events\"",
+      "set separator to ASCII character 9",
+      "set frontProcessName to name of first process whose frontmost is true",
+      "set candidates to {{\"微信\", \"wechat\"}, {\"WeChat\", \"wechat\"}, {\"企业微信\", \"wecom\"}, {\"WeCom\", \"wecom\"}}",
+      "repeat with candidate in candidates",
+      "set processName to item 1 of candidate",
+      "set appType to item 2 of candidate",
+      "if processName is frontProcessName then",
+      "tell process processName",
+      "if (count windows) > 0 then",
+      "set targetWindow to front window",
+      "set windowTitle to \"\"",
+      "set focusedTitle to \"\"",
+      "set focusedDescription to \"\"",
+      "try",
+      "set windowTitle to name of targetWindow",
+      "end try",
+      "try",
+      "set focusedElement to value of attribute \"AXFocusedUIElement\" of targetWindow",
+      "set focusedTitle to value of attribute \"AXTitle\" of focusedElement",
+      "end try",
+      "try",
+      "set focusedDescription to value of attribute \"AXDescription\" of focusedElement",
+      "end try",
+      "return \"ok\" & separator & appType & separator & windowTitle & separator & focusedTitle & separator & focusedDescription",
+      "end if",
+      "end tell",
+      "end if",
+      "end repeat",
+      "return \"none\"",
+      "end tell",
+    ].join("\n");
+    return await new Promise((resolve) => {
+      runFile("/usr/bin/osascript", ["-e", script], { timeout: 10000, encoding: "utf8" }, (error, stdout, stderr) => {
+        if (error) {
+          resolve({
+            ok: false,
+            available: false,
+            reason: "ACCESSIBILITY_READ_FAILED",
+            message: "无法读取 macOS 界面。请在“系统设置 -> 隐私与安全性 -> 辅助功能”中允许承载插件的应用访问界面后重试。",
+            security: common.security(),
+          });
+          return;
+        }
+        const parts = String(stdout || "").trim().split("\t");
+        if (parts[0] !== "ok") {
+          resolve({
+            ok: true,
+            available: false,
+            reason: "NO_FRONTMOST_CHAT_WINDOW",
+            message: "请先把微信或企业微信的目标聊天窗口置于最前面。",
+            security: common.security(),
+          });
+          return;
+        }
+        const [, appType, windowName, focusedTitle, focusedDescription] = parts;
+        const appNames = appType === "wecom" ? ["企业微信", "WeCom"] : ["微信", "WeChat"];
+        const candidateNames = [focusedTitle, focusedDescription, windowName]
+          .map((value) => String(value || "").trim())
+          .filter((value) => value && !appNames.includes(value));
+        resolve({
+          ok: true,
+          available: Boolean(candidateNames[0]),
+          appType,
+          windowName: String(windowName || "").trim(),
+          conversationName: candidateNames[0] || "",
+          observedLabels: candidateNames.slice(0, 5),
+          confidence: candidateNames[0] ? "low" : "none",
+          requiresConfirmation: true,
+          message: candidateNames[0]
+            ? "已读取到可见会话标识，请人工确认后再绑定。"
+            : "已找到前台窗口，但应用没有暴露可识别的会话名称。",
+          security: common.security(),
+        });
+      });
+    });
+  }
+
   async function listenerPids(port) {
     const lsofBin = ["/usr/sbin/lsof", "/usr/bin/lsof", "lsof"].find((candidate) =>
       candidate === "lsof" || fs.existsSync(candidate)
@@ -184,6 +264,7 @@ function createMacOSAdapter(options = {}) {
     cliFallback: "/usr/local/bin/tycpv",
     chooseDirectory,
     chooseWorkbookFiles,
+    inspectActiveConversation,
     createCredentialReference,
     diagnostics,
     listenerPids,
