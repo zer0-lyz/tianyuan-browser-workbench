@@ -50,6 +50,38 @@ Connector 启动时从本机 `runtime/agent-config.json` 或 `TIANYUAN_CONNECTOR
 
 Connector 不提供任意浏览器点击、任意 URL、任意 JavaScript 或绕过编辑锁。受控上传、清理和核对动作仍使用原有的确认、编辑锁、保存及回读门禁。
 
+资产基础法底稿批量保存和批量退出编辑已作为 MCP 工具暴露给 Codex：
+
+- `tianyuan.preview_batch_save` / `tianyuan.execute_batch_save`
+- `tianyuan.preview_batch_exit_edit` / `tianyuan.execute_batch_exit_edit`
+
+这些工具只会操作已绑定的天源资产基础法底稿页面。批量动作采用“预演 → 明确确认 → 逐科目执行 → 返回每科目成功证据”的流程；执行确认文本分别为 `确认批量保存` 和 `确认批量退出编辑`。如果浏览器页面没有加载扩展并绑定当前项目/对话，工具会返回 `NO_ONLINE_SESSIONS` 或绑定不匹配，而不会尝试控制普通标签页。
+
+## 财务报表导入
+
+插件新增独立的“天源财务报表导入”能力，用于将已经解析的资产负债表或利润表数据导入天源评估系统。它通过本机 `~/.tycpv/` 登录态连接 `valuation-mcp`，不依赖浏览器页面点击，也不会读取或修改源 Excel。
+
+固定流程为：
+
+```text
+companies → prepare（只读预检）→ 用户确认 → execute（保存）→ read（回读）
+```
+
+示例：
+
+```bash
+node runtime/scripts/financial-statement-import.mjs companies --project-id <项目ID>
+node runtime/scripts/financial-statement-import.mjs prepare \
+  --project-id <项目ID> --company-id <公司ID> \
+  --file "/本地/资产负债表.xlsx" --type balance_sheet \
+  --json "/本地/资产负债表解析数据.json" --audit 2
+node runtime/scripts/financial-statement-import.mjs execute --token "<预检返回的短期确认凭证>"
+node runtime/scripts/financial-statement-import.mjs read \
+  --project-id <项目ID> --company-id <公司ID> --type all
+```
+
+详细规则见 `skills/financial-statement-import/SKILL.md`。预检不会落库；只有用户明确确认后才允许执行，执行后必须回读关键科目金额。
+
 ## 更新
 
 工作台 `0.13.0` 起，“更新全部组件”会把 Connector 同步到 `~/plugins/tianyuan-browser-connector` 和 `~/.codex/plugins/cache/personal/tianyuan-browser-connector/0.4.2`。已启动的 Codex 或 WorkBuddy MCP 进程不会热替换；更新后仍显示旧版本时，需要重启对应 Agent。

@@ -30,6 +30,12 @@ function createUnsupportedAdapter(options = {}) {
     cliFallback: "tycpv",
     chooseDirectory: unsupportedPicker,
     chooseWorkbookFiles: unsupportedPicker,
+    inspectActiveConversation: async () => ({
+      ok: false,
+      available: false,
+      reason: "ACCESSIBILITY_CONVERSATION_UNSUPPORTED_PLATFORM",
+      security: common.security(),
+    }),
     createCredentialReference({ fallbackPath, key, secret }) {
       return common.createFileCredentialReference({ fallbackPath, key, secret });
     },

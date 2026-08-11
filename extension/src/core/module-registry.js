@@ -47,10 +47,10 @@ export class ModuleRegistry {
 
   async initialize(sharedContext) {
     await this.featureFlags.load();
-    for (const entry of this.entries.values()) {
+    const initializeEntry = async (entry) => {
       entry.enabled = this.featureFlags.isEnabled(entry.manifest);
       this.#applyAvailability(entry);
-      if (!entry.enabled) continue;
+      if (!entry.enabled) return;
       entry.scope = new ModuleScope();
       entry.instance = entry.definition.create
         ? entry.definition.create()
@@ -65,9 +65,28 @@ export class ModuleRegistry {
           entry.manifest.storageVersion || 1,
         ),
       });
-      await entry.instance.initialize?.(context);
-      entry.initialized = true;
-    }
+      try {
+        await entry.instance.initialize?.(context);
+        entry.initialized = true;
+      } catch (error) {
+        // A feature must not take down the whole side panel during startup.
+        entry.initializationError = error;
+        entry.enabled = false;
+        entry.initialized = false;
+        entry.scope?.dispose();
+        this.#applyAvailability(entry);
+        console.error(`Module initialization failed: ${entry.manifest.id}`, error);
+        this.eventBus.publish("module.initializationFailed", {
+          id: entry.manifest.id,
+          route: entry.manifest.route,
+          message: error?.message || String(error),
+        });
+      }
+    };
+
+    // Modules are independent. Initialize them concurrently so a slow module
+    // cannot delay the rest of the workbench or leave the remembered route blank.
+    await Promise.all([...this.entries.values()].map(initializeEntry));
     this.#renderModuleCount();
   }
 

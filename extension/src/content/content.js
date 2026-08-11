@@ -1,5 +1,5 @@
 (() => {
-const ADAPTER_VERSION = "2026-07-24-page-tree-mirror-v29-replaceable-listeners";
+const ADAPTER_VERSION = "2026-08-11-page-tree-mirror-v31";
 const CONTENT_STATE_KEY = "__tianyuanWorkbenchContentScriptState";
 const INJECTED_SCRIPT_ID = `tianyuan-workbench-page-adapter-${ADAPTER_VERSION}`;
 const EXT_REQUEST_TYPE = "TIANYUAN_WORKBENCH_GET_CONTEXT_V2";

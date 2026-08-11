@@ -116,6 +116,8 @@ export const updatesModule = {
         UPDATE_INSTALLER_NOT_FOUND: "安装包中缺少安装程序，已停止安装。",
         UPDATE_DOWNLOAD_NETWORK_FAILED: "安装包下载网络连接失败，请检查网络后重试。",
         UPDATE_DOWNLOAD_TIMEOUT: "安装包下载超时，请检查网络稳定性后重试。",
+        UPDATE_CHECK_TIMEOUT: "更新源响应超时，当前版本可以继续使用，请稍后重试。",
+        NATIVE_HELPER_TIMEOUT: "本地助手响应超时，请重新加载扩展后重试；当前版本未改变。",
         UPDATE_DOWNLOAD_SIZE_MISMATCH: "安装包大小与发布记录不一致，已停止处理。",
         UPDATE_FETCH_UNAVAILABLE: "本机 Node.js 运行时不支持下载，请更新本机运行组件。",
         UPDATE_INSTALLER_NOT_STARTED: "更新程序没有成功启动，请重试并查看诊断日志。",
@@ -346,7 +348,9 @@ export const updatesModule = {
             || context.extensionManifest.version,
           currentBuildNumber: Number(config.buildNumber || 0),
           currentRuntimeBuildId: String(contract?.runtimeBuildId || ""),
-        }, 20000);
+        // Leave enough room for the Helper's bounded network fallback to
+        // return UPDATE_CHECK_TIMEOUT instead of surfacing a transport timeout.
+        }, 30000);
         if (!result?.ok) throw new Error(result?.reason || "GITHUB_UPDATE_CHECK_FAILED");
         latestResult = result;
         await context.storage.save(result);

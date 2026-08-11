@@ -73,6 +73,8 @@ cp "$ROOT_DIR/native-helper/connector_bridge.js" "$STAGE/native-helper/connector
 cp "$ROOT_DIR/native-helper/process_launcher.js" "$STAGE/native-helper/process_launcher.js"
 cp "$ROOT_DIR/native-helper/update_checker.js" "$STAGE/native-helper/update_checker.js"
 cp "$ROOT_DIR/native-helper/update_installer.js" "$STAGE/native-helper/update_installer.js"
+cp "$ROOT_DIR/native-helper/file-archive.js" "$STAGE/native-helper/file-archive.js"
+cp "$ROOT_DIR/native-helper/file-archive-conversations.js" "$STAGE/native-helper/file-archive-conversations.js"
 cp "$ROOT_DIR/native-helper/platform/"*.js "$STAGE/native-helper/platform/"
 if [[ -f "$ROOT_DIR/native-helper/update-sources.json" ]]; then
   cp "$ROOT_DIR/native-helper/update-sources.json" "$STAGE/native-helper/update-sources.json"

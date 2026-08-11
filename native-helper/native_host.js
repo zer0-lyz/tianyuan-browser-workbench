@@ -52,6 +52,17 @@ const updateInstallerFactory = (() => {
     }
   }
 })();
+const fileArchiveFactory = (() => {
+  try {
+    return require("./file-archive.js");
+  } catch (cause) {
+    try {
+      return createRequire(path.join(path.dirname(process.execPath), "native_host.js"))("./file-archive.js");
+    } catch {
+      throw cause;
+    }
+  }
+})();
 const platformAdapter = (() => {
   try {
     return require("./platform/index.js");
@@ -113,6 +124,11 @@ const workbenchUpdater = updateInstallerFactory.createWorkbenchUpdater({
   updateChecker,
   platformAdapter,
   runtimeDirectory: processLauncher.runtimeDirectory(),
+});
+const fileArchive = fileArchiveFactory.createFileArchiveService({
+  runtimeDirectory: process.env.TIANYUAN_FILE_ARCHIVE_RUNTIME_DIR || processLauncher.runtimeDirectory(),
+  platformAdapter,
+  selfLaunchSpec: (args) => processLauncher.selfLaunchSpec(args),
 });
 
 function firstExistingPath(values, fallback) {
@@ -720,7 +736,11 @@ async function connectorBuildAttachmentFile(filePath) {
 async function connectorCreateAction(sessionId, input) {
   const session = connectorRequireActionSession(sessionId, input);
   const type = String(input.action || "");
-  if (![
+  const allowedActionTypes = [
+    "preview_batch_save",
+    "batch_save_asset_draft",
+    "preview_batch_exit_edit",
+    "batch_exit_edit",
     "preview_audit_attachment_upload",
     "upload_audit_attachment",
     "batch_upload_audit_attachments",
@@ -729,11 +749,13 @@ async function connectorCreateAction(sessionId, input) {
     "scan_audit_index_check_rows",
     "batch_set_audit_check_results",
     "clear_audit_test_rows",
-  ].includes(type)) {
+  ];
+  if (!allowedActionTypes.includes(type)) {
     throw new Error("ACTION_NOT_ALLOWED");
   }
+  const isBatchSubjectAction = ["preview_batch_save", "batch_save_asset_draft", "preview_batch_exit_edit", "batch_exit_edit"].includes(type);
   const rowNumber = Number(input.rowNumber);
-  const isBatchAction = ["batch_upload_audit_attachments", "scan_audit_index_check_rows", "batch_set_audit_check_results", "clear_audit_test_rows"].includes(type);
+  const isBatchAction = ["batch_upload_audit_attachments", "scan_audit_index_check_rows", "batch_set_audit_check_results", "clear_audit_test_rows"].includes(type) || isBatchSubjectAction;
   if (!isBatchAction && (!Number.isInteger(rowNumber) || rowNumber < 2 || rowNumber > 100000)) throw new Error("ROW_NUMBER_INVALID");
   const fieldTitle = String(input.fieldTitle || "查证资料索引").trim();
   const expectedFieldTitle = ["inspect_audit_check_row", "set_audit_check_result", "batch_set_audit_check_results"].includes(type)
@@ -743,6 +765,19 @@ async function connectorCreateAction(sessionId, input) {
   const requestedSubjectCode = String(input.subjectCode || session.binding.subjectCode || "").trim();
   const subjectCode = requestedSubjectCode === "current" ? "" : requestedSubjectCode;
   if (subjectCode && !/^C\d+(?:-\d+)*$/.test(subjectCode)) throw new Error("SUBJECT_CODE_INVALID");
+  const normalizeBatchSubjectCode = (value) => {
+    const candidate = String(value || "").trim().slice(0, 240);
+    if (/^C\d+(?:-\d+)*$/.test(candidate) || /^tree:(?!\s*$).+/.test(candidate) || /^treepath:(?!\s*$).+/.test(candidate)) return candidate;
+    throw new Error("SUBJECT_CODE_INVALID");
+  };
+  const subjectCodes = isBatchSubjectAction
+    ? (Array.isArray(input.subjectCodes) ? input.subjectCodes.map(normalizeBatchSubjectCode) : [])
+    : [];
+  if (isBatchSubjectAction && (!subjectCodes.length || subjectCodes.length > 100)) throw new Error(subjectCodes.length > 100 ? "SUBJECT_CODES_TOO_MANY" : "SUBJECT_CODES_REQUIRED");
+  const companyScope = String(input.companyScope || "current").trim();
+  if (!["current", "partial", "all"].includes(companyScope)) throw new Error("COMPANY_SCOPE_INVALID");
+  if (type === "batch_save_asset_draft" && input.confirmText !== "确认批量保存") throw new Error("BATCH_SAVE_CONFIRM_TEXT_REQUIRED");
+  if (type === "batch_exit_edit" && input.confirmText !== "确认批量退出编辑") throw new Error("BATCH_EXIT_CONFIRM_TEXT_REQUIRED");
   const moduleIndex = Number.isInteger(input.moduleIndex) ? input.moduleIndex : Number(input.moduleIndex || 0);
   if (!Number.isInteger(moduleIndex) || moduleIndex < 0 || moduleIndex > 20) throw new Error("MODULE_INDEX_INVALID");
   const moduleName = String(input.moduleName || "").trim().slice(0, 80);
@@ -800,6 +835,19 @@ async function connectorCreateAction(sessionId, input) {
       projectId: session.binding.projectId,
       companyId: session.binding.companyId,
       subjectCode,
+      subjectCodes,
+      companyScope,
+      companyFilters: Array.isArray(input.companyFilters) ? input.companyFilters.map((value) => String(value || "").slice(0, 160)).slice(0, 100) : [],
+      selectedCompanies: Array.isArray(input.selectedCompanies) ? input.selectedCompanies.slice(0, 100).map((item) => ({
+        value: String(item?.value || "").slice(0, 160),
+        id: String(item?.id || "").slice(0, 160),
+        code: String(item?.code || "").slice(0, 160),
+        shortName: String(item?.shortName || "").slice(0, 200),
+        name: String(item?.name || "").slice(0, 200),
+        title: String(item?.title || "").slice(0, 240),
+      })) : [],
+      companyValues: Array.isArray(input.companyValues) ? input.companyValues.map((value) => String(value || "").slice(0, 160)).slice(0, 100) : [],
+      mode: ["batch_save_asset_draft", "batch_exit_edit"].includes(type) ? "execute" : "dry_run",
       rowNumber: isBatchAction ? 0 : rowNumber,
       fieldTitle,
       moduleName,
@@ -817,7 +865,11 @@ async function connectorCreateAction(sessionId, input) {
         ? "确认填写核对情况并保存"
         : (type === "batch_set_audit_check_results"
           ? "确认批量填写核对情况并保存"
-          : (type === "clear_audit_test_rows" ? "确认清理测试数据并保存" : ""))),
+          : (type === "clear_audit_test_rows"
+            ? "确认清理测试数据并保存"
+            : (type === "batch_save_asset_draft"
+              ? "确认批量保存"
+              : (type === "batch_exit_edit" ? "确认批量退出编辑" : ""))))),
     createdAt: now,
   };
   connectorActions.set(actionId, action);
@@ -1303,7 +1355,22 @@ async function startConnectorBridgeAction({ forceRestart = false } = {}) {
 
 function readMessages(onMessage) {
   let buffer = Buffer.alloc(0);
-  process.stdin.on("end", () => process.exit(0));
+  let inputEnded = false;
+  let pendingRequests = 0;
+  let exitScheduled = false;
+
+  function maybeExit() {
+    if (!inputEnded || pendingRequests > 0 || exitScheduled) return;
+    exitScheduled = true;
+    setImmediate(() => process.exit(0));
+  }
+
+  process.stdin.on("end", () => {
+    // Chrome may close stdin immediately after sending a one-shot message.
+    // Keep the host alive until the async handler has written its response.
+    inputEnded = true;
+    maybeExit();
+  });
   process.stdin.on("data", (chunk) => {
     buffer = Buffer.concat([buffer, chunk]);
     while (buffer.length >= 4) {
@@ -1311,11 +1378,15 @@ function readMessages(onMessage) {
       if (buffer.length < 4 + length) return;
       const raw = buffer.slice(4, 4 + length).toString("utf8");
       buffer = buffer.slice(4 + length);
-      onMessage(JSON.parse(raw));
+      pendingRequests += 1;
+      Promise.resolve()
+        .then(() => onMessage(JSON.parse(raw)))
+        .catch(() => {})
+        .finally(() => {
+          pendingRequests = Math.max(0, pendingRequests - 1);
+          maybeExit();
+        });
     }
-  });
-  process.stdin.on("end", () => {
-    process.exit(0);
   });
 }
 
@@ -2236,6 +2307,7 @@ function cliExportFailure(logLines) {
 }
 
 function runCliExport(message, emit) {
+  return new Promise((resolve) => {
   let exportConfig;
   try {
     exportConfig = CLI_EXPORT_COMMANDS[String(message?.exportType || "")];
@@ -2266,6 +2338,7 @@ function runCliExport(message, emit) {
       if (completed) return;
       completed = true;
       emit(payload);
+      resolve(payload);
     }
 
     emit({
@@ -2345,15 +2418,18 @@ function runCliExport(message, emit) {
       });
     });
   } catch (error) {
-    emit({
+    const payload = {
       ok: false,
       event: "complete",
       phase: "failed",
       percent: 0,
       reason: error?.message || String(error),
       security: { credentialsReturned: false },
-    });
+    };
+    emit(payload);
+    resolve(payload);
   }
+  });
 }
 
 function parseSseOrJson(text) {
@@ -2747,6 +2823,57 @@ async function handle(message) {
   if (message?.action === "select_print_output_directory") {
     return await choosePrintOutputDirectory();
   }
+  if (message?.action === "detect_file_archive_apps") {
+    return await fileArchive.detect();
+  }
+  if (message?.action === "list_file_archive_conversations") {
+    return fileArchive.listConversations(message.appType === "wecom" ? "wecom" : "wechat");
+  }
+  if (message?.action === "get_file_archive_conversation_bindings") {
+    return fileArchive.getConversationBindings(message.appType === "wecom" ? "wecom" : "wechat");
+  }
+  if (message?.action === "inspect_file_archive_active_conversation") {
+    return await fileArchive.inspectActiveConversation();
+  }
+  if (message?.action === "select_file_archive_conversation_directory") {
+    const appType = message.appType === "wecom" ? "wecom" : "wechat";
+    const selected = await platformAdapter.chooseDirectory("选择所选会话的导出目录");
+    const outputDirectory = selected.paths?.[0] || "";
+    if (!selected.ok || !outputDirectory) {
+      return { ...selected, action: "file_archive_conversation_directory_selected", security: { credentialsReturned: false } };
+    }
+    const conversationIds = Array.isArray(message.conversationIds)
+      ? message.conversationIds.map((value) => String(value || "").trim()).filter(Boolean)
+      : [];
+    return fileArchive.saveConversationBindings({
+      appType,
+      bindings: conversationIds.map((conversationId) => ({ conversationId, outputDirectory })),
+    });
+  }
+  if (message?.action === "save_file_archive_conversation_bindings") {
+    return fileArchive.saveConversationBindings({
+      appType: message.appType === "wecom" ? "wecom" : "wechat",
+      bindings: Array.isArray(message.bindings) ? message.bindings : [],
+    });
+  }
+  if (message?.action === "select_file_archive_output_directory") {
+    return await fileArchive.selectOutputDirectory();
+  }
+  if (message?.action === "start_file_archive") {
+    return await fileArchive.start(message.config || {});
+  }
+  if (message?.action === "stop_file_archive") {
+    return await fileArchive.stop();
+  }
+  if (message?.action === "pause_file_archive") {
+    return await fileArchive.pause(message.paused !== false);
+  }
+  if (message?.action === "scan_file_archive") {
+    return await fileArchive.scan();
+  }
+  if (message?.action === "get_file_archive_status") {
+    return fileArchive.status();
+  }
   if (message?.action === "get_project_companies") {
     const projectId = parseNumericId(message.projectId, "projectId");
     const raw = await callTool("get_project_companies", { projectId });
@@ -2834,21 +2961,20 @@ if (process.argv.includes("--connector-bridge")) {
       })}\n`);
       process.exitCode = 1;
     });
+} else if (process.argv.includes("--file-archive-daemon")) {
+  fileArchive.runDaemon();
 } else {
   readMessages((message) => {
     if (message?.action === "run_cli_export") {
-      runCliExport(message, writeMessage);
-      return;
+      return runCliExport(message, writeMessage);
     }
     if (message?.action === "run_print_format") {
-      runPrintFormat(message, writeMessage);
-      return;
+      return runPrintFormat(message, writeMessage);
     }
     if (message?.action === "run_link_restore") {
-      runLinkRestore(message, writeMessage);
-      return;
+      return runLinkRestore(message, writeMessage);
     }
-    handle(message)
+    return handle(message)
       .then((payload) => {
         writeMessage(payload);
         scheduleUpdateHostShutdown(message, payload);

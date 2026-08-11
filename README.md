@@ -60,6 +60,8 @@ node scripts/install-local-runtime.mjs
 
 反馈模块支持功能建议、配置问题、故障反馈和使用体验。草稿只保存在扩展本机存储；用户确认隐私声明后，反馈通过 `https://feedback.zer0y.com/api/feedback` 写入 Cloudflare 私有 D1 数据库并返回匿名反馈编号。浏览器扩展不保存 Cloudflare 或 GitHub token，公网不提供反馈读取接口；服务端源码和部署说明见 `feedback-service/README.md`。
 
+“微信文件归档”模块支持 macOS 本机微信和企业微信下载目录检测、文件稳定性判断、去重、复制、SHA-256 校验、后台状态和失败记录。第二阶段已加入会话清单、搜索、多选、目录绑定和高置信度匹配接口；但当前本机微信/企业微信会话数据库为加密格式，面板会明确提示暂时无法可靠加载清单，不会猜测群聊或联系人。没有精确文件消息元数据时仍进入 `来源未知待确认` 目录。详细边界见 `docs/decisions/20260803-file-archive-mvp.md` 和 `docs/decisions/20260804-file-archive-phase2.md`。
+
 ## 运行目录
 
 - macOS：`~/.tianyuan-workbench/projects/天源评估系统/extension`

@@ -1,0 +1,161 @@
+[data-module-id="file-archive"] .file-archive-config,
+[data-module-id="file-archive"] .file-archive-conversations,
+[data-module-id="file-archive"] .file-archive-output,
+[data-module-id="file-archive"] .file-archive-execution,
+[data-module-id="file-archive"] .file-archive-recent {
+  display: grid;
+  gap: 12px;
+}
+
+[data-module-id="file-archive"] .file-archive-apps,
+[data-module-id="file-archive"] .file-archive-field-row,
+[data-module-id="file-archive"] .file-archive-actions,
+[data-module-id="file-archive"] .file-archive-conversation-toolbar,
+[data-module-id="file-archive"] .file-archive-conversation-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+[data-module-id="file-archive"] .file-archive-actions {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+[data-module-id="file-archive"] .file-archive-conversation-toolbar {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+[data-module-id="file-archive"] .file-archive-conversation-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+[data-module-id="file-archive"] .file-archive-conversation-list {
+  display: grid;
+  gap: 4px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--surface-muted);
+}
+
+[data-module-id="file-archive"] .file-archive-conversation-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+[data-module-id="file-archive"] .file-archive-conversation-item:has(input:checked) {
+  background: var(--accent-soft);
+}
+
+[data-module-id="file-archive"] .file-archive-conversation-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+[data-module-id="file-archive"] .file-archive-conversation-main strong,
+[data-module-id="file-archive"] .file-archive-conversation-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-module-id="file-archive"] .file-archive-conversation-main small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+[data-module-id="file-archive"] .file-archive-app-option {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-muted);
+}
+
+[data-module-id="file-archive"] .file-archive-app-option:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+[data-module-id="file-archive"] .file-archive-app-option span,
+[data-module-id="file-archive"] .file-archive-app-option small {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+[data-module-id="file-archive"] .file-archive-app-option small,
+[data-module-id="file-archive"] .file-archive-disabled-note,
+[data-module-id="file-archive"] .file-archive-cloud-warning {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+[data-module-id="file-archive"] .file-archive-disabled-note,
+[data-module-id="file-archive"] .file-archive-cloud-warning {
+  padding: 9px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--surface-muted);
+}
+
+[data-module-id="file-archive"] .file-archive-cloud-warning {
+  color: var(--warn);
+  border-color: #f0d58a;
+  background: #fff8dc;
+}
+
+[data-module-id="file-archive"] .file-archive-path-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+[data-module-id="file-archive"] .file-archive-recent-list {
+  display: grid;
+  gap: 5px;
+  max-height: 250px;
+  overflow: auto;
+}
+
+[data-module-id="file-archive"] .file-archive-recent-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+[data-module-id="file-archive"] .file-archive-recent-item strong,
+[data-module-id="file-archive"] .file-archive-recent-item small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-module-id="file-archive"] .file-archive-recent-item small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+}
+
+@media (max-width: 560px) {
+  [data-module-id="file-archive"] .file-archive-apps,
+  [data-module-id="file-archive"] .file-archive-field-row,
+  [data-module-id="file-archive"] .file-archive-actions,
+  [data-module-id="file-archive"] .file-archive-conversation-toolbar,
+  [data-module-id="file-archive"] .file-archive-conversation-actions {
+    grid-template-columns: 1fr;
+  }
+}

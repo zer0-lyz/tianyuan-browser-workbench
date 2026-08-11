@@ -59,6 +59,88 @@ export const tools = [
     }
   },
   {
+    name: "tianyuan.preview_batch_save",
+    description: "通过已绑定的天源资产基础法底稿页面预演批量保存。逐个科目读取页面状态和保存按钮，不点击保存、不修改底稿。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string" },
+        bindingId: { type: "string" },
+        projectId: { type: "string" },
+        threadId: { type: "string" },
+        subjectCodes: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 100, description: "要预演的科目代码，支持 C3-1-2、tree:科目名称 或 treepath:父级/科目名称。" },
+        companyScope: { type: "string", enum: ["current", "partial", "all"], default: "current" },
+        companyFilters: { type: "array", items: { type: "string" }, maxItems: 100 },
+        selectedCompanies: { type: "array", items: { type: "object" }, maxItems: 100 },
+        companyValues: { type: "array", items: { type: "string" }, maxItems: 100 }
+      },
+      required: ["sessionId", "bindingId", "projectId", "threadId", "subjectCodes"],
+      additionalProperties: false
+    }
+  },
+  {
+    name: "tianyuan.execute_batch_save",
+    description: "在用户明确确认后，通过已绑定的天源资产基础法底稿页面逐科目点击保存并回传每个科目的页面成功证据。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string" },
+        bindingId: { type: "string" },
+        projectId: { type: "string" },
+        threadId: { type: "string" },
+        subjectCodes: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 100 },
+        companyScope: { type: "string", enum: ["current", "partial", "all"], default: "current" },
+        companyFilters: { type: "array", items: { type: "string" }, maxItems: 100 },
+        selectedCompanies: { type: "array", items: { type: "object" }, maxItems: 100 },
+        companyValues: { type: "array", items: { type: "string" }, maxItems: 100 },
+        confirmText: { type: "string", const: "确认批量保存" }
+      },
+      required: ["sessionId", "bindingId", "projectId", "threadId", "subjectCodes", "confirmText"],
+      additionalProperties: false
+    }
+  },
+  {
+    name: "tianyuan.preview_batch_exit_edit",
+    description: "通过已绑定的天源资产基础法底稿页面预演批量退出编辑。逐个科目读取退出编辑按钮，不点击、不修改底稿。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string" },
+        bindingId: { type: "string" },
+        projectId: { type: "string" },
+        threadId: { type: "string" },
+        subjectCodes: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 100 },
+        companyScope: { type: "string", enum: ["current", "partial", "all"], default: "current" },
+        companyFilters: { type: "array", items: { type: "string" }, maxItems: 100 },
+        selectedCompanies: { type: "array", items: { type: "object" }, maxItems: 100 },
+        companyValues: { type: "array", items: { type: "string" }, maxItems: 100 }
+      },
+      required: ["sessionId", "bindingId", "projectId", "threadId", "subjectCodes"],
+      additionalProperties: false
+    }
+  },
+  {
+    name: "tianyuan.execute_batch_exit_edit",
+    description: "在用户明确确认后，通过已绑定的天源资产基础法底稿页面逐科目点击退出编辑并回传每个科目的页面成功证据。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string" },
+        bindingId: { type: "string" },
+        projectId: { type: "string" },
+        threadId: { type: "string" },
+        subjectCodes: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 100 },
+        companyScope: { type: "string", enum: ["current", "partial", "all"], default: "current" },
+        companyFilters: { type: "array", items: { type: "string" }, maxItems: 100 },
+        selectedCompanies: { type: "array", items: { type: "object" }, maxItems: 100 },
+        companyValues: { type: "array", items: { type: "string" }, maxItems: 100 },
+        confirmText: { type: "string", const: "确认批量退出编辑" }
+      },
+      required: ["sessionId", "bindingId", "projectId", "threadId", "subjectCodes", "confirmText"],
+      additionalProperties: false
+    }
+  },
+  {
     name: "tianyuan.preview_audit_attachment_upload",
     description: "通过已绑定的天源浏览器页面预演评估核实附件上传。只定位科目、行和查证资料索引上传分类，不注入文件、不上传、不保存。",
     inputSchema: {
@@ -363,6 +445,10 @@ async function runBrowserAction(name, input) {
   const sessionsPayload = await request("/api/sessions");
   requireBoundSession(sessionsPayload.sessions || [], input);
   const action = {
+    "tianyuan.preview_batch_save": "preview_batch_save",
+    "tianyuan.execute_batch_save": "batch_save_asset_draft",
+    "tianyuan.preview_batch_exit_edit": "preview_batch_exit_edit",
+    "tianyuan.execute_batch_exit_edit": "batch_exit_edit",
     "tianyuan.upload_audit_attachment": "upload_audit_attachment",
     "tianyuan.batch_upload_audit_attachments": "batch_upload_audit_attachments",
     "tianyuan.clear_audit_test_rows": "clear_audit_test_rows",
@@ -380,7 +466,7 @@ async function runBrowserAction(name, input) {
     input.sessionId,
     submitted.action.actionId,
     input,
-    ["upload_audit_attachment", "batch_upload_audit_attachments", "clear_audit_test_rows", "set_audit_check_result", "batch_set_audit_check_results"].includes(action) ? 150000 : 60000,
+    ["upload_audit_attachment", "batch_upload_audit_attachments", "clear_audit_test_rows", "set_audit_check_result", "batch_set_audit_check_results", "batch_save_asset_draft", "batch_exit_edit"].includes(action) ? 300000 : 60000,
   );
   return {
     ok: result.status === "completed" && result.result?.ok === true,
@@ -458,7 +544,11 @@ async function connectionStatus(input = {}) {
   const boundSessions = onlineSessions.filter((session) => bindingFor(session));
   const matches = boundSessions.filter((session) => matchesBinding(session, input));
   const issues = [];
-  if (!onlineSessions.length) issues.push({ code: "NO_ONLINE_SESSIONS", message: "没有当前 Agent 有权访问的在线天源浏览器 session。" });
+  if (!onlineSessions.length) issues.push({
+    code: "NO_ONLINE_SESSIONS",
+    message: "没有当前 Agent 有权访问的在线天源浏览器 session。请在 Chrome 打开已登录的天源资产基础法底稿页，加载本机扩展并在连接配置中绑定当前项目/对话。",
+    hint: "不要使用普通未加载扩展的标签页；绑定成功后顶部应显示已绑定，再重新调用本工具。",
+  });
   else if (!boundSessions.length) issues.push({ code: "NO_AGENT_BINDINGS", message: "在线天源页面尚未绑定当前 Agent。" });
   else if (!matches.length) issues.push({ code: "NO_MATCHING_BINDING", message: "没有找到与当前工作区或对话匹配的天源页面。" });
   else if (matches.length > 1 && !input.sessionId && !input.bindingId) issues.push({ code: "MULTIPLE_MATCHING_SESSIONS", message: "匹配到多个天源页面，请明确 sessionId 或 bindingId。" });
@@ -491,6 +581,10 @@ export async function executeTool(name, input = {}) {
     return { ok: true, protocolVersion: payload.protocolVersion, adapter: payload.adapter, capabilities: payload.capabilities, safety: payload.safety };
   }
   if ([
+    "tianyuan.preview_batch_save",
+    "tianyuan.execute_batch_save",
+    "tianyuan.preview_batch_exit_edit",
+    "tianyuan.execute_batch_exit_edit",
     "tianyuan.preview_audit_attachment_upload",
     "tianyuan.upload_audit_attachment",
     "tianyuan.batch_upload_audit_attachments",

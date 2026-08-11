@@ -7,6 +7,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { createPlatformAdapter } = require("./platform/index.js");
+const { filterRetainedCatalog, readCodexCatalog } = require("./codex_catalog.js");
 
 const platformAdapter = createPlatformAdapter();
 
@@ -91,8 +92,14 @@ function createBridge(options = {}) {
   const sourcesPath = options.sourcesPath || process.env.TIANYUAN_CONNECTOR_AGENT_SOURCES_PATH || path.join(runtimeRoot, "native-helper", "agent-sources.json");
   const configDir = options.configDir || process.env.TIANYUAN_CONNECTOR_AGENT_CONFIG_DIR || path.join(runtimeRoot, "agent-sources");
   const codexStatePath = options.codexStatePath || process.env.TIANYUAN_CODEX_GLOBAL_STATE_PATH || path.join(home, ".codex", ".codex-global-state.json");
+  const codexHome = options.codexHome || process.env.CODEX_HOME || path.join(home, ".codex");
+  const projectsPath = options.projectsPath || process.env.OFFICE_CONNECTOR_PROJECTS || path.join(home, ".local", "share", "office-connector", "runtime", "config", "projects.local.json");
+  const threadsPath = options.threadsPath || process.env.OFFICE_CONNECTOR_THREADS || path.join(home, ".local", "share", "office-connector", "runtime", "config", "threads.local.json");
+  const processesPath = options.processesPath || path.join(codexHome, "process_manager", "chat_processes.json");
+  const sqlitePath = options.sqlitePath || path.join(codexHome, "sqlite", "codex-dev.db");
   const workbuddyDbPath = options.workbuddyDbPath || process.env.TIANYUAN_WORKBUDDY_DB_PATH || path.join(home, ".workbuddy", "workbuddy.db");
   const compatibilityPath = options.compatibilityPath || process.env.TIANYUAN_CONNECTOR_RUNTIME_COMPATIBILITY_PATH || path.join(__dirname, "runtime-compat.json");
+  const officeBridgeUrl = options.officeBridgeUrl || process.env.OFFICE_CONNECTOR_BRIDGE_URL || "http://127.0.0.1:40115";
   const platformUrl = process.env.TIANYUAN_CONNECTOR_PLATFORM_URL || "http://127.0.0.1:40315";
   const sessions = new Map(); const actions = new Map(); const bindings = new Map(); const sources = new Map();
   let loaded = false; let migrated = false;
@@ -245,13 +252,48 @@ function createBridge(options = {}) {
   }; }
   function prune() { const instant = Date.now(); for (const [key, session] of sessions) if (instant - Date.parse(session.lastSeenAt) > 120000) sessions.delete(key); for (const [key, action] of actions) { const age = Date.parse(action.completedAt || action.createdAt); const ttl = action.completedAt ? ACTION_RESULT_TTL_MS : ACTION_TTL_MS; if (!Number.isFinite(age) || instant - age > ttl) actions.delete(key); } }
   function attachment(filePath) { const resolved = path.resolve(String(filePath || "")); if (!path.isAbsolute(String(filePath || ""))) throw error("ATTACHMENT_PATH_MUST_BE_ABSOLUTE"); const stat = fs.statSync(resolved); if (!stat.isFile()) throw error("ATTACHMENT_NOT_A_FILE"); if (stat.size <= 0) throw error("ATTACHMENT_FILE_EMPTY"); if (stat.size > MAX_ATTACHMENT_BYTES) throw error("ATTACHMENT_FILE_TOO_LARGE"); const extension = path.extname(resolved).toLowerCase(); if (!ATTACHMENT_EXTENSIONS.has(extension)) throw error("ATTACHMENT_FILE_TYPE_NOT_ALLOWED"); return { path: resolved, name: path.basename(resolved), size: stat.size, type: "application/octet-stream" }; }
-  function actionIsWrite(type) { return ["upload_audit_attachment", "batch_upload_audit_attachments", "save_batch_upload_draft", "clear_audit_attachments", "clear_audit_test_rows", "set_audit_check_result", "batch_set_audit_check_results"].includes(type); }
+  function actionIsWrite(type) {
+    return ["upload_audit_attachment", "batch_upload_audit_attachments", "save_batch_upload_draft", "clear_audit_attachments", "clear_audit_test_rows", "set_audit_check_result", "batch_set_audit_check_results", "batch_save_asset_draft", "batch_exit_edit"].includes(type);
+  }
+  function normalizeBatchSubjectCode(value) {
+    const subject = limited(value, 240);
+    if (/^C\d+(?:-\d+)*$/.test(subject)) return subject;
+    if (/^tree:(?!\s*$).+/.test(subject) || /^treepath:(?!\s*$).+/.test(subject)) return subject;
+    throw error("SUBJECT_CODE_INVALID");
+  }
+  function normalizedSelection(value, max = 100) {
+    if (!Array.isArray(value)) return [];
+    return value.slice(0, max).map((item) => typeof item === "object" && item !== null
+      ? {
+          value: limited(item.value, 160), id: limited(item.id, 160), code: limited(item.code, 160),
+          shortName: limited(item.shortName, 200), name: limited(item.name, 200), title: limited(item.title, 240),
+        }
+      : limited(item, 160));
+  }
   function createAction(session, agent, input) {
-    const type = limited(input.action, 80); const allowed = new Set(["preview_audit_attachment_upload", "upload_audit_attachment", "batch_upload_audit_attachments", "save_batch_upload_draft", "inspect_audit_check_row", "set_audit_check_result", "scan_audit_index_check_rows", "batch_set_audit_check_results", "clear_audit_attachments", "clear_audit_test_rows"]); if (!allowed.has(type)) throw error("ACTION_NOT_ALLOWED");
-    const binding = authorize(session, agent, input, actionIsWrite(type)); if (session.status !== "online") throw error("SESSION_NOT_ONLINE", 409); if (!session.binding.projectId || !session.binding.companyId || session.binding.pageType !== "asset-draft") throw error("ASSET_DRAFT_SESSION_REQUIRED", 409);
+    const type = limited(input.action, 80);
+    const allowed = new Set(["preview_batch_save", "batch_save_asset_draft", "preview_batch_exit_edit", "batch_exit_edit", "preview_audit_attachment_upload", "upload_audit_attachment", "batch_upload_audit_attachments", "save_batch_upload_draft", "inspect_audit_check_row", "set_audit_check_result", "scan_audit_index_check_rows", "batch_set_audit_check_results", "clear_audit_attachments", "clear_audit_test_rows"]);
+    if (!allowed.has(type)) throw error("ACTION_NOT_ALLOWED");
+    const binding = authorize(session, agent, input, actionIsWrite(type));
+    if (session.status !== "online") throw error("SESSION_NOT_ONLINE", 409);
+    if (!session.binding.projectId || !session.binding.companyId || session.binding.pageType !== "asset-draft") throw error("ASSET_DRAFT_SESSION_REQUIRED", 409);
+    const isBatchSubjectAction = ["preview_batch_save", "batch_save_asset_draft", "preview_batch_exit_edit", "batch_exit_edit"].includes(type);
+    const isBatchPageAction = isBatchSubjectAction;
     const rowNumbers = Array.isArray(input.rowNumbers) ? input.rowNumbers.map(Number).filter((row) => Number.isInteger(row) && row >= 2 && row <= 100000) : [];
-    const rowNumber = Number(input.rowNumber); if (!rowNumbers.length && !["scan_audit_index_check_rows"].includes(type) && (!Number.isInteger(rowNumber) || rowNumber < 2)) throw error("ROW_NUMBER_INVALID");
-    const subjectCode = limited(input.subjectCode === "current" ? "" : input.subjectCode || session.binding.subjectCode, 120); if (subjectCode && !/^C\d+(?:-\d+)*$/.test(subjectCode)) throw error("SUBJECT_CODE_INVALID");
+    const rowNumber = Number(input.rowNumber);
+    if (!isBatchPageAction && !rowNumbers.length && !["scan_audit_index_check_rows"].includes(type) && (!Number.isInteger(rowNumber) || rowNumber < 2)) throw error("ROW_NUMBER_INVALID");
+    const subjectCode = limited(input.subjectCode === "current" ? "" : input.subjectCode || session.binding.subjectCode, 120);
+    if (subjectCode && !/^C\d+(?:-\d+)*$/.test(subjectCode)) throw error("SUBJECT_CODE_INVALID");
+    const subjectCodes = isBatchSubjectAction
+      ? (Array.isArray(input.subjectCodes) ? input.subjectCodes.map(normalizeBatchSubjectCode) : [])
+      : [];
+    if (isBatchSubjectAction && (!subjectCodes.length || subjectCodes.length > 100)) throw error(subjectCodes.length > 100 ? "SUBJECT_CODES_TOO_MANY" : "SUBJECT_CODES_REQUIRED");
+    const companyScope = limited(input.companyScope || "current", 20);
+    if (!["current", "partial", "all"].includes(companyScope)) throw error("COMPANY_SCOPE_INVALID");
+    if (["batch_save_asset_draft", "batch_exit_edit"].includes(type)) {
+      const expected = type === "batch_save_asset_draft" ? "确认批量保存" : "确认批量退出编辑";
+      if (input.confirmText !== expected) throw error(type === "batch_save_asset_draft" ? "BATCH_SAVE_CONFIRM_TEXT_REQUIRED" : "BATCH_EXIT_CONFIRM_TEXT_REQUIRED");
+    }
     if (["upload_audit_attachment", "batch_upload_audit_attachments", "save_batch_upload_draft"].includes(type) && input.confirmText !== (type === "upload_audit_attachment" ? "确认上传并保存" : "确认批量上传并保存")) throw error("UPLOAD_CONFIRM_TEXT_REQUIRED");
     if (type === "clear_audit_test_rows" && input.confirmText !== "确认清理测试数据并保存") throw error("CLEAR_TEST_DATA_CONFIRM_TEXT_REQUIRED");
     if (type === "clear_audit_attachments" && input.confirmText !== "确认批量清理附件并保存") throw error("CLEAR_ATTACHMENTS_CONFIRM_TEXT_REQUIRED");
@@ -278,7 +320,7 @@ function createBridge(options = {}) {
         }))
       : [];
     if (type === "batch_upload_audit_attachments" && !files.length) throw error("BATCH_UPLOAD_FILES_REQUIRED");
-    const action = { actionId: id("action"), sessionId: session.sessionId, bindingId: binding.bindingId, agentId: agent.agentId, providerId: agent.providerId, installationId: agent.installationId, controlEpoch: binding.updatedAt, type, status: "queued", target: { projectId: session.binding.projectId, companyId: session.binding.companyId, subjectCode, rowNumber: rowNumbers.length ? 0 : rowNumber, rowNumbers, expectedIndexValues, expectedCleanupValues, fieldTitle: limited(input.fieldTitle || (type.includes("check") ? "查证核对情况" : "查证资料索引"), 80), fieldColumn: Number.isInteger(input.fieldColumn) ? input.fieldColumn : null, sheetName: limited(input.sheetName, 200), resultText: limited(input.resultText, 80), procedureText: limited(input.procedureText, 80), moduleName: limited(input.moduleName, 80), moduleIndex: Number.isInteger(input.moduleIndex) ? input.moduleIndex : 0, deferSave: Boolean(input.deferSave), maxRows: Math.max(2, Math.min(Number(input.maxRows || 500), 5000)) }, file, files, confirmText: limited(input.confirmText, 80), createdAt: now() }; actions.set(action.actionId, action); return action;
+    const action = { actionId: id("action"), sessionId: session.sessionId, bindingId: binding.bindingId, agentId: agent.agentId, providerId: agent.providerId, installationId: agent.installationId, controlEpoch: binding.updatedAt, type, status: "queued", target: { projectId: session.binding.projectId, companyId: session.binding.companyId, subjectCode, subjectCodes, companyScope, companyFilters: normalizedSelection(input.companyFilters), selectedCompanies: normalizedSelection(input.selectedCompanies), companyValues: normalizedSelection(input.companyValues), mode: ["batch_save_asset_draft", "batch_exit_edit"].includes(type) ? "execute" : "dry_run", rowNumber: rowNumbers.length ? 0 : rowNumber, rowNumbers, expectedIndexValues, expectedCleanupValues, fieldTitle: limited(input.fieldTitle || (type.includes("check") ? "查证核对情况" : "查证资料索引"), 80), fieldColumn: Number.isInteger(input.fieldColumn) ? input.fieldColumn : null, sheetName: limited(input.sheetName, 200), resultText: limited(input.resultText, 80), procedureText: limited(input.procedureText, 80), moduleName: limited(input.moduleName, 80), moduleIndex: Number.isInteger(input.moduleIndex) ? input.moduleIndex : 0, deferSave: Boolean(input.deferSave), maxRows: Math.max(2, Math.min(Number(input.maxRows || 500), 5000)) }, file, files, confirmText: limited(input.confirmText, 80), createdAt: now() }; actions.set(action.actionId, action); return action;
   }
   function publicAction(action) { return action ? { actionId: action.actionId, sessionId: action.sessionId, bindingId: action.bindingId, type: action.type, status: action.status, target: action.target, file: action.file ? { name: action.file.name, size: action.file.size, type: action.file.type } : null, files: (action.files || []).map((item) => ({ name: item.name, size: item.size, type: item.type, moduleName: item.moduleName, moduleIndex: item.moduleIndex })), createdAt: action.createdAt, claimedAt: action.claimedAt || null, completedAt: action.completedAt || null, cancellationReason: action.cancellationReason || null, result: action.result || null } : null; }
 
@@ -337,11 +379,52 @@ function createBridge(options = {}) {
     return source;
   }
   async function codexCatalog() {
-    try { const response = await fetch(`${platformUrl}/api/catalog`); const payload = await response.json(); if (response.ok && payload?.ok) return { projects: Array.isArray(payload.projects) ? payload.projects : [], threads: Array.isArray(payload.threads) ? payload.threads : [], updatedAt: payload.updatedAt || null, source: "connector-platform" }; } catch { /* local fallback */ }
-    const state = readJson(codexStatePath, {}); const projects = new Map(); const add = (item = {}) => { const projectId = limited(item.projectId || item.id, 200); if (!projectId) return; const projectPath = normalizePath(item.projectPath || item.path || item.cwd || item.rootPaths?.[0]); projects.set(projectId, { projectId, projectName: limited(item.projectName || item.name || path.basename(projectPath) || projectId, 200), projectPath, path: projectPath, updatedAt: Number(item.updatedAt || 0) || null }); };
-    for (const value of Object.values(state["local-projects"] || {})) add(value); for (const value of Object.values(state["thread-project-assignments"] || {})) add(value);
-    const threads = Object.entries(state["thread-project-assignments"] || {}).map(([threadId, item]) => { const project = projects.get(String(item?.projectId || "")); if (!threadId || !project) return null; return { threadId, title: limited(item?.title || item?.threadTitle || `Codex 对话 ${threadId.slice(0, 8)}`, 300), projectId: project.projectId, projectName: project.projectName, projectPath: normalizePath(item?.cwd || item?.path || project.projectPath), cwd: normalizePath(item?.cwd || item?.path || project.projectPath), recencyAt: project.updatedAt }; }).filter(Boolean);
-    return { projects: [...projects.values()], threads, updatedAt: now(), source: "local-codex-state" };
+    try {
+      const response = await fetch(`${platformUrl}/api/catalog`);
+      const payload = await response.json();
+      if (response.ok && payload?.ok && (payload.projects?.length || payload.threads?.length)) {
+        return filterRetainedCatalog({
+          projects: Array.isArray(payload.projects) ? payload.projects : [],
+          threads: Array.isArray(payload.threads) ? payload.threads : [],
+          updatedAt: payload.updatedAt || null,
+          source: "connector-platform",
+          diagnostics: payload.diagnostics || null,
+        }, { projectsPath, threadsPath });
+      }
+    } catch {
+      // Fall through to the Connector Suite bridge.
+    }
+    try {
+      const [projectsResponse, threadsResponse] = await Promise.all([
+        fetch(`${officeBridgeUrl}/api/projects`),
+        fetch(`${officeBridgeUrl}/api/threads`),
+      ]);
+      const projectsPayload = await projectsResponse.json();
+      const threadsPayload = await threadsResponse.json();
+      if (projectsResponse.ok && threadsResponse.ok && projectsPayload?.ok && threadsPayload?.ok
+        && (projectsPayload.projects?.length || threadsPayload.threads?.length)) {
+        return filterRetainedCatalog({
+          projects: Array.isArray(projectsPayload.projects) ? projectsPayload.projects : [],
+          threads: Array.isArray(threadsPayload.threads) ? threadsPayload.threads : [],
+          updatedAt: new Date().toISOString(),
+          source: "connector-suite-bridge",
+          diagnostics: {
+            projects: projectsPayload.diagnostics || null,
+            threads: threadsPayload.diagnostics || null,
+          },
+        }, { projectsPath, threadsPath });
+      }
+    } catch {
+      // Fall through to the same local metadata sources used by Connector Suite.
+    }
+    return filterRetainedCatalog(readCodexCatalog({
+      codexHome,
+      codexStatePath,
+      projectsPath,
+      threadsPath,
+      processesPath,
+      sqlitePath,
+    }), { projectsPath, threadsPath });
   }
 
   function sqliteRows(query) {
@@ -431,6 +514,7 @@ function createBridge(options = {}) {
       if (req.method === "GET" && url.pathname === "/api/sessions") { const agent = isBrowser(req) ? null : identity(req, true); const result = [...sessions.values()].filter((session) => !agent || bindingsFor(session.binding).some((binding) => binding.agentId === agent.agentId && binding.providerId === agent.providerId && binding.installationId === agent.installationId)).map((session) => publicSession(session, agent)); return json(res, 200, { ok: true, sessions: result }, origin); }
       if (req.method === "POST" && parts.length === 4 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "heartbeat") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const input = await body(req); session.lastSeenAt = now(); if (input.binding) session.binding = safePage(input.binding); if (input.context) session.context = safeContext(input.context); return json(res, 200, { ok: true, session: publicSession(session) }, origin); }
       if (req.method === "POST" && parts.length === 4 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "agent-bindings") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const binding = createBinding(session, await body(req)); return json(res, 200, { ok: true, binding: publicBinding(binding), session: publicSession(session) }, origin); }
+      if (req.method === "DELETE" && parts.length === 5 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "agent-bindings") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const binding = bindings.get(parts[4]); if (!binding || binding.pageKey !== pageKey(session.binding)) throw error("AGENT_BINDING_MISMATCH", 404); bindings.delete(binding.bindingId); cancelControllerActions(binding.bindingId); saveBindings(); syncSession(session); return json(res, 200, { ok: true, cleared: true, bindingId: binding.bindingId, session: publicSession(session) }, origin); }
       if (req.method === "POST" && parts.length === 6 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "agent-bindings" && parts[5] === "access") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const input = await body(req); const previous = bindings.get(parts[4]); if (!previous || previous.pageKey !== pageKey(session.binding)) throw error("AGENT_BINDING_MISMATCH", 404); const changed = createBinding(session, { ...previous, ...input, bindingId: previous.bindingId, providerId: previous.providerId, installationId: previous.installationId, agentId: previous.agentId }); return json(res, 200, { ok: true, binding: publicBinding(changed), session: publicSession(session) }, origin); }
       if (req.method === "POST" && parts.length === 4 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "binding") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const input = await body(req); const source = [...sources.values()].find((item) => item.providerId === "codex"); if (!source) throw error("AGENT_NOT_REGISTERED", 409); const binding = createBinding(session, { ...input, providerId: "codex", installationId: source.installationId, agentId: source.agentId, workspaceId: input.projectId, workspaceName: input.projectName, workspacePath: input.projectPath, conversationId: input.threadId, conversationTitle: input.threadTitle, scope: input.scope === "project" ? "workspace" : "conversation", accessMode: input.accessMode || "control" }); return json(res, 200, { ok: true, binding: codexCompatibility(binding), agentBinding: publicBinding(binding), session: publicSession(session) }, origin); }
       if (req.method === "POST" && parts.length === 5 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "binding" && parts[4] === "current-thread") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const input = await body(req); const catalog = await codexCatalog(); const candidate = catalog.threads.find((thread) => (input.projectId && thread.projectId === input.projectId) || (input.projectPath && normalizePath(thread.projectPath) === normalizePath(input.projectPath))) || null; if (!candidate) throw error("CURRENT_THREAD_NOT_FOUND", 404); const source = [...sources.values()].find((item) => item.providerId === "codex"); if (!source) throw error("AGENT_NOT_REGISTERED", 409); const binding = createBinding(session, { providerId: "codex", installationId: source.installationId, workspaceId: candidate.projectId, workspaceName: candidate.projectName, workspacePath: candidate.projectPath, conversationId: candidate.threadId, conversationTitle: candidate.title, scope: "conversation", accessMode: "control", confirmControlTransfer: input.confirmControlTransfer }); return json(res, 200, { ok: true, binding: codexCompatibility(binding), agentBinding: publicBinding(binding), thread: candidate, session: publicSession(session) }, origin); }

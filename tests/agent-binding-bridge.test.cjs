@@ -280,6 +280,10 @@ async function main() {
     assert.equal(transferred.status, 200);
     assert.equal(transferred.payload.binding.accessMode, "control");
 
+    const clearedWorkBuddy = await request("DELETE", `/api/sessions/session-a/agent-bindings/${workbuddyBinding.bindingId}`);
+    assert.equal(clearedWorkBuddy.status, 200);
+    assert.equal(clearedWorkBuddy.payload.cleared, true);
+
     const revokedQueue = await request("POST", `/api/sessions/session-a/actions/${queued.payload.action.actionId}/result`, {
       bindingId: "legacy-codex-binding",
       result: { ok: false },
@@ -372,7 +376,7 @@ async function main() {
     assert.equal(localCleanupAction.payload.action.target.expectedCleanupValues.length, 2);
 
     const isolated = await request("GET", "/api/sessions", undefined, workbuddy);
-    assert.equal(isolated.payload.sessions.length, 1);
+    assert.equal(isolated.payload.sessions.length, 0);
 
     const agentConfigPath = path.join(root, "codex-agent-config.json");
     fs.writeFileSync(agentConfigPath, JSON.stringify({ providerId: "codex", installationId: "codex-test", credentialRef: `file:${credentialsPath}#codex` }));

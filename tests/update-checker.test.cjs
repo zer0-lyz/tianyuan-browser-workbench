@@ -6,6 +6,7 @@ const {
   compareSemver,
   platformKey,
   configuredManifestUrls,
+  isAuthoritativeLatestManifestUrl,
   checkGithubUpdate,
 } = require("../native-helper/update_checker.js");
 
@@ -32,6 +33,18 @@ async function run() {
   assert.equal(compareSemver("1.2.0", "1.2.0-beta.10"), 1);
   assert.equal(platformKey("win32", "x64"), "windows-x64");
   assert.equal(platformKey("darwin", "arm64"), "macos-arm64");
+  assert.equal(
+    isAuthoritativeLatestManifestUrl(
+      "https://github.com/zer0-lyz/tianyuan-browser-workbench-releases/releases/latest/download/update-manifest.json",
+    ),
+    true,
+  );
+  assert.equal(
+    isAuthoritativeLatestManifestUrl(
+      "https://github.com/zer0-lyz/tianyuan-browser-workbench-releases/releases/download/v0.14.17/update-manifest.json",
+    ),
+    false,
+  );
   assert.equal(configuredManifestUrls({
     updateManifestUrls: ["https://gitee.com/example/tianyuan/raw/main/update-manifest.json"],
   }).includes("https://gitee.com/example/tianyuan/raw/main/update-manifest.json"), true);
@@ -226,6 +239,54 @@ async function run() {
   assert.equal(repair.repairRequired, true);
   assert.equal(repair.manifestFound, true);
   assert.equal(repair.asset.sha256, "b".repeat(64));
+
+  let authoritativeRequestCount = 0;
+  const authoritativeCurrent = await checkGithubUpdate({
+    currentVersion: "0.14.21",
+    currentBuildNumber: 2026080209,
+    currentRuntimeBuildId: "current-build",
+    platform: "win32",
+    architecture: "x64",
+  }, {
+    fetchImpl: async (url) => {
+      authoritativeRequestCount += 1;
+      assert.equal(
+        String(url),
+        "https://github.com/zer0-lyz/tianyuan-browser-workbench-releases/releases/latest/download/update-manifest.json",
+      );
+      return response(200, {
+        productVersion: "0.14.21",
+        buildNumber: 2026080209,
+        runtimeBuildId: "current-build",
+        assets: {
+          "windows-x64": {
+            fileName: "tianyuan-workbench-v0.14.21-windows-x64.zip",
+            url: "tianyuan-workbench-v0.14.21-windows-x64.zip",
+            sha256: "f".repeat(64),
+            size: 100,
+          },
+        },
+      });
+    },
+  });
+  assert.equal(authoritativeCurrent.ok, true);
+  assert.equal(authoritativeCurrent.updateAvailable, false);
+  assert.equal(authoritativeCurrent.latestVersion, "0.14.21");
+  assert.equal(authoritativeRequestCount, 1);
+
+  await assert.rejects(
+    checkGithubUpdate({
+      currentVersion: "0.14.21",
+      currentBuildNumber: 2026080209,
+      platform: "win32",
+      architecture: "x64",
+    }, {
+      checkTimeoutMs: 20,
+      timeoutMs: 5,
+      fetchImpl: async () => new Promise(() => {}),
+    }),
+    /UPDATE_CHECK_TIMEOUT/,
+  );
 
   console.log("GitHub update checker tests passed.");
 }

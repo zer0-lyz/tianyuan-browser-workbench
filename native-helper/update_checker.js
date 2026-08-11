@@ -6,7 +6,10 @@ const path = require("node:path");
 const DEFAULT_REPOSITORY = "zer0-lyz/tianyuan-browser-workbench-releases";
 const GITHUB_API_BASE = "https://api.github.com";
 const UPDATE_MANIFEST_NAME = "update-manifest.json";
-const DEFAULT_TIMEOUT_MS = 12000;
+const DEFAULT_TIMEOUT_MS = 10000;
+const MANIFEST_TIMEOUT_MS = 3000;
+const OPTIONAL_MANIFEST_TIMEOUT_MS = 3000;
+const CHECK_OPERATION_TIMEOUT_MS = 18000;
 const UPDATE_SOURCES_FILE = path.join(__dirname, "update-sources.json");
 const ALLOWED_MANIFEST_HOSTS = new Set([
   "gitee.com",
@@ -143,6 +146,17 @@ function validateManifestUrl(value) {
   return url.href;
 }
 
+function isAuthoritativeLatestManifestUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return url.protocol === "https:"
+      && url.hostname === "github.com"
+      && /\/releases\/latest\/download\/update-manifest\.json$/i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
 function normalizeManifestAsset(asset, manifestUrl) {
   if (!asset || typeof asset !== "object") return null;
   const fileName = String(asset.fileName || asset.name || "");
@@ -223,7 +237,10 @@ async function checkManifestSources(input = {}, options = {}) {
       });
       if (!result.found || !result.payload) continue;
       const update = resultFromManifest(result.payload, manifestUrl, input);
-      if (update.updateAvailable) return update;
+      // GitHub's latest-release manifest is authoritative even when it says
+      // the current installation is already up to date. Returning here avoids
+      // an unnecessary API fallback that can exceed the browser-side timeout.
+      if (update.updateAvailable || isAuthoritativeLatestManifestUrl(manifestUrl)) return update;
     } catch {
       continue;
     }
@@ -276,15 +293,21 @@ async function loadOptionalManifest(release, options) {
   }
 }
 
-async function checkGithubUpdate(input = {}, options = {}) {
+async function checkGithubUpdateInternal(input = {}, options = {}) {
   const repository = DEFAULT_REPOSITORY;
   const currentVersion = String(input.currentVersion || "").trim();
   const currentBuildNumber = Number(input.currentBuildNumber || 0);
   if (!parseSemver(currentVersion)) throw new Error("CURRENT_VERSION_INVALID");
-  const manifestUpdate = await checkManifestSources(input, options);
+  const manifestUpdate = await checkManifestSources(input, {
+    ...options,
+    timeoutMs: MANIFEST_TIMEOUT_MS,
+  });
   if (manifestUpdate) return manifestUpdate;
   const endpoint = `${GITHUB_API_BASE}/repos/${repository}/releases/latest`;
-  const releaseResult = await fetchJson(endpoint, options);
+  const releaseResult = await fetchJson(endpoint, {
+    ...options,
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+  });
   if (!releaseResult.found) {
     return {
       ok: true,
@@ -302,7 +325,10 @@ async function checkGithubUpdate(input = {}, options = {}) {
   }
 
   const release = releaseResult.payload || {};
-  const manifest = await loadOptionalManifest(release, options);
+  const manifest = await loadOptionalManifest(release, {
+    ...options,
+    timeoutMs: OPTIONAL_MANIFEST_TIMEOUT_MS,
+  });
   const latestVersion = String(manifest?.productVersion || release.tag_name || "").trim().replace(/^v/i, "");
   if (!parseSemver(latestVersion)) throw new Error("LATEST_VERSION_INVALID");
   const latestBuildNumber = Number(manifest?.buildNumber || 0);
@@ -357,6 +383,22 @@ async function checkGithubUpdate(input = {}, options = {}) {
   };
 }
 
+async function checkGithubUpdate(input = {}, options = {}) {
+  const timeoutMs = Number(options.checkTimeoutMs || CHECK_OPERATION_TIMEOUT_MS);
+  let timeout = null;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeout = setTimeout(() => reject(new Error("UPDATE_CHECK_TIMEOUT")), timeoutMs);
+  });
+  try {
+    return await Promise.race([
+      checkGithubUpdateInternal(input, options),
+      timeoutPromise,
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 module.exports = {
   DEFAULT_REPOSITORY,
   UPDATE_MANIFEST_NAME,
@@ -365,5 +407,6 @@ module.exports = {
   compareSemver,
   platformKey,
   selectGithubAsset,
+  isAuthoritativeLatestManifestUrl,
   checkGithubUpdate,
 };

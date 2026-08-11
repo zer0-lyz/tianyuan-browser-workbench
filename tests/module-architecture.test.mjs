@@ -9,10 +9,11 @@ import { ModuleScope } from "../extension/src/core/module-scope.js";
 import { ModuleStorage } from "../extension/src/core/module-storage.js";
 import { updatesModule } from "../extension/src/modules/updates/module.js";
 import { feedbackModule } from "../extension/src/modules/feedback/module.js";
+import { fileArchiveModule } from "../extension/src/modules/file-archive/module.js";
 
-const definitions = [...legacyFeatureModules, updatesModule, feedbackModule];
-assert.equal(definitions.length, 10);
-assert.equal(definitions.filter((item) => item.manifest.type === "feature").length, 8);
+const definitions = [...legacyFeatureModules, updatesModule, feedbackModule, fileArchiveModule];
+assert.equal(definitions.length, 12);
+assert.equal(definitions.filter((item) => item.manifest.type === "feature").length, 10);
 assert.equal(definitions.filter((item) => item.manifest.type === "utility").length, 2);
 assert.equal(new Set(definitions.map((item) => item.manifest.id)).size, definitions.length);
 assert.equal(new Set(definitions.map((item) => item.manifest.route)).size, definitions.length);
@@ -116,6 +117,53 @@ assert.deepEqual(lifecycle, [
   "two:activate",
 ]);
 assert.equal(fakeElement("moduleCountBadge").textContent, "2 个模块");
+
+const isolatedLifecycle = [];
+const isolatedRegistry = new ModuleRegistry({
+  featureFlags: {
+    async load() {},
+    isEnabled() { return true; },
+  },
+  eventBus: new EventBus(),
+  storageFactory: () => ({}),
+  documentRef: { getElementById: fakeElement },
+});
+isolatedRegistry.register({
+  manifest: {
+    id: "healthy-module",
+    route: "healthy-module",
+    displayName: "Healthy",
+    messageNamespace: "healthy-module",
+    type: "feature",
+    entryElementId: "healthy-entry",
+    pageElementId: "healthy-page",
+  },
+  create() {
+    return {
+      initialize() { isolatedLifecycle.push("healthy:initialize"); },
+    };
+  },
+});
+isolatedRegistry.register({
+  manifest: {
+    id: "broken-module",
+    route: "broken-module",
+    displayName: "Broken",
+    messageNamespace: "broken-module",
+    type: "feature",
+    entryElementId: "broken-entry",
+    pageElementId: "broken-page",
+  },
+  create() {
+    return {
+      initialize() { throw new Error("BROKEN_MODULE_TEST"); },
+    };
+  },
+});
+await isolatedRegistry.initialize({});
+assert.deepEqual(isolatedLifecycle, ["healthy:initialize"]);
+assert.equal(isolatedRegistry.routeExists("healthy-module"), true);
+assert.equal(isolatedRegistry.routeExists("broken-module"), false);
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const modulesRoot = path.join(repoRoot, "extension", "src", "modules");
