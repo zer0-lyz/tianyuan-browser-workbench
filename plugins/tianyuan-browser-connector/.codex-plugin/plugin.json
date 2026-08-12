@@ -1,7 +1,7 @@
 {
   "name": "tianyuan-browser-connector",
-  "version": "0.4.2",
-  "description": "把本地 Agent 安全连接到已绑定的天源浏览器页面，并执行受控查询和操作。",
+  "version": "0.4.3",
+  "description": "\u628a\u672c\u5730 Agent \u5b89\u5168\u8fde\u63a5\u5230\u5df2\u7ed1\u5b9a\u7684\u5929\u6e90\u6d4f\u89c8\u5668\u9875\u9762\uff0c\u5e76\u6267\u884c\u53d7\u63a7\u67e5\u8be2\u548c\u64cd\u4f5c\u3002",
   "author": {
     "name": "Tianyuan Browser Connector"
   },
@@ -15,29 +15,29 @@
   ],
   "skills": "./skills/",
   "interface": {
-    "displayName": "天源浏览器连接器",
-    "shortDescription": "连接已授权的天源页面，执行受控读取和操作。",
-    "longDescription": "通过本地 Connector Bridge 将已注册的 Agent 工作区或对话安全路由到对应的天源浏览器标签页。读取和控制权限按页面绑定隔离，正式动作仍要求确认、编辑锁和回读。",
+    "displayName": "\u5929\u6e90\u6d4f\u89c8\u5668\u8fde\u63a5\u5668",
+    "shortDescription": "\u8fde\u63a5\u5df2\u6388\u6743\u7684\u5929\u6e90\u9875\u9762\uff0c\u6267\u884c\u53d7\u63a7\u8bfb\u53d6\u548c\u64cd\u4f5c\u3002",
+    "longDescription": "\u901a\u8fc7\u672c\u5730 Connector Bridge \u5c06\u5df2\u6ce8\u518c\u7684 Agent \u5de5\u4f5c\u533a\u6216\u5bf9\u8bdd\u5b89\u5168\u8def\u7531\u5230\u5bf9\u5e94\u7684\u5929\u6e90\u6d4f\u89c8\u5668\u6807\u7b7e\u9875\u3002\u8bfb\u53d6\u548c\u63a7\u5236\u6743\u9650\u6309\u9875\u9762\u7ed1\u5b9a\u9694\u79bb\uff0c\u6b63\u5f0f\u52a8\u4f5c\u4ecd\u8981\u6c42\u786e\u8ba4\u3001\u7f16\u8f91\u9501\u548c\u56de\u8bfb\u3002",
     "developerName": "Tianyuan Browser Connector",
     "category": "Productivity",
     "capabilities": [
       "MCP",
-      "本地运行",
-      "浏览器连接",
-      "受控读取",
-      "受控写入",
-      "资产基础法批量保存",
-      "批量退出编辑",
-      "财务报表导入",
-      "预检确认回读"
+      "\u672c\u5730\u8fd0\u884c",
+      "\u6d4f\u89c8\u5668\u8fde\u63a5",
+      "\u53d7\u63a7\u8bfb\u53d6",
+      "\u53d7\u63a7\u5199\u5165",
+      "\u8d44\u4ea7\u57fa\u7840\u6cd5\u6279\u91cf\u4fdd\u5b58",
+      "\u6279\u91cf\u9000\u51fa\u7f16\u8f91",
+      "\u8d22\u52a1\u62a5\u8868\u5bfc\u5165",
+      "\u9884\u68c0\u786e\u8ba4\u56de\u8bfb"
     ],
     "brandColor": "#202124",
     "defaultPrompt": [
-      "确认当前项目绑定的天源浏览器页面。",
-      "读取当前天源页面的项目、公司和科目上下文。",
-      "预演或确认执行评估核实附件上传。",
-      "预演并在确认后执行资产基础法底稿批量保存。",
-      "将已解析的资产负债表或利润表提交天源财务报表导入预检，展示金额后等待确认，再执行并回读。"
+      "\u786e\u8ba4\u5f53\u524d\u9879\u76ee\u7ed1\u5b9a\u7684\u5929\u6e90\u6d4f\u89c8\u5668\u9875\u9762\u3002",
+      "\u8bfb\u53d6\u5f53\u524d\u5929\u6e90\u9875\u9762\u7684\u9879\u76ee\u3001\u516c\u53f8\u548c\u79d1\u76ee\u4e0a\u4e0b\u6587\u3002",
+      "\u9884\u6f14\u6216\u786e\u8ba4\u6267\u884c\u8bc4\u4f30\u6838\u5b9e\u9644\u4ef6\u4e0a\u4f20\u3002",
+      "\u9884\u6f14\u5e76\u5728\u786e\u8ba4\u540e\u6267\u884c\u8d44\u4ea7\u57fa\u7840\u6cd5\u5e95\u7a3f\u6279\u91cf\u4fdd\u5b58\u3002",
+      "\u5c06\u5df2\u89e3\u6790\u7684\u8d44\u4ea7\u8d1f\u503a\u8868\u6216\u5229\u6da6\u8868\u63d0\u4ea4\u5929\u6e90\u8d22\u52a1\u62a5\u8868\u5bfc\u5165\u9884\u68c0\uff0c\u5c55\u793a\u91d1\u989d\u540e\u7b49\u5f85\u786e\u8ba4\uff0c\u518d\u6267\u884c\u5e76\u56de\u8bfb\u3002"
     ]
   },
   "mcpServers": "./.mcp.json"

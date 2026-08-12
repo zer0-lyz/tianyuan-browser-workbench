@@ -1,5 +1,5 @@
 (() => {
-  const ADAPTER_VERSION = "2026-08-11-page-tree-mirror-v31";
+  const ADAPTER_VERSION = "2026-08-12-page-tree-visible-only-v32";
   const ADAPTER_STATE_KEY = "__tianyuanWorkbenchPageAdapterState";
   const REQUEST_TYPE = `TIANYUAN_WORKBENCH_GET_CONTEXT:${ADAPTER_VERSION}`;
   const RESPONSE_TYPE = `TIANYUAN_WORKBENCH_CONTEXT_RESULT:${ADAPTER_VERSION}`;
@@ -530,43 +530,10 @@
     return targets;
   }
 
-  async function expandSubjectTreeForCollection() {
-    let clicked = 0;
-    const rootContainers = [".el-tree", "[role='tree']", ".subject-tree"]
-      .flatMap((selector) => [...document.querySelectorAll(selector)])
-      .filter(isVisible);
-    for (let round = 0; round < 10; round += 1) {
-      const toggles = [...new Set(rootContainers.flatMap((container) => [
-        ...container.querySelectorAll(".el-tree-node__expand-icon,[class*='tree-node'][class*='expand'],[role='treeitem'] .el-icon-caret-right"),
-      ]))]
-        .filter(isVisible)
-        .filter((element) => {
-          const rect = element.getBoundingClientRect();
-          if (rect.left > 340) return false;
-          const className = String(element.className || "");
-          if (/is-leaf/.test(className)) return false;
-          const node = element.closest?.(".el-tree-node,[role='treeitem'],li");
-          const nodeText = textOf(node);
-          if (!nodeText || nodeText.length > 120) return false;
-          const expanded = node?.classList?.contains("is-expanded")
-            || node?.getAttribute?.("aria-expanded") === "true"
-            || element.getAttribute?.("aria-expanded") === "true";
-          return !expanded;
-        });
-      if (!toggles.length) break;
-      for (const toggle of toggles.slice(0, 40)) {
-        clickElement(toggle);
-        clicked += 1;
-        await sleep(80);
-      }
-      await sleep(300);
-    }
-    return clicked;
-  }
-
   async function listAssetDraftSubjects() {
     const before = collectSubjectTreeItems();
-    const clicked = await expandSubjectTreeForCollection();
+    // Do not expand collapsed branches here. The side panel must only offer
+    // subjects that the user has already loaded on the page.
     const after = await collectSubjectTreeItemsByScrolling();
     return {
       ok: true,
@@ -574,8 +541,9 @@
       collectedAt: new Date().toISOString(),
       url: location.href,
       subjects: after,
-      expanded: clicked > 0,
-      expandedClickCount: clicked,
+      expanded: false,
+      expandedClickCount: 0,
+      collectionMode: "visible_only",
       beforeCount: before.length,
     };
   }
@@ -3372,11 +3340,9 @@
     };
     if (!targetPath) return { ...result, reason: "PATH_EMPTY" };
 
-    // A fresh draft route can restore the subject tree with all parents
-    // collapsed. Expand it before matching a path so every selected subject
-    // gets a real navigation attempt during batch execution.
-    const expandedClickCount = await expandSubjectTreeForCollection();
-    result.expandedClickCount = expandedClickCount;
+    // Path-only entries are allowed only when their branch is already loaded.
+    // Batch navigation must never expand the entire subject tree to find one.
+    result.collectionMode = "visible_only";
 
     function directNodeText(node) {
       const content = node?.querySelector?.(":scope > .el-tree-node__content")
