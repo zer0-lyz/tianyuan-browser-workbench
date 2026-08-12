@@ -5569,7 +5569,7 @@ async function loadSubjectList() {
       ? { ...context, subjectTree: pageSubjectTree }
       : { ...context, subjectTree: [] };
     if (pageSubjectTreeReady) {
-      appendTaskLog(`页面显示科目读取完成：${pageSubjectResult.subjects?.length || 0} 个，展开 ${pageSubjectResult.expandedClickCount || 0} 次`);
+      appendTaskLog(`页面当前已加载科目读取完成：${pageSubjectResult.subjects?.length || 0} 个；未自动展开其他科目`);
     } else {
       const reason = pageSubjectResult?.reason || "PAGE_SUBJECT_TREE_EMPTY";
       throw new Error(`页面显示科目读取失败（${reason}），为避免误处理隐藏或无内容科目，本次不加载 MCP 全量科目。请刷新天源页面后重试。`);
@@ -5609,8 +5609,7 @@ async function loadSubjectList() {
       collectedAt: new Date().toISOString(),
       pageSubjectResult: pageSubjectResult?.ok ? {
         ok: true,
-        expanded: Boolean(pageSubjectResult.expanded),
-        expandedClickCount: pageSubjectResult.expandedClickCount || 0,
+        collectionMode: pageSubjectResult.collectionMode || "visible_only",
         beforeCount: pageSubjectResult.beforeCount || 0,
         subjectCount: pageSubjectResult.subjects?.length || 0,
       } : {
