@@ -59,6 +59,49 @@ export const tools = [
     }
   },
   {
+    name: "tianyuan.prepare_asset_draft_import",
+    description: "预检资产基础法申报表 Excel 导入。解析并过滤为系统允许的第一阶段申报字段，检查目标公司、行数和覆盖范围，不写入系统。科目排除按调用参数控制，默认不排除任何科目。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "integer", minimum: 1 },
+        companyIds: { type: "array", items: { type: "integer", minimum: 1 }, minItems: 1, maxItems: 100 },
+        filePath: { type: "string", description: "已生成的平台申报表 Excel 文件路径。" },
+        excludedSubjectCodes: { type: "array", items: { type: "string" }, maxItems: 100, description: "本次项目需要排除的科目代码；默认空数组，不排除科目。" },
+        excludedSubjectNames: { type: "array", items: { type: "string" }, maxItems: 100, description: "本次项目需要排除的科目名称；默认空数组，不排除科目。" }
+      },
+      required: ["projectId", "companyIds", "filePath"],
+      additionalProperties: false
+    }
+  },
+  {
+    name: "tianyuan.execute_asset_draft_import",
+    description: "执行已预检的资产基础法申报表导入。必须使用 prepareAssetDraftImport 返回的 prepareId，并以精确确认文本执行；确认令牌只保留在插件进程内，不会返回。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        prepareId: { type: "string", minLength: 1 },
+        confirmText: { type: "string", const: "确认执行申报表导入" }
+      },
+      required: ["prepareId", "confirmText"],
+      additionalProperties: false
+    }
+  },
+  {
+    name: "tianyuan.export_asset_declare_table",
+    description: "导出指定项目和公司的资产基础法申报表，用于导入后的只读回读核验。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "integer", minimum: 1 },
+        companyIds: { type: "array", items: { type: "integer", minimum: 1 }, minItems: 1, maxItems: 100 },
+        outDir: { type: "string", description: "导出目录。" }
+      },
+      required: ["projectId", "companyIds", "outDir"],
+      additionalProperties: false
+    }
+  },
+  {
     name: "tianyuan.preview_batch_save",
     description: "通过已绑定的天源资产基础法底稿页面预演批量保存。逐个科目读取页面状态和保存按钮，不点击保存、不修改底稿。",
     inputSchema: {
@@ -565,6 +608,12 @@ async function connectionStatus(input = {}) {
 }
 
 export async function executeTool(name, input = {}) {
+  if (["tianyuan.prepare_asset_draft_import", "tianyuan.execute_asset_draft_import", "tianyuan.export_asset_declare_table"].includes(name)) {
+    const { executeAssetDraftImport, exportAssetDeclareTable, prepareAssetDraftImport } = await import("./asset-draft-import.mjs");
+    if (name === "tianyuan.prepare_asset_draft_import") return prepareAssetDraftImport(input);
+    if (name === "tianyuan.execute_asset_draft_import") return executeAssetDraftImport(input);
+    return exportAssetDeclareTable(input);
+  }
   await ensureAgentRegistered();
   if (name === "tianyuan.connection_status") return connectionStatus(input);
   if (name === "tianyuan.list_sessions") {
