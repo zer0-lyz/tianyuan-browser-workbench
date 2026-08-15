@@ -95,7 +95,7 @@ node runtime/scripts/financial-statement-import.mjs read \
 
 ### 6. 留痕
 
-完成后更新项目 `项目管理/PROJECT_STATE.md` 和 `项目管理/TASK_LOG.md`，记录源文件、项目/公司、报表类型、年度、预检结果、执行结果和回读差异。不要记录 token。
+完成后按项目留痕规范记录源文件、项目/公司、报表类型、年度、预检结果、执行结果和回读差异。不要记录 token。
 
 ## JSON 数据格式
 
