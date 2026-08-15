@@ -25,6 +25,19 @@
 - 不提交个人本机路径（如 `/Users/<用户名>`、云盘路径）；
 - 为新增功能补充测试，并保证 `node --test tests/*.test.cjs tests/*.test.mjs` 通过。
 
+## 问题反馈
+
+使用中遇到问题或有改进建议，请到 GitHub Issues 提交：
+
+- 新建 Issue：<https://github.com/zer0-lyz/tianyuan-browser-workbench/issues/new>
+- 浏览已有反馈：<https://github.com/zer0-lyz/tianyuan-browser-workbench/issues>
+
+提交反馈时请包含：操作系统与版本、浏览器与版本、工作台版本（侧栏“版本”）、完整错误信息、复现步骤。**不要**在 Issue 中粘贴 MCP token、Cookie、Authorization、密码、验证码或任何登录凭据。
+
+## 分支保护
+
+`main` 分支受保护：所有改动必须通过 Pull Request 合并，且至少 1 人审核；禁止直接向 `main` 推送、禁止强制推送与删除分支。若你提交 PR 后长时间未获响应，可在 Issue 中说明。
+
 ## 给 Agent 自动配置
 
 把仓库下载或克隆到本机后，在仓库根目录执行：
