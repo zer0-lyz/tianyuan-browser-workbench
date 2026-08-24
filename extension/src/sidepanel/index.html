@@ -53,7 +53,7 @@
             <h2>功能模块</h2>
             <p>选择一个功能开始处理</p>
           </div>
-          <span id="moduleCountBadge" class="badge">8 个模块</span>
+          <span id="moduleCountBadge" class="badge">10 个模块</span>
         </div>
         <div class="module-grid">
           <button id="openBatchSave" type="button" class="module-card">
@@ -147,6 +147,16 @@
             </span>
             <strong>明细表公式恢复</strong>
             <small>恢复明细表丢失的跨表汇总链接，重建四层公式</small>
+          </button>
+          <button id="openDepreciationCapex" type="button" class="module-card">
+            <span class="module-icon module-icon-detail" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path class="ph-duotone" d="M4.5 19.5h15a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5h-15A1.5 1.5 0 0 0 3 6v12a1.5 1.5 0 0 0 1.5 1.5"></path>
+                <path d="M6.75 16.5h1.5v-3h-1.5zm4.5 0h1.5V9h-1.5zm4.5 0h1.5v-5.25h-1.5zM21 4.5H3a.75.75 0 0 0-.75.75V18A1.5 1.5 0 0 0 3.75 19.5h16.5a1.5 1.5 0 0 0 1.5-1.5V5.25A.75.75 0 0 0 21 4.5m-.75 13.5H3.75V6h16.5z"></path>
+              </svg>
+            </span>
+            <strong>折旧摊销与资本性支出预测</strong>
+            <small>设置参数、录入资产并运行长周期折旧摊销预测</small>
           </button>
         </div>
         <div class="home-note">
@@ -844,6 +854,8 @@
         </section>
         <div id="linkRestoreSupportMount" class="page-mount"></div>
       </section>
+
+      <section id="page-depreciation-capex-forecast" class="route-page hidden" data-route="depreciation-capex-forecast"></section>
 
       <section id="scopeSection" class="section scope-section shared-panel hidden">
         <div class="section-title-row">
