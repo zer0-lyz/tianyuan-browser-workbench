@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>资产输入 - 折旧摊销与资本性支出预测</title>
+  <link rel="stylesheet" href="page.css">
+</head>
+<body>
+  <main class="page" data-page="asset-input">
+    <header class="page-header">
+      <div>
+        <h1 id="pageTitle">资产输入</h1>
+        <p>独立大页面输入；保存后写入当前工作簿对应的 row-3 表头区域。</p>
+      </div>
+      <div class="button-row">
+        <a class="button-link" href="../../sidepanel/index.html#depreciation-capex-forecast">返回参数页</a>
+        <a id="downloadTemplate" class="button-link" download>下载 canonical 模板</a>
+      </div>
+    </header>
+
+    <section class="section">
+      <div class="section-heading">
+        <div><h2 id="kindTitle">存量资产</h2><p>可以直接从 Excel 复制粘贴（优先使用制表符分隔），也可以先导入一个 .xlsx 工作簿。</p></div>
+        <span id="inputStatus" class="badge">未读取</span>
+      </div>
+      <div class="button-row">
+        <button id="pasteFromClipboard" type="button" class="secondary">从剪贴板读取</button>
+        <button id="parseInput" type="button">解析并校验</button>
+        <button id="importWorkbook" type="button" class="secondary">选择 .xlsx 导入为当前工作簿</button>
+        <button id="clearInput" type="button" class="secondary">清空</button>
+      </div>
+      <p class="hint">粘贴内容的第一行必须是模板第 3 行表头；必填表头必须唯一，允许带额外项目元数据列。</p>
+      <textarea id="inputText" spellcheck="false" placeholder="请粘贴包含第 3 行表头的数据"></textarea>
+      <div id="inputMessage" class="status" aria-live="polite">等待输入</div>
+    </section>
+
+    <section class="section">
+      <div class="section-heading"><div><h2>必填表头</h2><p>按名称精确匹配，不依赖列位置。</p></div><span id="rowCount" class="badge">0 行</span></div>
+      <ul id="requiredHeaders" class="header-list"></ul>
+      <ul id="inputErrors" class="error-list" hidden></ul>
+    </section>
+
+    <section class="section">
+      <div class="section-heading"><div><h2>预览</h2><p>仅预览前 30 行；保存时传递完整粘贴数据。</p></div></div>
+      <div id="preview" class="preview"><div class="empty-state">尚未解析</div></div>
+      <div class="button-row">
+        <button id="saveInput" type="button" disabled>保存到当前工作簿</button>
+        <a class="button-link secondary" href="../../sidepanel/index.html#depreciation-capex-forecast">返回状态</a>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="input.js"></script>
+</body>
+</html>

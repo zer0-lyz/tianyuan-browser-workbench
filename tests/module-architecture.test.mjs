@@ -11,8 +11,9 @@ import { updatesModule } from "../extension/src/modules/updates/module.js";
 import { feedbackModule } from "../extension/src/modules/feedback/module.js";
 import { fileArchiveModule } from "../extension/src/modules/file-archive/module.js";
 import { landPublicityModule } from "../extension/src/modules/land-publicity/module.js";
+import { depreciationCapexModule } from "../extension/src/modules/depreciation-capex-forecast/module.js";
 
-const definitions = [...legacyFeatureModules, updatesModule, feedbackModule, fileArchiveModule, landPublicityModule];
+const definitions = [...legacyFeatureModules, updatesModule, feedbackModule, landPublicityModule, depreciationCapexModule];
 assert.equal(definitions.length, 13);
 assert.equal(definitions.filter((item) => item.manifest.type === "feature").length, 11);
 assert.equal(definitions.filter((item) => item.manifest.type === "utility").length, 2);

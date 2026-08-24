@@ -49,6 +49,13 @@ function createMacOSAdapter(options = {}) {
     ].join("\n"));
   }
 
+  async function chooseXlsxFile() {
+    return await runAppleScript([
+      "set selectedFile to choose file with prompt \"选择折旧摊销预测输入工作簿（.xlsx）\"",
+      "POSIX path of selectedFile",
+    ].join("\n"));
+  }
+
   async function inspectActiveConversation() {
     const script = [
       "tell application \"System Events\"",
@@ -275,6 +282,7 @@ function createMacOSAdapter(options = {}) {
     chooseDirectory,
     openPath,
     chooseWorkbookFiles,
+    chooseXlsxFile,
     inspectActiveConversation,
     createCredentialReference,
     diagnostics,

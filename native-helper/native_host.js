@@ -63,6 +63,17 @@ const fileArchiveFactory = (() => {
     }
   }
 })();
+const depreciationCapexForecastFactory = (() => {
+  try {
+    return require("./depreciation-capex-forecast.js");
+  } catch (cause) {
+    try {
+      return createRequire(path.join(path.dirname(process.execPath), "native_host.js"))("./depreciation-capex-forecast.js");
+    } catch {
+      throw cause;
+    }
+  }
+})();
 const platformAdapter = (() => {
   try {
     return require("./platform/index.js");
@@ -235,6 +246,30 @@ const LAND_PUBLICITY_SCRIPT = path.join(
   "land_publicity_runner.py",
 );
 const PRINT_OUTPUT_MODES = new Set(["overwrite", "copy_in_source", "new_directory"]);
+const DEPRECIATION_CAPEX_ACTIONS = Object.freeze({
+  depreciation_capex_forecast_prepare: "prepare",
+  depreciation_capex_forecast_status: "status",
+  depreciation_capex_forecast_select_xlsx: "select_xlsx",
+  depreciation_capex_forecast_select_output_directory: "select_output_directory",
+  depreciation_capex_forecast_import: "import",
+  depreciation_capex_forecast_write_params: "write_params",
+  depreciation_capex_forecast_write_stock: "write_stock",
+  depreciation_capex_forecast_write_added: "write_added",
+  depreciation_capex_forecast_preflight: "preflight",
+  depreciation_capex_forecast_run: "run",
+  depreciation_capex_forecast_run_with_details: "run_with_details",
+  depreciation_capex_forecast_result: "read_result",
+  depreciation_capex_forecast_read_annual: "read_annual",
+  depreciation_capex_forecast_read_monthly: "read_monthly",
+  depreciation_capex_forecast_read_detail_process: "read_detail_process",
+  depreciation_capex_forecast_export_readback: "export_readback",
+});
+const depreciationCapexForecast = depreciationCapexForecastFactory.createDepreciationCapexForecastService({
+  platformAdapter,
+  pythonBin: PYTHON_BIN,
+  runtimeDirectory: processLauncher.runtimeDirectory(),
+  skillRoot: runtimeConfig.depreciationSkillDir || process.env.TIANYUAN_DEPRECIATION_SKILL_DIR,
+});
 
 function getToken() {
   return runtimeToken || envToken;
@@ -2947,6 +2982,20 @@ async function handle(message) {
     }
   }
 
+  const depreciationAction = String(message?.action || "");
+  const depreciationNamespace = message?.namespace === "depreciation-capex-forecast"
+    || message?.namespace === "depreciation_capex_forecast";
+  const depreciationOperation = DEPRECIATION_CAPEX_ACTIONS[depreciationAction]
+    || (depreciationAction === "depreciation_capex_forecast" || depreciationAction === "depreciation-capex-forecast"
+      ? String(message?.operation || "")
+      : "");
+  if (depreciationNamespace || depreciationOperation) {
+    return await depreciationCapexForecast.handle({
+      ...message,
+      operation: depreciationOperation || message.operation,
+    });
+  }
+
   if (message?.action === "health") {
     return await health({ probe: message.probe === true });
   }
@@ -3096,13 +3145,15 @@ async function handle(message) {
 async function runSelfTest() {
   const cli = await checkCli();
   const platform = platformAdapter.diagnostics();
+  const depreciation = depreciationCapexForecast.selfTest();
   return {
     ok: fs.existsSync(PYTHON_BIN)
       && fs.existsSync(PRINT_FORMAT_SCRIPTS.detail)
       && fs.existsSync(PRINT_FORMAT_SCRIPTS.declaration)
       && fs.existsSync(LINK_RESTORE_SCRIPT)
       && fs.existsSync(LAND_PUBLICITY_SCRIPT)
-      && platform.supported,
+      && platform.supported
+      && depreciation.ok,
     service: "tianyuan-native-host",
     platform: process.platform,
     architecture: process.arch,
@@ -3114,6 +3165,7 @@ async function runSelfTest() {
       linkRestore: fs.existsSync(LINK_RESTORE_SCRIPT),
       landPublicity: fs.existsSync(LAND_PUBLICITY_SCRIPT),
     },
+    depreciationCapexForecast: depreciation,
     cli,
     security: { credentialsReturned: false },
   };

@@ -17,6 +17,7 @@ INSTALLED_UPDATE_CHECKER="$INSTALL_DIR/update_checker.js"
 INSTALLED_UPDATE_INSTALLER="$INSTALL_DIR/update_installer.js"
 INSTALLED_FILE_ARCHIVE="$INSTALL_DIR/file-archive.js"
 INSTALLED_FILE_ARCHIVE_CONVERSATIONS="$INSTALL_DIR/file-archive-conversations.js"
+INSTALLED_DEPRECIATION="$INSTALL_DIR/depreciation-capex-forecast.js"
 INSTALLED_PLATFORM_DIR="$INSTALL_DIR/platform"
 INSTALLED_RUNTIME_COMPAT="$INSTALL_DIR/runtime-compat.json"
 HOST_LAUNCHER="$INSTALL_DIR/native_host_launcher.sh"
@@ -24,6 +25,7 @@ SERVER_LAUNCHER="$INSTALL_DIR/server_launcher.sh"
 HOST_LOG="$INSTALL_DIR/native_host.log"
 SERVER_LOG="$INSTALL_DIR/server.log"
 PRINT_SKILLS_DIR="$HOME/.tianyuan-workbench/dependencies/天源评估系统/print-format-skills"
+DEPRECIATION_SKILL_DIR="$HOME/.tianyuan-workbench/dependencies/天源评估系统/depreciation-capex-forecast"
 NODE_BIN="$(command -v node || true)"
 TYCPV_NODE="/Library/Application Support/tycpv/node"
 WORKBENCH_PYTHON="$HOME/.tianyuan-workbench/python/bin/python3"
@@ -52,6 +54,7 @@ mkdir -p "$PRINT_SKILLS_DIR/appraisal-declaration-print-format/scripts"
 mkdir -p "$PRINT_SKILLS_DIR/asset-link-restore/scripts"
 mkdir -p "$PRINT_SKILLS_DIR/asset-link-restore/references"
 mkdir -p "$PRINT_SKILLS_DIR/zj-land-publicity"
+mkdir -p "$(dirname "$DEPRECIATION_SKILL_DIR")"
 chmod +x "$HOST_SCRIPT"
 cp "$HOST_SCRIPT" "$INSTALLED_HOST_SCRIPT"
 cp "$ROOT_DIR/native-helper/server.js" "$INSTALLED_SERVER_SCRIPT"
@@ -61,6 +64,7 @@ cp "$ROOT_DIR/native-helper/update_checker.js" "$INSTALLED_UPDATE_CHECKER"
 cp "$ROOT_DIR/native-helper/update_installer.js" "$INSTALLED_UPDATE_INSTALLER"
 cp "$ROOT_DIR/native-helper/file-archive.js" "$INSTALLED_FILE_ARCHIVE"
 cp "$ROOT_DIR/native-helper/file-archive-conversations.js" "$INSTALLED_FILE_ARCHIVE_CONVERSATIONS"
+cp "$ROOT_DIR/native-helper/depreciation-capex-forecast.js" "$INSTALLED_DEPRECIATION"
 rm -rf "$INSTALLED_PLATFORM_DIR"
 cp -R "$ROOT_DIR/native-helper/platform" "$INSTALLED_PLATFORM_DIR"
 if [[ -f "$ROOT_DIR/native-helper/runtime-compat.json" ]]; then
@@ -78,12 +82,33 @@ cp "$ROOT_DIR/skills/asset-link-restore/references/structure.md" "$PRINT_SKILLS_
 cp "$ROOT_DIR/skills/zj-land-publicity/SKILL.md" "$PRINT_SKILLS_DIR/zj-land-publicity/SKILL.md"
 cp "$ROOT_DIR/skills/zj-land-publicity/scrape_zj_land.py" "$PRINT_SKILLS_DIR/zj-land-publicity/scrape_zj_land.py"
 cp "$ROOT_DIR/skills/zj-land-publicity/land_publicity_runner.py" "$PRINT_SKILLS_DIR/zj-land-publicity/land_publicity_runner.py"
+rm -rf "$DEPRECIATION_SKILL_DIR"
+mkdir -p "$DEPRECIATION_SKILL_DIR"
+cp -R "$ROOT_DIR/skills/depreciation-capex-forecast/." "$DEPRECIATION_SKILL_DIR/"
+for required in \
+	SKILL.md \
+	agents/openai.yaml \
+	tests/test_workbook.py \
+	references/workflow.md \
+	assets/折旧摊销预测输入模板.xlsx \
+	scripts/workflow.py \
+	scripts/depreciation_forecast/__init__.py \
+	scripts/depreciation_forecast/__main__.py \
+	scripts/depreciation_forecast/cli.py \
+	scripts/depreciation_forecast/model.py \
+	scripts/depreciation_forecast/workbook.py; do
+  if [[ ! -f "$DEPRECIATION_SKILL_DIR/$required" ]]; then
+    echo "Missing depreciation skill file: $DEPRECIATION_SKILL_DIR/$required" >&2
+    exit 1
+  fi
+done
 chmod +x "$INSTALLED_HOST_SCRIPT"
 chmod +x "$INSTALLED_SERVER_SCRIPT"
 
 SELF_TEST_OUTPUT="$(
   TIANYUAN_PYTHON_BIN="$PYTHON_BIN" \
   TIANYUAN_PRINT_SKILLS_DIR="$PRINT_SKILLS_DIR" \
+  TIANYUAN_DEPRECIATION_SKILL_DIR="$DEPRECIATION_SKILL_DIR" \
   "$NODE_BIN" "$INSTALLED_HOST_SCRIPT" --self-test
 )" || {
   echo "Native Host self-test failed: $SELF_TEST_OUTPUT" >&2
@@ -104,6 +129,7 @@ cat > "$HOST_LAUNCHER" <<SH
 #!/bin/bash
 echo "\$(date '+%Y-%m-%d %H:%M:%S') start native host" >> "$HOST_LOG"
 export TIANYUAN_PYTHON_BIN="$PYTHON_BIN"
+export TIANYUAN_DEPRECIATION_SKILL_DIR="$DEPRECIATION_SKILL_DIR"
 exec "$NODE_BIN" "$INSTALLED_HOST_SCRIPT" 2>> "$HOST_LOG"
 SH
 chmod +x "$HOST_LAUNCHER"

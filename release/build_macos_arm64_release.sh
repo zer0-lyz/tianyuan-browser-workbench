@@ -32,7 +32,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { createHash } = require("node:crypto");
 const root = process.argv[2];
-const roots = ["extension", "native-helper", "plugins/tianyuan-browser-connector", "scripts/install-local-runtime.mjs"];
+const roots = ["extension", "native-helper", "plugins/tianyuan-browser-connector", "scripts/install-local-runtime.mjs", "skills/depreciation-capex-forecast"];
 const files = [];
 for (const relativeRoot of roots) {
   const absoluteRoot = path.join(root, relativeRoot);
