@@ -101,6 +101,18 @@ function createWindowsAdapter(options = {}) {
     ].join("\n"));
   }
 
+  async function chooseXlsxFile() {
+    return await runPowerShell([
+      powerShellPreamble(),
+      "$dialog = New-Object System.Windows.Forms.OpenFileDialog",
+      "$dialog.Title = '选择折旧摊销预测输入工作簿（.xlsx）'",
+      "$dialog.Filter = 'Excel 工作簿 (*.xlsx)|*.xlsx'",
+      "$dialog.Multiselect = $false",
+      "if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { exit 2 }",
+      "[Console]::Out.WriteLine($dialog.FileName)",
+    ].join("\n"));
+  }
+
   async function listenerPids(port) {
     try {
       const output = await new Promise((resolve, reject) => {
@@ -477,6 +489,7 @@ function createWindowsAdapter(options = {}) {
     chooseDirectory,
     openPath,
     chooseWorkbookFiles,
+    chooseXlsxFile,
     async inspectActiveConversation() {
       return {
         ok: false,

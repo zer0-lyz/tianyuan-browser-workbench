@@ -148,16 +148,6 @@
             <strong>明细表公式恢复</strong>
             <small>恢复明细表丢失的跨表汇总链接，重建四层公式</small>
           </button>
-          <button id="openFileArchive" type="button" class="module-card">
-            <span class="module-icon module-icon-archive" aria-hidden="true">
-              <svg viewBox="0 0 24 24" focusable="false">
-                <path class="ph-duotone" d="M4.5 6.75h15v12h-15z"></path>
-                <path d="M7.5 4.5h9a.75.75 0 0 1 .75.75v1.5h-1.5v-.75h-7.5v.75h-1.5v-1.5a.75.75 0 0 1 .75-.75m-3 2.25h15a.75.75 0 0 1 .75.75v12A1.5 1.5 0 0 1 18.75 21h-13.5a1.5 1.5 0 0 1-1.5-1.5v-12a.75.75 0 0 1 .75-.75m.75 1.5V19.5h13.5V8.25Zm3 3h1.5v1.5h-1.5Zm3 0h4.5v1.5h-4.5Zm-3 3h1.5v1.5h-1.5Zm3 0h4.5v1.5h-4.5Z"></path>
-              </svg>
-            </span>
-            <strong>微信文件归档</strong>
-            <small>监听微信或企业微信下载文件，复制并校验到本机目录</small>
-          </button>
           <button id="openLandPublicity" type="button" class="module-card">
             <span class="module-icon module-icon-land-publicity" aria-hidden="true">
               <svg viewBox="0 0 24 24" focusable="false">
@@ -167,6 +157,16 @@
             </span>
             <strong>浙江土地成交公示</strong>
             <small>按行政区、用途和价格面积筛选并生成地图结果</small>
+          </button>
+          <button id="openDepreciationCapex" type="button" class="module-card">
+            <span class="module-icon module-icon-detail" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path class="ph-duotone" d="M4.5 19.5h15a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5h-15A1.5 1.5 0 0 0 3 6v12a1.5 1.5 0 0 0 1.5 1.5"></path>
+                <path d="M6.75 16.5h1.5v-3h-1.5zm4.5 0h1.5V9h-1.5zm4.5 0h1.5v-5.25h-1.5zM21 4.5H3a.75.75 0 0 0-.75.75V18A1.5 1.5 0 0 0 3.75 19.5h16.5a1.5 1.5 0 0 0 1.5-1.5V5.25A.75.75 0 0 0 21 4.5m-.75 13.5H3.75V6h16.5z"></path>
+              </svg>
+            </span>
+            <strong>折旧摊销与资本性支出预测</strong>
+            <small>设置参数、录入资产并运行长周期折旧摊销预测</small>
           </button>
         </div>
         <div class="home-note">
@@ -867,6 +867,8 @@
         </section>
         <div id="linkRestoreSupportMount" class="page-mount"></div>
       </section>
+
+      <section id="page-depreciation-capex-forecast" class="route-page hidden" data-route="depreciation-capex-forecast"></section>
 
       <section id="scopeSection" class="section scope-section shared-panel hidden">
         <div class="section-title-row">

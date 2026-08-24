@@ -35,6 +35,7 @@ function createUnsupportedAdapter(options = {}) {
       security: common.security(),
     }),
     chooseWorkbookFiles: unsupportedPicker,
+    chooseXlsxFile: unsupportedPicker,
     inspectActiveConversation: async () => ({
       ok: false,
       available: false,
