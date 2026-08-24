@@ -344,10 +344,10 @@ export const depreciationCapexModule = {
         context.scope.on(elements.saveDepreciationParameters, "click", saveParameters);
         context.scope.on(elements.preflightDepreciation, "click", preflight);
         context.scope.on(elements.runDepreciation, "click", run);
-        context.scope.on(elements.openDepreciationStock, "click", () => openPage("input.html", { kind: "stock" }));
-        context.scope.on(elements.openDepreciationAdded, "click", () => openPage("input.html", { kind: "added" }));
-        context.scope.on(elements.openDepreciationResults, "click", () => openPage("results.html"));
-        context.scope.on(elements.openDepreciationDetails, "click", () => openPage("details.html"));
+        context.scope.on(elements.openDepreciationStock, "click", () => openPage("input", { kind: "stock" }));
+        context.scope.on(elements.openDepreciationAdded, "click", () => openPage("input", { kind: "added" }));
+        context.scope.on(elements.openDepreciationResults, "click", () => openPage("results"));
+        context.scope.on(elements.openDepreciationDetails, "click", () => openPage("details"));
         const saved = await context.storage.load({ withDetails: false });
         elements.depreciationWithDetails.checked = saved.withDetails === true;
       },

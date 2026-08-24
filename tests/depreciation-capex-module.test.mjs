@@ -59,6 +59,8 @@ for (const relativePath of [
 const inputPage = fs.readFileSync(path.join(moduleRoot, "input.html"), "utf8");
 const resultsPage = fs.readFileSync(path.join(moduleRoot, "results.html"), "utf8");
 const detailsPage = fs.readFileSync(path.join(moduleRoot, "details.html"), "utf8");
+const moduleSource = fs.readFileSync(path.join(moduleRoot, "module.js"), "utf8");
+assert.doesNotMatch(moduleSource, /openPage\("(?:input|results|details)\.html/);
 assert.match(inputPage, /从剪贴板读取/);
 assert.match(inputPage, /选择 \.xlsx 导入/);
 assert.match(inputPage, /保存到当前工作簿/);
