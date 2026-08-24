@@ -85,8 +85,8 @@ async function main() {
   const sidepanelSource = fs.readFileSync(path.join(__dirname, "..", "extension", "src", "sidepanel", "sidepanel.js"), "utf8");
   const pageAdapterSource = fs.readFileSync(path.join(__dirname, "..", "extension", "src", "injected", "page_adapter.js"), "utf8");
   const contentSource = fs.readFileSync(path.join(__dirname, "..", "extension", "src", "content", "content.js"), "utf8");
-  const pageAdapterVersion = pageAdapterSource.match(/const ADAPTER_VERSION = "([^"]+)"/)?.[1];
-  const contentAdapterVersion = contentSource.match(/const ADAPTER_VERSION = "([^"]+)"/)?.[1];
+  const pageAdapterVersion = pageAdapterSource.match(/(?:const|var) ADAPTER_VERSION = "([^"]+)"/)?.[1];
+  const contentAdapterVersion = contentSource.match(/(?:const|var) ADAPTER_VERSION = "([^"]+)"/)?.[1];
   assert.equal(contentAdapterVersion, pageAdapterVersion);
   assert.equal(contentSource.trimStart().startsWith("(() => {"), true);
   assert.equal(contentSource.includes("CONTENT_STATE_KEY"), true);

@@ -5,7 +5,6 @@ import { ModuleRegistry } from "../core/module-registry.js";
 import { createModuleStorageFactory } from "../core/module-storage.js";
 import { updatesModule } from "../modules/updates/module.js";
 import { feedbackModule } from "../modules/feedback/module.js";
-import { fileArchiveModule } from "../modules/file-archive/module.js";
 
 const REQUEST_TYPE = "TIANYUAN_WORKBENCH_GET_CONTEXT_V2";
 const ACTION_REQUEST_TYPE = "TIANYUAN_WORKBENCH_RUN_ACTION_V2";
@@ -78,7 +77,6 @@ const elements = {
   openFormatDetail: document.getElementById("openFormatDetail"),
   openFormatDeclaration: document.getElementById("openFormatDeclaration"),
   openLinkRestore: document.getElementById("openLinkRestore"),
-  openFileArchive: document.getElementById("openFileArchive"),
   backFromConnections: document.getElementById("backFromConnections"),
   backFromSave: document.getElementById("backFromSave"),
   backFromExit: document.getElementById("backFromExit"),
@@ -340,6 +338,7 @@ const elements = {
 let latestPayload = null;
 let latestContext = null;
 let busy = false;
+let connectionCheckPromise = null;
 let cliAuthBusy = false;
 let cliAuthorizationUrl = "";
 let availableSubjects = [];
@@ -428,7 +427,6 @@ const moduleRegistry = new ModuleRegistry({
 for (const module of legacyFeatureModules) moduleRegistry.register(module);
 moduleRegistry.register(updatesModule);
 moduleRegistry.register(feedbackModule);
-moduleRegistry.register(fileArchiveModule);
 elements.extensionId.textContent = chrome.runtime.id;
 
 function on(element, eventName, handler) {
@@ -3245,7 +3243,7 @@ async function authorizeCli() {
   setCliAuthorizationFallback("");
   updateCliStatusMessage("正在申请 CLI 动态授权地址...", "idle");
   try {
-    const result = await sendNativeMessage({ action: "cli_login" }, 30000);
+    const result = await sendNativeMessage({ action: "cli_login", force: true }, 30000);
     latestPayload = {
       ok: Boolean(result?.ok),
       action: "cli_login",
@@ -5021,7 +5019,7 @@ async function processConnectorActionQueue() {
   }
 }
 
-async function checkConnections() {
+async function performConnectionCheck() {
   const connectorCheck = checkConnectorConnection({ silent: true });
   setConnection(elements.connectorStatus, "检查中", "idle");
   setConnection(elements.helperStatus, "检查中", "idle");
@@ -5073,6 +5071,16 @@ async function checkConnections() {
     setStatus(`helper 启动失败：${message}`, "error");
     return payload;
   }
+}
+
+function checkConnections() {
+  if (connectionCheckPromise) return connectionCheckPromise;
+  const task = performConnectionCheck();
+  const shared = task.finally(() => {
+    if (connectionCheckPromise === shared) connectionCheckPromise = null;
+  });
+  connectionCheckPromise = shared;
+  return shared;
 }
 
 async function openMcpTokenDialog() {
@@ -5959,8 +5967,11 @@ async function copyJson(event) {
 }
 
 async function refreshAll() {
-  await checkConnections();
-  return await refreshContext();
+  const [, context] = await Promise.all([
+    checkConnections(),
+    refreshContext(),
+  ]);
+  return context;
 }
 
 on(elements.goHome, "click", () => navigateToRoute("home"));
@@ -5977,7 +5988,6 @@ on(elements.openExportDeclare, "click", () => navigateToRoute("export-declare"))
 on(elements.openFormatDetail, "click", () => navigateToRoute("format-detail"));
 on(elements.openFormatDeclaration, "click", () => navigateToRoute("format-declaration"));
 on(elements.openLinkRestore, "click", () => navigateToRoute("link-restore"));
-on(elements.openFileArchive, "click", () => navigateToRoute("file-archive"));
 on(elements.backFromConnections, "click", () => navigateToRoute("home"));
 on(elements.backFromSave, "click", () => navigateToRoute("home"));
 on(elements.backFromExit, "click", () => navigateToRoute("home"));
@@ -6239,7 +6249,13 @@ async function bootstrapApplication() {
     });
     renderRoute(requestedRoute);
     await restoreRememberedMcpToken();
-    await refreshAll();
+    setStatus("工作台已就绪，正在后台读取连接和页面状态…", "idle");
+    window.setTimeout(() => {
+      void refreshAll().catch((error) => {
+        setStatus(`后台读取失败：${error?.message || String(error)}`, "error");
+        console.error(error);
+      });
+    }, 0);
   } catch (error) {
     // Keep the shell usable even if a non-core startup task fails.
     renderRoute("home");

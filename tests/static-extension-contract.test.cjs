@@ -42,7 +42,7 @@ const pluginReadme = fs.readFileSync(path.join(repoRoot, "plugins", "tianyuan-br
 const pluginManifest = JSON.parse(fs.readFileSync(path.join(repoRoot, "plugins", "tianyuan-browser-connector", ".codex-plugin", "plugin.json"), "utf8"));
 
 function quotedConstant(source, name) {
-  return source.match(new RegExp(`const ${name} = "([^"]+)"`))?.[1] || "";
+  return source.match(new RegExp(`(?:const|var) ${name} = "([^"]+)"`))?.[1] || "";
 }
 
 function referencedManifestFiles() {
@@ -148,7 +148,14 @@ assert.equal(sidepanel.includes("check_github_update"), false);
 assert.equal(sidepanel.includes("function checkForUpdates"), false);
 assert.equal(sidepanel.includes("moduleRegistry.register(updatesModule)"), true);
 assert.equal(sidepanel.includes("moduleRegistry.register(feedbackModule)"), true);
-assert.equal(sidepanel.includes("moduleRegistry.register(fileArchiveModule)"), true);
+assert.equal(sidepanel.includes("moduleRegistry.register(fileArchiveModule)"), false);
+assert.equal(sidepanel.includes("openFileArchive"), false);
+assert.equal(html.includes('id="openFileArchive"'), false);
+assert.equal(html.includes('id="page-file-archive"'), false);
+assert.equal(sidepanel.includes("let connectionCheckPromise = null;"), true);
+assert.equal(sidepanel.includes("async function performConnectionCheck()"), true);
+assert.equal(sidepanel.includes("await Promise.all(["), true);
+assert.equal(sidepanel.includes("void refreshAll().catch"), true);
 assert.equal(fs.existsSync(path.join(repoRoot, "native-helper", "codex_catalog.js")), true);
 assert.equal(html.includes('id="agentBindingProviderSelect"'), true);
 assert.equal(html.includes('id="saveAgentBinding"'), true);

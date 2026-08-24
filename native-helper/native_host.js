@@ -1481,9 +1481,9 @@ async function getCliLoginStatus(sessionId = "") {
   return { ok: status.state !== "failed", ...status, authenticated: false };
 }
 
-function startCliLogin() {
+function startCliLogin({ force = false } = {}) {
   const auth = readCliAuthState();
-  if (auth.authenticated) {
+  if (auth.authenticated && !force) {
     return Promise.resolve({
       ok: true,
       action: "cli_login",
@@ -2282,16 +2282,10 @@ function exportProgressFromLine(line, state) {
 
 function cliExportFailure(logLines) {
   const text = logLines.map((item) => String(item?.text || "")).join("\n");
-  if (/本地登录凭证已过期|请先运行\s*tycpv login|(?:登录|授权).*(?:过期|失效)|缺少\s*MCP token/i.test(text)) {
+  if (/本地登录凭证已过期|请先运行\s*tycpv login|(?:登录|授权).*(?:过期|失效)|缺少\s*MCP token|Unauthorized: invalid token|invalid token/i.test(text)) {
     return {
       reason: "TYCPV_AUTH_REQUIRED",
-      userMessage: "CLI 授权已过期或缺失。请进入“连接配置”，点击“授权 CLI”，完成登录后点击“启动/检查”，再重新导出。",
-    };
-  }
-  if (/unauthorized|invalid token|MCP token|VALUATION_MCP_TOKEN/i.test(text)) {
-    return {
-      reason: "MCP_TOKEN_REQUIRED",
-      userMessage: "MCP token 未配置或已失效。请在“连接配置”中由使用者本人重新配置 MCP token，再重新导出。",
+      userMessage: "CLI 授权已失效或缺失。请进入“连接配置”，点击“授权 CLI”重新登录，完成后再点击“启动/检查”，然后重新导出。",
     };
   }
   if (/forbidden|权限不足|无权访问/i.test(text)) {
@@ -2800,7 +2794,7 @@ async function handle(message) {
     return workbenchUpdater.getStatus();
   }
   if (message?.action === "cli_login") {
-    return await startCliLogin();
+    return await startCliLogin({ force: message?.force === true });
   }
   if (message?.action === "cli_login_status") {
     return await getCliLoginStatus(String(message.sessionId || ""));
