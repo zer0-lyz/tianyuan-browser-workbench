@@ -30,6 +30,7 @@ function createUnsupportedAdapter(options = {}) {
     cliFallback: "tycpv",
     chooseDirectory: unsupportedPicker,
     chooseWorkbookFiles: unsupportedPicker,
+    chooseXlsxFile: unsupportedPicker,
     inspectActiveConversation: async () => ({
       ok: false,
       available: false,
