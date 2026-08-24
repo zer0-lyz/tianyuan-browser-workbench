@@ -1,15 +1,15 @@
 (() => {
-const ADAPTER_VERSION = "2026-08-11-page-tree-mirror-v31";
-const CONTENT_STATE_KEY = "__tianyuanWorkbenchContentScriptState";
-const INJECTED_SCRIPT_ID = `tianyuan-workbench-page-adapter-${ADAPTER_VERSION}`;
-const EXT_REQUEST_TYPE = "TIANYUAN_WORKBENCH_GET_CONTEXT_V2";
-const EXT_ACTION_REQUEST_TYPE = "TIANYUAN_WORKBENCH_RUN_ACTION_V2";
-const PAGE_REQUEST_TYPE = `TIANYUAN_WORKBENCH_GET_CONTEXT:${ADAPTER_VERSION}`;
-const PAGE_RESPONSE_TYPE = `TIANYUAN_WORKBENCH_CONTEXT_RESULT:${ADAPTER_VERSION}`;
-const PAGE_ACTION_REQUEST_TYPE = `TIANYUAN_WORKBENCH_RUN_ACTION:${ADAPTER_VERSION}`;
-const PAGE_ACTION_RESPONSE_TYPE = `TIANYUAN_WORKBENCH_ACTION_RESULT:${ADAPTER_VERSION}`;
+var ADAPTER_VERSION = "2026-08-12-page-tree-visible-only-v32";
+var CONTENT_STATE_KEY = "__tianyuanWorkbenchContentScriptState";
+var INJECTED_SCRIPT_ID = `tianyuan-workbench-page-adapter-${ADAPTER_VERSION}`;
+var EXT_REQUEST_TYPE = "TIANYUAN_WORKBENCH_GET_CONTEXT_V2";
+var EXT_ACTION_REQUEST_TYPE = "TIANYUAN_WORKBENCH_RUN_ACTION_V2";
+var PAGE_REQUEST_TYPE = `TIANYUAN_WORKBENCH_GET_CONTEXT:${ADAPTER_VERSION}`;
+var PAGE_RESPONSE_TYPE = `TIANYUAN_WORKBENCH_CONTEXT_RESULT:${ADAPTER_VERSION}`;
+var PAGE_ACTION_REQUEST_TYPE = `TIANYUAN_WORKBENCH_RUN_ACTION:${ADAPTER_VERSION}`;
+var PAGE_ACTION_RESPONSE_TYPE = `TIANYUAN_WORKBENCH_ACTION_RESULT:${ADAPTER_VERSION}`;
 
-const existingContentState = globalThis[CONTENT_STATE_KEY];
+var existingContentState = globalThis[CONTENT_STATE_KEY];
 if (existingContentState?.listener) {
   try {
     chrome.runtime.onMessage.removeListener(existingContentState.listener);
@@ -18,7 +18,7 @@ if (existingContentState?.listener) {
   }
 }
 
-let adapterInjectionPromise = null;
+var adapterInjectionPromise = null;
 
 function injectPageAdapter() {
   adapterInjectionPromise = new Promise((resolve, reject) => {
@@ -79,7 +79,7 @@ async function requestPageAdapter(type, responseType, payload = {}, timeoutMs = 
   });
 }
 
-const contentMessageListener = (message, _sender, sendResponse) => {
+var contentMessageListener = (message, _sender, sendResponse) => {
   if (message?.type !== EXT_REQUEST_TYPE && message?.type !== EXT_ACTION_REQUEST_TYPE) return false;
 
   const actionTimeout = ["upload_audit_attachment", "batch_upload_audit_attachments", "set_audit_check_result", "batch_set_audit_check_results"].includes(message.payload?.action)

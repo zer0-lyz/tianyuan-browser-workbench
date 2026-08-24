@@ -63,6 +63,8 @@ export const fileArchiveModule = {
       stableSeconds: 3,
     };
     let statusTimer = null;
+    let routeActive = false;
+    let initialRouteDataLoaded = false;
     let conversationResult = null;
     let conversationBindings = new Map();
     let selectedConversationIds = new Set();
@@ -252,6 +254,27 @@ export const fileArchiveModule = {
       }
     }
 
+    function startStatusTimer() {
+      if (statusTimer) return;
+      statusTimer = window.setInterval(() => {
+        if (routeActive && document.visibilityState === "visible") {
+          void refreshStatus();
+        }
+      }, 2000);
+    }
+
+    function stopStatusTimer() {
+      if (!statusTimer) return;
+      window.clearInterval(statusTimer);
+      statusTimer = null;
+    }
+
+    async function loadRouteData() {
+      await detect();
+      await refreshStatus();
+      await loadConversations();
+    }
+
     async function detect() {
       try {
         detection = await context.sendNativeMessage({ action: "detect_file_archive_apps" }, 10000);
@@ -365,19 +388,29 @@ export const fileArchiveModule = {
         context.scope.on(elements.refreshFileArchive, "click", refreshStatus);
         context.scope.on(elements.fileArchiveSourceWechat, "change", () => { renderDetection(); void loadConversations(); });
         context.scope.on(elements.fileArchiveSourceWecom, "change", () => { renderDetection(); void loadConversations(); });
-        context.scope.interval(() => { if (document.visibilityState === "visible") void refreshStatus(); }, 2000);
-        // Render the workbench first; Native Messaging availability must not blank the whole side panel.
-        void detect();
-        void loadConversations();
-        void refreshStatus();
-      },
-      activate() {
+        context.scope.add(stopStatusTimer);
         renderDetection();
         renderConversations();
-        void refreshStatus();
+        renderStatus();
       },
-      deactivate() {},
-      dispose() { if (statusTimer) window.clearInterval(statusTimer); },
+      activate() {
+        routeActive = true;
+        renderDetection();
+        renderConversations();
+        startStatusTimer();
+        if (!initialRouteDataLoaded) {
+          initialRouteDataLoaded = true;
+          void loadRouteData();
+        } else {
+          void detect();
+          void refreshStatus();
+        }
+      },
+      deactivate() {
+        routeActive = false;
+        stopStatusTimer();
+      },
+      dispose() { stopStatusTimer(); },
     };
   },
 };

@@ -55,6 +55,7 @@ const roots = [
   "native-helper",
   "plugins/tianyuan-browser-connector",
   "scripts/install-local-runtime.mjs",
+  "skills/depreciation-capex-forecast",
 ];
 const files = [];
 for (const relativeRoot of roots) {
@@ -170,6 +171,7 @@ cp "$ROOT_DIR/native-helper/update_checker.js" "$STAGE/native-helper/update_chec
 cp "$ROOT_DIR/native-helper/update_installer.js" "$STAGE/native-helper/update_installer.js"
 cp "$ROOT_DIR/native-helper/file-archive.js" "$STAGE/native-helper/file-archive.js"
 cp "$ROOT_DIR/native-helper/file-archive-conversations.js" "$STAGE/native-helper/file-archive-conversations.js"
+cp "$ROOT_DIR/native-helper/depreciation-capex-forecast.js" "$STAGE/native-helper/depreciation-capex-forecast.js"
 cp "$ROOT_DIR/native-helper/update-sources.json" "$STAGE/native-helper/update-sources.json"
 cp "$ROOT_DIR/native-helper/platform/"*.js "$STAGE/native-helper/platform/"
 cat > "$STAGE/native-helper/runtime-compat.json" <<EOF
