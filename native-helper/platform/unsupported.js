@@ -29,6 +29,11 @@ function createUnsupportedAdapter(options = {}) {
     cliCandidates: [],
     cliFallback: "tycpv",
     chooseDirectory: unsupportedPicker,
+    openPath: async () => ({
+      ok: false,
+      reason: "PLATFORM_OPEN_PATH_UNSUPPORTED",
+      security: common.security(),
+    }),
     chooseWorkbookFiles: unsupportedPicker,
     inspectActiveConversation: async () => ({
       ok: false,

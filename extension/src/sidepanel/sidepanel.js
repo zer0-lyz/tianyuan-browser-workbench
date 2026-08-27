@@ -6,6 +6,7 @@ import { createModuleStorageFactory } from "../core/module-storage.js";
 import { updatesModule } from "../modules/updates/module.js";
 import { feedbackModule } from "../modules/feedback/module.js";
 import { fileArchiveModule } from "../modules/file-archive/module.js";
+import { landPublicityModule } from "../modules/land-publicity/module.js";
 
 const REQUEST_TYPE = "TIANYUAN_WORKBENCH_GET_CONTEXT_V2";
 const ACTION_REQUEST_TYPE = "TIANYUAN_WORKBENCH_RUN_ACTION_V2";
@@ -429,6 +430,7 @@ for (const module of legacyFeatureModules) moduleRegistry.register(module);
 moduleRegistry.register(updatesModule);
 moduleRegistry.register(feedbackModule);
 moduleRegistry.register(fileArchiveModule);
+moduleRegistry.register(landPublicityModule);
 elements.extensionId.textContent = chrome.runtime.id;
 
 function on(element, eventName, handler) {
@@ -6234,6 +6236,7 @@ async function bootstrapApplication() {
       getSafeDiagnostics,
       copyText: (text) => navigator.clipboard.writeText(text),
       sendNativeMessage,
+      streamNativeMessage,
       setConnection,
       setStatus,
     });
