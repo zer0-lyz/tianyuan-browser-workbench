@@ -28,6 +28,16 @@ function createMacOSAdapter(options = {}) {
     ].join("\n"));
   }
 
+  async function openPath(targetPath) {
+    return await new Promise((resolve) => {
+      runFile("/usr/bin/open", [String(targetPath)], { timeout: 15000 }, (error) => {
+        resolve(error
+          ? { ok: false, reason: "LAND_OPEN_PATH_FAILED", security: common.security() }
+          : { ok: true, opened: true, security: common.security() });
+      });
+    });
+  }
+
   async function chooseWorkbookFiles() {
     return await runAppleScript([
       "set selectedFiles to choose file with prompt \"选择需要调整打印格式的 Excel 文件\" with multiple selections allowed",
@@ -263,6 +273,7 @@ function createMacOSAdapter(options = {}) {
     cliCandidates: ["/usr/local/bin/tycpv"],
     cliFallback: "/usr/local/bin/tycpv",
     chooseDirectory,
+    openPath,
     chooseWorkbookFiles,
     inspectActiveConversation,
     createCredentialReference,
