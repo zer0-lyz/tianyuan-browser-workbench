@@ -79,6 +79,16 @@ function createWindowsAdapter(options = {}) {
     ].join("\n"));
   }
 
+  async function openPath(targetPath) {
+    return await new Promise((resolve) => {
+      runFile("explorer.exe", [String(targetPath)], { timeout: 15000, windowsHide: true }, (error) => {
+        resolve(error
+          ? { ok: false, reason: "LAND_OPEN_PATH_FAILED", security: common.security() }
+          : { ok: true, opened: true, security: common.security() });
+      });
+    });
+  }
+
   async function chooseWorkbookFiles() {
     return await runPowerShell([
       powerShellPreamble(),
@@ -465,6 +475,7 @@ function createWindowsAdapter(options = {}) {
     ].filter(Boolean),
     cliFallback: "tycpv.cmd",
     chooseDirectory,
+    openPath,
     chooseWorkbookFiles,
     async inspectActiveConversation() {
       return {

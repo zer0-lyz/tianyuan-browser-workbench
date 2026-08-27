@@ -229,6 +229,11 @@ const LINK_RESTORE_SCRIPT = path.join(
   "scripts",
   "restore_links.py",
 );
+const LAND_PUBLICITY_SCRIPT = path.join(
+  PRINT_SKILLS_DIR,
+  "zj-land-publicity",
+  "land_publicity_runner.py",
+);
 const PRINT_OUTPUT_MODES = new Set(["overwrite", "copy_in_source", "new_directory"]);
 
 function getToken() {
@@ -2232,6 +2237,181 @@ async function runLinkRestore(message, emit) {
   }
 }
 
+function normalizeLandPublicityRequest(input) {
+  const request = input && typeof input === "object" ? input : {};
+  let outputDirectory;
+  try {
+    outputDirectory = validateExportDirectory(request.outputDirectory);
+  } catch {
+    throw new Error("LAND_OUTPUT_DIRECTORY_INVALID");
+  }
+  const arrays = ["tradeMethods", "tradeStages", "landUses"];
+  const normalized = {
+    tradeForm: String(request.tradeForm || "").trim().slice(0, 40),
+    district: String(request.district || "").trim().slice(0, 100),
+    location: String(request.location || "").trim().slice(0, 160),
+    startDate: String(request.startDate || "").trim().slice(0, 20),
+    startYear: String(request.startYear || "").trim().slice(0, 4),
+    quotePreset: String(request.quotePreset || "all").trim().slice(0, 30),
+    quoteStartDate: String(request.quoteStartDate || "").trim().slice(0, 20),
+    quoteEndDate: String(request.quoteEndDate || "").trim().slice(0, 20),
+    areaUnit: String(request.areaUnit || "sqm").trim().slice(0, 8),
+    districtExact: request.districtExact === true,
+    provinceWide: request.provinceWide === true,
+    generateMap: request.generateMap === true,
+    outputDirectory,
+  };
+  for (const field of arrays) {
+    if (request[field] !== undefined && !Array.isArray(request[field])) throw new Error(`LAND_${field.toUpperCase()}_MUST_BE_ARRAY`);
+    normalized[field] = Array.isArray(request[field])
+      ? request[field].map((value) => String(value || "").trim().slice(0, 40)).filter(Boolean).slice(0, 20)
+      : [];
+  }
+  for (const field of ["startPriceMin", "startPriceMax", "areaMin", "areaMax"]) {
+    const value = request[field];
+    if (value === "" || value === null || value === undefined) normalized[field] = "";
+    else {
+      const number = Number(value);
+      if (!Number.isFinite(number) || number < 0 || number > 1e12) throw new Error(`LAND_${field.toUpperCase()}_INVALID`);
+      normalized[field] = number;
+    }
+  }
+  const maxPages = Number(request.maxPages || 5);
+  if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 200) throw new Error("LAND_MAX_PAGES_INVALID");
+  normalized.maxPages = maxPages;
+  const serialized = JSON.stringify(normalized);
+  if (Buffer.byteLength(serialized, "utf8") > 128 * 1024) throw new Error("LAND_REQUEST_TOO_LARGE");
+  return normalized;
+}
+
+function landOutputPathReadback(value, outputDirectory) {
+  const raw = String(value || "").trim();
+  if (!raw || raw.includes("\0") || !path.isAbsolute(raw)) throw new Error("LAND_OUTPUT_PATH_INVALID");
+  const resolved = fs.realpathSync(raw);
+  const root = path.resolve(outputDirectory);
+  const relative = path.relative(root, resolved);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("LAND_OUTPUT_OUTSIDE_DIRECTORY");
+  const stat = fs.statSync(resolved);
+  if (!stat.isFile() || stat.size <= 0) throw new Error("LAND_OUTPUT_READBACK_FAILED");
+  return resolved;
+}
+
+function landOpenPathReadback(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw.includes("\0") || !path.isAbsolute(raw)) throw new Error("LAND_OPEN_PATH_INVALID");
+  const resolved = fs.realpathSync(raw);
+  const extension = path.extname(resolved).toLowerCase();
+  if (![".html", ".xlsx", ".json", ".js"].includes(extension)) throw new Error("LAND_OPEN_PATH_TYPE_NOT_ALLOWED");
+  const stat = fs.statSync(resolved);
+  if (!stat.isFile() || stat.size <= 0) throw new Error("LAND_OPEN_PATH_NOT_READABLE");
+  return resolved;
+}
+
+function runLandPublicity(message, emit) {
+  return new Promise((resolve) => {
+    let request;
+    try {
+      if (!fs.existsSync(LAND_PUBLICITY_SCRIPT)) throw new Error("LAND_PUBLICITY_SCRIPT_NOT_FOUND");
+      request = normalizeLandPublicityRequest(message?.request);
+    } catch (error) {
+      const payload = {
+        ok: false,
+        event: "complete",
+        phase: "failed",
+        percent: 0,
+        action: "run_land_publicity",
+        reason: error?.message || String(error),
+        security: { credentialsReturned: false },
+      };
+      emit(payload);
+      resolve(payload);
+      return;
+    }
+    let finalPayload = null;
+    let settled = false;
+    const complete = (payload) => {
+      if (settled) return;
+      try {
+        const outputPaths = [payload.excelPath, payload.htmlPath, payload.coordsPath, payload.pointsJsPath, payload.mapPath]
+          .filter(Boolean)
+          .map((value) => landOutputPathReadback(value, request.outputDirectory));
+        const result = {
+          ...payload,
+          event: "complete",
+          action: "run_land_publicity",
+          phase: payload.ok ? "completed" : "failed",
+          percent: payload.ok ? 100 : Number(payload.percent || 0),
+          outputPaths,
+          security: { credentialsReturned: false },
+        };
+        settled = true;
+        emit(result);
+        resolve(result);
+      } catch (error) {
+        settled = true;
+        const result = {
+          ok: false,
+          event: "complete",
+          action: "run_land_publicity",
+          phase: "failed",
+          percent: 0,
+          reason: error?.message || String(error),
+          security: { credentialsReturned: false },
+        };
+        emit(result);
+        resolve(result);
+      }
+    };
+    const args = [LAND_PUBLICITY_SCRIPT, "--request-json", JSON.stringify(request)];
+    const launch = processLauncher.commandLaunchSpec(PYTHON_BIN, args);
+    const child = spawn(launch.command, launch.args, {
+      cwd: path.dirname(LAND_PUBLICITY_SCRIPT),
+      env: { ...process.env, ...launch.env, PYTHONUNBUFFERED: "1" },
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    const consume = (line) => {
+      const text = String(line || "").trim();
+      if (text.startsWith("TY_LAND_PROGRESS:")) {
+        try {
+          emit({ ok: true, event: "progress", action: "run_land_publicity", ...JSON.parse(text.slice("TY_LAND_PROGRESS:".length)), security: { credentialsReturned: false } });
+        } catch {
+          // Ignore malformed progress lines; final result remains authoritative.
+        }
+      } else if (text.startsWith("TY_LAND_RESULT:")) {
+        try {
+          finalPayload = JSON.parse(text.slice("TY_LAND_RESULT:".length));
+        } catch {
+          finalPayload = { ok: false, reason: "LAND_RESULT_INVALID" };
+        }
+      }
+    };
+    readline.createInterface({ input: child.stdout }).on("line", consume);
+    readline.createInterface({ input: child.stderr }).on("line", () => {});
+    child.on("error", (error) => complete({ ok: false, reason: error?.code === "ENOENT" ? "PYTHON_NOT_FOUND" : error?.message || String(error) }));
+    child.on("close", (code, signal) => {
+      if (settled) return;
+      if (!finalPayload) {
+        complete({ ok: false, reason: code === 0 ? "LAND_RESULT_MISSING" : "LAND_RUNNER_FAILED", exitCode: code, signal: signal || null });
+        return;
+      }
+      if (code !== 0 && finalPayload.ok) {
+        complete({ ok: false, reason: "LAND_RUNNER_FAILED", exitCode: code, signal: signal || null });
+        return;
+      }
+      if (!finalPayload.ok) {
+        complete({ ...finalPayload, exitCode: code, signal: signal || null });
+        return;
+      }
+      try {
+        complete({ ...finalPayload, exitCode: code, signal: signal || null });
+      } catch (error) {
+        complete({ ok: false, reason: error?.message || String(error), exitCode: code, signal: signal || null });
+      }
+    });
+  });
+}
+
 function validateExportDirectory(value) {
   const raw = String(value || "").trim();
   if (!raw || raw.includes("\0") || !path.isAbsolute(raw)) {
@@ -2823,6 +3003,14 @@ async function handle(message) {
   if (message?.action === "select_print_output_directory") {
     return await choosePrintOutputDirectory();
   }
+  if (message?.action === "select_land_publicity_output_directory") {
+    return await chooseDirectory("选择浙江土地成交公示输出目录");
+  }
+  if (message?.action === "open_land_publicity_path") {
+    const resolved = landOpenPathReadback(message.path);
+    const opened = await platformAdapter.openPath(resolved);
+    return { ...opened, action: "open_land_publicity_path", path: resolved, security: { credentialsReturned: false } };
+  }
   if (message?.action === "detect_file_archive_apps") {
     return await fileArchive.detect();
   }
@@ -2913,6 +3101,7 @@ async function runSelfTest() {
       && fs.existsSync(PRINT_FORMAT_SCRIPTS.detail)
       && fs.existsSync(PRINT_FORMAT_SCRIPTS.declaration)
       && fs.existsSync(LINK_RESTORE_SCRIPT)
+      && fs.existsSync(LAND_PUBLICITY_SCRIPT)
       && platform.supported,
     service: "tianyuan-native-host",
     platform: process.platform,
@@ -2923,6 +3112,7 @@ async function runSelfTest() {
       detail: fs.existsSync(PRINT_FORMAT_SCRIPTS.detail),
       declaration: fs.existsSync(PRINT_FORMAT_SCRIPTS.declaration),
       linkRestore: fs.existsSync(LINK_RESTORE_SCRIPT),
+      landPublicity: fs.existsSync(LAND_PUBLICITY_SCRIPT),
     },
     cli,
     security: { credentialsReturned: false },
@@ -2973,6 +3163,9 @@ if (process.argv.includes("--connector-bridge")) {
     }
     if (message?.action === "run_link_restore") {
       return runLinkRestore(message, writeMessage);
+    }
+    if (message?.action === "run_land_publicity") {
+      return runLandPublicity(message, writeMessage);
     }
     return handle(message)
       .then((payload) => {

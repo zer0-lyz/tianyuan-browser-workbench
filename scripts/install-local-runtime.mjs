@@ -320,6 +320,7 @@ function sourceBuildDigest() {
   const roots = [
     "extension",
     "native-helper",
+    "skills",
     "plugins/tianyuan-browser-connector",
     "scripts/install-local-runtime.mjs",
   ];
@@ -648,6 +649,7 @@ function main() {
     "appraisal-detail-print-format",
     "appraisal-declaration-print-format",
     "asset-link-restore",
+    "zj-land-publicity",
   ]) {
     copyDir(path.join(repoRoot, "skills", skillName), path.join(printSkillsRoot, skillName));
   }
