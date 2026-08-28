@@ -26,7 +26,7 @@ test("land publicity module and skill package are wired", () => {
   const sidepanel = fs.readFileSync(path.join(repoRoot, "extension/src/sidepanel/sidepanel.js"), "utf8");
   assert.match(moduleSource, /id: "land-publicity"/);
   assert.match(moduleSource, /route: "land-publicity"/);
-  assert.match(moduleSource, /stage: "beta"/);
+  assert.match(moduleSource, /stage: "stable"/);
   assert.match(moduleSource, /streamNativeMessage/);
   assert.match(moduleSource, /if \(!result\?\.ok\) throw/);
   for (const id of [
