@@ -17,3 +17,11 @@ native-helper/native_host_launcher.sh
 dist/*.zip
 dist/*.sha256
 release/.build/
+__pycache__/
+*.pyc
+/docs/context/
+/docs/test-evidence/
+/项目管理/PROJECT_MEMORY.md
+/项目管理/PROJECT_STATE.md
+/项目管理/TASK_LOG.md
+/项目管理/VERSION_BASELINES.md
