@@ -4,7 +4,7 @@
 
 ## Skill 来源
 
-接入外部 Skill 分享包 `/Users/lin/Downloads/asset-link-restore-分享包`：
+接入外部 Skill 分享包（本机下载目录中的 `asset-link-restore-分享包`）：
 
 - `SKILL.md`
 - `scripts/restore_links.py`（核心，仅依赖 openpyxl）
