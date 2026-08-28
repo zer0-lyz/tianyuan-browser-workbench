@@ -79,7 +79,6 @@ const elements = {
   openFormatDetail: document.getElementById("openFormatDetail"),
   openFormatDeclaration: document.getElementById("openFormatDeclaration"),
   openLinkRestore: document.getElementById("openLinkRestore"),
-  openFileArchive: document.getElementById("openFileArchive"),
   backFromConnections: document.getElementById("backFromConnections"),
   backFromSave: document.getElementById("backFromSave"),
   backFromExit: document.getElementById("backFromExit"),
@@ -5979,7 +5978,6 @@ on(elements.openExportDeclare, "click", () => navigateToRoute("export-declare"))
 on(elements.openFormatDetail, "click", () => navigateToRoute("format-detail"));
 on(elements.openFormatDeclaration, "click", () => navigateToRoute("format-declaration"));
 on(elements.openLinkRestore, "click", () => navigateToRoute("link-restore"));
-on(elements.openFileArchive, "click", () => navigateToRoute("file-archive"));
 on(elements.backFromConnections, "click", () => navigateToRoute("home"));
 on(elements.backFromSave, "click", () => navigateToRoute("home"));
 on(elements.backFromExit, "click", () => navigateToRoute("home"));
