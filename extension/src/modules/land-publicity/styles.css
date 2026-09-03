@@ -22,6 +22,46 @@
   font-size: 12px;
 }
 
+[data-module-id="land-publicity"] .land-publicity-fixed-conditions,
+[data-module-id="land-publicity"] .land-publicity-date-range {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+[data-module-id="land-publicity"] .land-publicity-date-range {
+  flex-wrap: nowrap;
+  gap: 10px;
+}
+
+[data-module-id="land-publicity"] .land-publicity-date-range .field-block {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+[data-module-id="land-publicity"] .land-publicity-fixed-condition {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  padding: 1px 0;
+}
+
+[data-module-id="land-publicity"] .land-publicity-fixed-condition span {
+  color: var(--muted, #667085);
+  font-size: 12px;
+}
+
+[data-module-id="land-publicity"] .land-publicity-fixed-condition span::after {
+  content: "：";
+}
+
+[data-module-id="land-publicity"] .land-publicity-fixed-condition strong {
+  color: var(--text, #1c2430);
+  font-size: 14px;
+  font-weight: 600;
+}
+
 [data-module-id="land-publicity"] .land-publicity-option-group label {
   display: inline-flex;
   align-items: center;
@@ -31,7 +71,13 @@
 }
 
 [data-module-id="land-publicity"] .land-publicity-use-group {
-  grid-column: span 2;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+[data-module-id="land-publicity"] .land-publicity-map-option {
+  max-width: 320px;
+  margin-top: 12px;
 }
 
 [data-module-id="land-publicity"] .land-publicity-inline-fields,
@@ -102,4 +148,5 @@
   [data-module-id="land-publicity"] .land-publicity-use-group {
     grid-column: auto;
   }
+
 }

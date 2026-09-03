@@ -2,7 +2,7 @@
 """受控运行器：复用浙江土地成交公示 Skill，并生成 Excel/独立结果页。
 
 核心列表抓取和 HTML 详情解析继续来自 scrape_zj_land.py。本文件只负责
-参数契约、抓取后筛选、结果页和安全的原子输出，避免把业务逻辑塞进 Native Host。
+参数契约、列表候选过滤、详情复核、结果页和安全的原子输出，避免把业务逻辑塞进 Native Host。
 """
 
 from __future__ import annotations
@@ -166,6 +166,81 @@ def _list_district_filter(request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _list_record_matches_request(request: Dict[str, Any], record: Dict[str, Any]) -> bool:
+    """在列表记录阶段安全收窄候选，缺失字段一律留给详情阶段复核。"""
+    release_date = _date(record.get("releaseTime"))
+    start_boundary = _date(request.get("startDate"))
+    if start_boundary is None and request.get("startYear"):
+        start_boundary = dt.date(int(request["startYear"]), 1, 1)
+    end_boundary = _date(request.get("endDate"))
+    if release_date and start_boundary and release_date < start_boundary:
+        return False
+    if release_date and end_boundary and release_date > end_boundary:
+        return False
+
+    content_fields = parse_content_fields(record.get("content", ""))
+    if request.get("landUses"):
+        values = _field_values(record, content_fields, ("landUse", "use", "assignmentPurpose", "用途", "土地用途"))
+        if values and not _contains_any(values, request["landUses"]):
+            return False
+
+    if request.get("tradeMethods"):
+        values = _field_values(record, {}, ("tradeType", "tradeMethod", "tradeWay", "dealType", "交易方式"))
+        if values and not _contains_any(values, request["tradeMethods"]):
+            return False
+
+    if request.get("tradeForm"):
+        values = _field_values(record, {}, ("tradeForm", "transactionForm", "交易形式"))
+        if values and not _contains_any(values, (request["tradeForm"],)):
+            return False
+
+    location_keyword = _text(request.get("location"), 160).lower()
+    if location_keyword:
+        list_location = _text(content_fields.get("地块位置"), 300)
+        if list_location and location_keyword not in f"{_text(record.get('districtName'))} {list_location}".lower():
+            return False
+    return True
+
+
+def _list_stop_before(request: Dict[str, Any]) -> str:
+    start_boundary = _date(request.get("startDate"))
+    if start_boundary is None and request.get("startYear"):
+        start_boundary = dt.date(int(request["startYear"]), 1, 1)
+    return start_boundary.isoformat() if start_boundary else ""
+
+
+def _date_epoch_ms(value: Any, end_of_day: bool = False) -> Optional[int]:
+    parsed = _date(value)
+    if parsed is None:
+        return None
+    boundary = dt.time.max if end_of_day else dt.time.min
+    moment = dt.datetime.combine(parsed, boundary, tzinfo=dt.timezone(dt.timedelta(hours=8)))
+    return int(moment.timestamp() * 1000)
+
+
+def _list_server_filters(request: Dict[str, Any]) -> Dict[str, Any]:
+    """生成官网列表 API 已验证支持的业务筛选参数。"""
+    filters: Dict[str, Any] = {}
+    if not request.get("provinceWide"):
+        region_name = _text(request.get("district"), 100)
+        location = _text(request.get("location"), 160)
+        if re.fullmatch(r".+(?:市|区|县)", location):
+            filters["regionName"] = location
+            if region_name and region_name != location:
+                filters["fallbackRegionName"] = region_name
+        elif region_name:
+            filters["regionName"] = region_name
+    start_ms = _date_epoch_ms(request.get("startDate"))
+    end_ms = _date_epoch_ms(request.get("endDate"), end_of_day=True)
+    if start_ms is not None:
+        filters["publishStartTime"] = start_ms
+    elif request.get("startYear"):
+        filters["publishStartTime"] = _date_epoch_ms(f"{request['startYear']}-01-01")
+    if end_ms is not None:
+        filters["publishEndTime"] = end_ms
+    return filters
+
+
 def _list(value: Any, allowed: Iterable[str], field: str) -> List[str]:
     if value in (None, ""):
         return []
@@ -203,6 +278,11 @@ def validate_request(request: Dict[str, Any]) -> Dict[str, Any]:
     start_date = _text(request.get("startDate"), 20)
     if start_date and (_date(start_date) is None or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", start_date)):
         raise ValueError("LAND_START_DATE_INVALID")
+    end_date = _text(request.get("endDate"), 20)
+    if end_date and (_date(end_date) is None or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", end_date)):
+        raise ValueError("LAND_END_DATE_INVALID")
+    if start_date and end_date and _date(start_date) > _date(end_date):
+        raise ValueError("LAND_DATE_RANGE_INVALID")
     if not start_date and not start_year:
         raise ValueError("LAND_START_DATE_OR_YEAR_REQUIRED")
 
@@ -246,7 +326,7 @@ def validate_request(request: Dict[str, Any]) -> Dict[str, Any]:
     if area_min is not None and area_max is not None and area_min > area_max:
         raise ValueError("LAND_AREA_RANGE_INVALID")
 
-    max_pages = request.get("maxPages", 5)
+    max_pages = request.get("maxPages", 50)
     try:
         max_pages = int(max_pages)
     except (TypeError, ValueError):
@@ -269,6 +349,7 @@ def validate_request(request: Dict[str, Any]) -> Dict[str, Any]:
         "location": location,
         "landUses": _list(request.get("landUses"), LAND_USES, "landUses"),
         "startDate": start_date,
+        "endDate": end_date,
         "startYear": start_year,
         "quotePreset": quote_preset,
         "quoteStartDate": quote_start,
@@ -344,19 +425,22 @@ def filter_records(
     unsupported: List[str] = []
     counts: Dict[str, int] = {"unknownStartPrice": 0, "unknownArea": 0, "unknownQuoteStart": 0}
     if request.get("tradeForm"):
-        unsupported.append("交易形式：目标列表/详情 API 未提供稳定字段，未伪装为服务器端筛选；仅在返回字段存在时作抓取后匹配。")
+        unsupported.append("交易形式：目标列表/详情 API 未提供稳定字段，仅在返回字段存在时作候选复核。")
 
     quote_start, quote_end = _quote_window(request, today=today)
     output: List[Dict[str, Any]] = []
     start_boundary = _date(request.get("startDate"))
     if start_boundary is None and request.get("startYear"):
         start_boundary = dt.date(int(request["startYear"]), 1, 1)
+    end_boundary = _date(request.get("endDate"))
 
     for item in enriched:
         record = item["record"]
         detail = item["detail"]
         release_date = _date(record.get("releaseTime"))
         if start_boundary and (release_date is None or release_date < start_boundary):
+            continue
+        if end_boundary and (release_date is None or release_date > end_boundary):
             continue
 
         district = _text(record.get("districtName"))
@@ -429,7 +513,7 @@ def filter_records(
     if counts["unknownQuoteStart"]:
         warnings.append(f"{counts['unknownQuoteStart']} 条记录缺少报价开始时间，已从报价时间筛选中排除。")
     if request["tradeMethods"] or request["tradeStages"] or request["landUses"]:
-        unsupported.append("交易方式、交易阶段、土地用途和区间条件均为抓取后筛选，列表 API 未接收这些参数。")
+        unsupported.append("土地用途、交易方式或阶段等接口未提供稳定查询参数，系统在候选列表和详情阶段复核。")
     return output, {
         "warnings": warnings,
         "unsupportedFilters": unsupported,
@@ -556,8 +640,10 @@ def _filter_condition_summary(request: Dict[str, Any]) -> str:
         conditions.append(f"交易阶段={'、'.join(request['tradeStages'])}")
     if request.get("landUses"):
         conditions.append(f"土地用途={'、'.join(request['landUses'])}")
-    if request.get("startDate"):
-        conditions.append(f"起始日期≥{request['startDate']}")
+    if request.get("startDate") or request.get("endDate"):
+        start_date = request.get("startDate") or "不限"
+        end_date = request.get("endDate") or "不限"
+        conditions.append(f"成交公示日期={start_date}至{end_date}")
     if request.get("startYear"):
         conditions.append(f"起始年份≥{request['startYear']}")
     quote_preset = request.get("quotePreset") or "all"
@@ -617,7 +703,7 @@ def write_excel(path: Path, rows: List[Dict[str, Any]], request: Dict[str, Any],
         ("抓取后记录数", summary.get("fetched", 0)),
         ("写出记录数", len(rows)),
         ("当前筛选条件", _filter_condition_summary(request)),
-        ("过滤说明", "行政区、用途、交易方式、交易阶段、报价时间和区间条件均在抓取后执行；目标列表 API 未接收这些参数。"),
+        ("过滤说明", "行政区和成交公示日期先作为列表查询条件；土地用途、位置关键词、交易方式和交易阶段等条件再由候选列表及详情复核。"),
         ("限制与警告", "；".join(summary.get("warnings", []) + summary.get("unsupportedFilters", [])) or "无"),
     ]:
         summary_sheet.append([key, value])
@@ -659,7 +745,7 @@ def write_result_html(path: Path, rows: List[Dict[str, Any]], request: Dict[str,
     empty_notice = ""
     if not rows:
         conditions = _table_cell(_filter_condition_summary(request))
-        advice = "建议检查起始年份/日期、行政区码或区县名称，以及接口返回是否存在记录。"
+        advice = "建议检查成交公示日期、行政区或位置关键词，以及接口返回是否存在记录。"
         if request.get("maxPages") == 1 and (request.get("district") or request.get("location")):
             advice = "当前只抓第1页；列表按发布时间倒序，目标行政区可能不在最新50条中，请改为50页（行政区推荐）后重试。"
         empty_notice = (
@@ -667,8 +753,14 @@ def write_result_html(path: Path, rows: List[Dict[str, Any]], request: Dict[str,
             f'<p>当前筛选条件：{conditions}</p>'
             f'<p>{advice}</p></section>'
         )
+    coordinate_count = sum(1 for row in rows if row.get("坐标状态") == "有坐标")
+    missing_coordinate_count = sum(1 for row in rows if row.get("坐标状态", "").startswith("无坐标"))
     warnings = summary.get("warnings", []) + summary.get("unsupportedFilters", [])
-    warning_html = "".join(f"<li>{_table_cell(item)}</li>" for item in warnings) or "<li>无额外限制</li>"
+    warning_html = "".join(f"<li>{_table_cell(item)}</li>" for item in warnings)
+    warning_block = (
+        f'<details class="filter-notes"><summary>查看筛选说明</summary><ul>{warning_html}</ul></details>'
+        if warnings else ""
+    )
     map_name = file_names.get("map", "")
     map_block = (
         f'<div class="map-actions"><a class="button" href="{_table_cell(map_name)}" target="_blank" rel="noopener">查看地图</a></div>'
@@ -684,15 +776,15 @@ body{{margin:0;background:#f5f7fb;color:#1c2430;font:14px -apple-system,BlinkMac
 main{{max-width:1440px;margin:0 auto;padding:28px}}h1{{margin:0 0 8px;font-size:25px}}h2{{margin:0 0 12px;font-size:18px}}.muted{{color:#667085}}
 .card{{background:#fff;border:1px solid #e5e9f0;border-radius:14px;padding:18px;margin:16px 0;box-shadow:0 4px 18px #1d29390d}}
 .actions{{display:flex;gap:10px;flex-wrap:wrap}}.button{{display:inline-block;padding:8px 13px;border-radius:8px;background:#2457c5;color:#fff;text-decoration:none}}.button.secondary{{background:#eef3ff;color:#2457c5}}
-.stats{{display:flex;gap:28px;flex-wrap:wrap}}.stat strong{{display:block;font-size:22px}}.stat span{{color:#667085}}
+.stats{{display:flex;gap:28px;flex-wrap:wrap}}.stat strong{{display:block;font-size:22px}}.stat span{{color:#667085}}.result-summary{{margin:12px 0 0}}.filter-notes{{margin-top:14px;color:#8b5e00}}.filter-notes summary{{cursor:pointer;color:#667085}}.filter-notes ul{{margin:8px 0 0;padding-left:20px}}
 .table-wrap{{overflow:auto}}table{{border-collapse:collapse;width:100%;min-width:980px}}th,td{{border-bottom:1px solid #edf0f5;padding:9px 10px;text-align:left;white-space:nowrap}}th{{background:#f8fafc;position:sticky;top:0}}tr.no-coordinate{{background:#fff8e6}}.empty{{text-align:center;color:#667085;padding:30px}}
 iframe{{width:100%;height:520px;border:1px solid #e5e9f0;border-radius:10px}}.map-empty{{padding:20px;color:#667085;background:#f8fafc;border-radius:10px}}li{{margin:6px 0;color:#8b5e00}}
 </style></head><body><main>
-<h1>浙江土地成交公示结果</h1><p class="muted">本页为独立结果页；所有行政区、交易、用途、报价时间和区间条件均为抓取后筛选，未伪装为服务器端查询。</p>
-<section class="card"><div class="stats"><div class="stat"><strong>{summary.get("fetched", 0)}</strong><span>已抓取</span></div><div class="stat"><strong>{len(rows)}</strong><span>已筛选</span></div><div class="stat"><strong>{sum(1 for row in rows if row.get("坐标状态") == "有坐标")}</strong><span>可定位</span></div><div class="stat"><strong>{sum(1 for row in rows if row.get("坐标状态", "").startswith("无坐标"))}</strong><span>无坐标</span></div></div>
+<h1>浙江土地成交公示结果</h1><p class="muted">本页为独立结果页；行政区和成交日期已用于列表查询，其余接口未支持的条件再读取候选详情复核。</p>
+<section class="card"><div class="stats"><div class="stat"><strong>{summary.get("fetched", 0)}</strong><span>条件候选</span></div><div class="stat"><strong>{len(rows)}</strong><span>详情复核通过</span></div><div class="stat"><strong>{coordinate_count}</strong><span>可定位</span></div><div class="stat"><strong>{missing_coordinate_count}</strong><span>无坐标</span></div></div>
+<p class="muted result-summary">共抓取 {summary.get("fetched", 0)} 条，按当前条件保留 {len(rows)} 条；原始抓取中有坐标 {summary.get("fetchedCoordinateCount", coordinate_count)} 条，地图展示筛选结果中的 {coordinate_count} 条。</p>
 <div class="actions" style="margin-top:16px"><a class="button" href="{_table_cell(excel_name)}" download>下载 Excel</a><a class="button secondary" href="{_table_cell(excel_name)}" target="_blank" rel="noopener">打开 Excel</a></div></section>
-{empty_notice}<section class="card"><h2>筛选限制与回读说明</h2><ul>{warning_html}</ul></section>
-<section class="card"><h2>地图区域</h2>{map_block}<p class="muted">黄色行表示详情接口未返回 resourceCoordinate；地图点位使用 resourceCoordinate.center。</p></section>
+{empty_notice}{warning_block}<section class="card"><h2>地图（{coordinate_count} 条可定位结果）</h2>{map_block}<p class="muted">地图仅展示符合筛选条件且返回 resourceCoordinate.center 的记录；无坐标记录保留在下方明细中。</p></section>
 <section class="card"><h2>成交公示明细</h2><div class="table-wrap"><table><thead><tr>{header}</tr></thead><tbody>{body}</tbody></table></div></section>
 </main></body></html>"""
     path.write_text(html_content, encoding="utf-8")
@@ -723,25 +815,43 @@ def execute_request(
     }
     stage = Path(tempfile.mkdtemp(prefix=".tianyuan-land-", dir=output_dir))
     try:
-        progress("fetching", 5, "正在读取浙江土地成交公示列表", fetched=0, filtered=0, written=0)
+        progress("fetching", 5, "正在按条件读取浙江土地成交公示候选列表", fetched=0, filtered=0, written=0)
         list_filter = _list_district_filter(config)
-        records = fetcher(district_filter=list_filter, max_pages=config["maxPages"])
+        records = fetcher(
+            district_filter=list_filter,
+            max_pages=config["maxPages"],
+            record_filter=lambda record: _list_record_matches_request(config, record),
+            stop_before=_list_stop_before(config),
+            server_filters=_list_server_filters(config),
+        )
         fetched_count = len(records)
-        progress("fetching", 38, f"列表抓取完成，共 {fetched_count} 条", fetched=fetched_count, filtered=0, written=0)
+        progress("fetching", 38, f"条件候选读取完成，共 {fetched_count} 条，正在复核详情", fetched=fetched_count, filtered=0, written=0)
         enriched: List[Dict[str, Any]] = []
         for index, record in enumerate(records, 1):
             enriched.append(enrich_record(record, detail_fetcher))
             percent = 40 + round(index / max(1, fetched_count) * 28)
             progress("enriching", percent, f"正在读取详情 {index}/{fetched_count}", fetched=fetched_count, enriched=index, filtered=0, written=0)
         filtered, filter_summary = filter_records(enriched, config)
+        fetched_coordinate_count = sum(
+            1 for item in enriched
+            if item.get("coord", {}).get("center", {}).get("lng") not in (None, "")
+            and item.get("coord", {}).get("center", {}).get("lat") not in (None, "")
+        )
+        filtered_coordinate_count = sum(
+            1 for item in filtered
+            if item.get("coord", {}).get("center", {}).get("lng") not in (None, "")
+            and item.get("coord", {}).get("center", {}).get("lat") not in (None, "")
+        )
         summary = {
             "fetched": fetched_count,
             "enriched": len(enriched),
             "filtered": len(filtered),
             "written": len(filtered),
+            "fetchedCoordinateCount": fetched_coordinate_count,
+            "filteredCoordinateCount": filtered_coordinate_count,
             **filter_summary,
         }
-        progress("filtering", 72, f"抓取后筛选完成，保留 {len(filtered)} 条", fetched=fetched_count, filtered=len(filtered), written=0)
+        progress("filtering", 72, f"候选详情复核完成，保留 {len(filtered)} 条", fetched=fetched_count, filtered=len(filtered), written=0)
 
         stage_xlsx = stage / "result.xlsx"
         coord_stage = stage / "result_coords.json"
@@ -819,7 +929,9 @@ def execute_request(
             "coordsPath": str(final_paths["coords"]) if config["generateMap"] else "",
             "pointsJsPath": str(final_paths["points"]) if config["generateMap"] else "",
             "mapPath": str(final_paths["map"]) if config["generateMap"] else "",
-            "noCoordinateCount": sum(1 for item in filtered if not (item.get("coord", {}).get("center", {}).get("lng") not in (None, "") and item.get("coord", {}).get("center", {}).get("lat") not in (None, ""))),
+            "fetchedCoordinateCount": fetched_coordinate_count,
+            "filteredCoordinateCount": filtered_coordinate_count,
+            "noCoordinateCount": len(filtered) - filtered_coordinate_count,
             "filterSummary": summary,
             "security": {"credentialsReturned": False},
         }
