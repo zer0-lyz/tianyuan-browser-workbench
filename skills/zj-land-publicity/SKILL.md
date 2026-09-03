@@ -7,17 +7,19 @@ description: "抓取浙江省自然资源网上交易系统（zjzrzyjy.com）土
 
 ## 概述
 
-抓取浙江省自然资源网上交易系统（zjzrzyjy.com）的土地成交公示数据，从列表 API 获取全量记录，解析 content 字段中的 HTML 表格提取土地详情，整理后保存为 Excel。坐标功能优先读取详情接口 `queryResourceDetail` 的 `resourceCoordinate`，并可额外生成坐标 JSON / 地图 HTML；如果接口缺失，再回退到宗地界址图 PDF 渲染流程。
+抓取浙江省自然资源网上交易系统（zjzrzyjy.com）的土地成交公示数据，从列表 API 获取记录，按列表字段和 content 内容收窄候选，再读取详情复核并整理为 Excel。工作台界面固定查询国有土地、挂牌出让/拍卖出让、结果公示，并使用成交公示起始日期和结束日期筛选。坐标功能优先读取详情接口 `queryResourceDetail` 的 `resourceCoordinate`，并可额外生成坐标 JSON / 地图 HTML；如果接口缺失，再回退到宗地界址图 PDF 渲染流程。
 
 ## 运行前确认
 
 如果用户没有明确给出参数，不要默认全量抓取。先确认以下信息，再执行：
 
 - 行政区名称，例如 `绍兴`、`镇海区`
-- 起始年份，例如 `2025`
+- 成交公示起始日期和结束日期，例如 `2025-01-01` 至 `2025-12-31`
 - 是否需要按 `districtName` 精确匹配，适合区县名
 - 是否需要导出坐标，或同时生成地图
 - 输出文件路径，若不提供则脚本会自动命名
+
+工作台中的交易条件不提供选择项，抓取页数由模块内部固定为 50 页。列表接口支持 `regionCode`、`publishStartTime` 和 `publishEndTime`，运行器会先按行政区和成交公示日期向服务器请求候选；土地用途、位置关键词等接口未提供的条件，再在候选列表和详情阶段复核。旧版请求中的年份、报价时间、价格和面积参数仍由运行器兼容处理，但新版界面不再展示这些筛选项。
 
 如果信息不全，先询问用户，不要直接使用默认值跑全量。
 
@@ -30,8 +32,16 @@ description: "抓取浙江省自然资源网上交易系统（zjzrzyjy.com）土
   - `type=3`: 成交公示类型
   - `current`: 页码
   - `size`: 每页条数（建议 50）
+  - `regionCode`: 行政区代码，可传逗号分隔的代码集合
+  - `publishStartTime` / `publishEndTime`: 发布时间起止时间戳（毫秒）
   - `sort=desc`: 按发布时间降序
 - **Referer**: `https://www.zjzrzyjy.com/landWeb/publicityList`
+
+列表接口支持的条件参数为：
+  - `regionCode`: 行政区代码集合；运行器从官网行政区树解析地市/区县代码
+  - `publishStartTime`、`publishEndTime`: 发布时间起止时间戳（毫秒）
+
+土地用途、位置关键词、交易方式等未被该接口支持的条件，不会伪装成服务器端筛选；运行器通过 `record_filter` 在详情请求前收窄候选，缺失字段的记录保留并交由详情阶段判断。
 
 ### 附件文件接口（获取出让公告、勘测图等下载链接）
 - **URL**: `https://www.zjzrzyjy.com/trade/view/landbidding/queryLandResourceUploadFile`
@@ -59,6 +69,8 @@ description: "抓取浙江省自然资源网上交易系统（zjzrzyjy.com）土
 | `releaseTime` | 发布时间 |
 | `content` | HTML 格式的土地详情表格（最重要） |
 | `tradeType` | 交易方式 |
+
+工作台按 `releaseTime` 对成交公示日期执行起止日期闭区间筛选，起始日和结束日均包含。
 
 ### 字段清洗规则
 

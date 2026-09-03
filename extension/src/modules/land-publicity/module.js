@@ -1,23 +1,19 @@
 import { landPublicityTemplate } from "./template.js";
 
+const FIXED_TRADE_FORM = "国有土地";
+const FIXED_TRADE_METHODS = ["挂牌出让", "拍卖出让"];
+const FIXED_TRADE_STAGES = ["结果公示"];
+
 const DEFAULT_CONFIG = {
-  tradeForm: "",
-  tradeMethods: [],
-  tradeStages: ["结果公示"],
+  tradeForm: FIXED_TRADE_FORM,
+  tradeMethods: [...FIXED_TRADE_METHODS],
+  tradeStages: [...FIXED_TRADE_STAGES],
   district: "",
   provinceWide: false,
   location: "",
   landUses: [],
   startDate: "",
-  startYear: "2025",
-  quotePreset: "all",
-  quoteStartDate: "",
-  quoteEndDate: "",
-  startPriceMin: "",
-  startPriceMax: "",
-  areaMin: "",
-  areaMax: "",
-  areaUnit: "mu",
+  endDate: "",
   districtExact: false,
   generateMap: true,
   maxPages: "50",
@@ -27,9 +23,7 @@ const DEFAULT_CONFIG = {
 function elementMap(documentRef) {
   const ids = [
     "openLandPublicity", "backFromLandPublicity", "landPublicityDistrict", "landPublicityProvinceWide", "landPublicityLocation",
-    "landPublicityDistrictExact", "landPublicityStartDate", "landPublicityStartYear", "landPublicityQuotePreset",
-    "landPublicityQuoteStartDate", "landPublicityQuoteEndDate", "landPublicityMaxPages", "landPublicityStartPriceMin",
-    "landPublicityStartPriceMax", "landPublicityAreaMin", "landPublicityAreaMax", "landPublicityAreaUnit",
+    "landPublicityDistrictExact", "landPublicityStartDate", "landPublicityEndDate",
     "landPublicityGenerateMap", "landPublicityOutputDirectory", "chooseLandPublicityOutput", "clearLandPublicityFilters", "runLandPublicity",
     "openLandPublicityHtml", "openLandPublicityExcel", "openLandPublicityMap", "landPublicityProgressText",
     "landPublicityProgressPercent", "landPublicityProgressBar", "landPublicityFetchedCount", "landPublicityFilteredCount",
@@ -57,12 +51,24 @@ function setMessage(element, text, kind = "") {
   element.dataset.kind = kind;
 }
 
-function numberOrEmpty(value, label) {
-  const text = String(value ?? "").trim();
-  if (!text) return "";
-  const number = Number(text);
-  if (!Number.isFinite(number) || number < 0) throw new Error(`${label}必须是非负数字`);
-  return number;
+function normalizeConfig(value = {}) {
+  const source = value && typeof value === "object" ? value : {};
+  return {
+    ...DEFAULT_CONFIG,
+    tradeForm: FIXED_TRADE_FORM,
+    tradeMethods: [...FIXED_TRADE_METHODS],
+    tradeStages: [...FIXED_TRADE_STAGES],
+    district: String(source.district || "").trim(),
+    provinceWide: source.provinceWide === true,
+    location: String(source.location || "").trim(),
+    landUses: Array.isArray(source.landUses) ? source.landUses : [],
+    startDate: String(source.startDate || "").trim(),
+    endDate: String(source.endDate || "").trim(),
+    districtExact: source.districtExact === true,
+    generateMap: source.generateMap !== false,
+    maxPages: "50",
+    outputDirectory: String(source.outputDirectory || "").trim(),
+  };
 }
 
 function filterConditionSummary(request) {
@@ -73,32 +79,12 @@ function filterConditionSummary(request) {
     conditions.push(`行政区=${request.district}${request.districtExact ? "（districtName精确匹配）" : ""}`);
   }
   if (request.location) conditions.push(`位置关键词=${request.location}`);
-  if (request.tradeForm) conditions.push(`交易形式=${request.tradeForm}`);
-  if (request.tradeMethods?.length) conditions.push(`交易方式=${request.tradeMethods.join("、")}`);
-  if (request.tradeStages?.length) conditions.push(`交易阶段=${request.tradeStages.join("、")}`);
+  conditions.push(`交易形式=${FIXED_TRADE_FORM}`);
+  conditions.push(`交易方式=${FIXED_TRADE_METHODS.join("、")}`);
+  conditions.push(`交易阶段=${FIXED_TRADE_STAGES.join("、")}`);
   if (request.landUses?.length) conditions.push(`土地用途=${request.landUses.join("、")}`);
-  if (request.startDate) conditions.push(`起始日期≥${request.startDate}`);
-  if (request.startYear) conditions.push(`起始年份≥${request.startYear}`);
-  if (request.quotePreset && request.quotePreset !== "all") {
-    const quoteLabels = {
-      today: "今天",
-      future_3_days: "未来三天",
-      future_7_days: "未来七天",
-      future_30_days: "未来三十天",
-      custom: "自定义",
-    };
-    let quoteText = quoteLabels[request.quotePreset] || request.quotePreset;
-    if (request.quoteStartDate || request.quoteEndDate) quoteText += `（${request.quoteStartDate || "不限"}至${request.quoteEndDate || "不限"}）`;
-    conditions.push(`报价开始时间=${quoteText}`);
-  }
-  if (request.startPriceMin !== "" || request.startPriceMax !== "") {
-    conditions.push(`起始价=${request.startPriceMin === "" ? "不限" : request.startPriceMin}至${request.startPriceMax === "" ? "不限" : request.startPriceMax}`);
-  }
-  if (request.areaMin !== "" || request.areaMax !== "") {
-    const unit = request.areaUnit === "mu" ? "亩" : "平方米";
-    conditions.push(`出让面积=${request.areaMin === "" ? "不限" : request.areaMin}至${request.areaMax === "" ? "不限" : request.areaMax}${unit}`);
-  }
-  if (request.maxPages) conditions.push(`抓取页数上限=${request.maxPages}`);
+  if (request.startDate || request.endDate) conditions.push(`成交公示日期=${request.startDate || "不限"}至${request.endDate || "不限"}`);
+  conditions.push("抓取页数上限=50");
   return conditions.join("；") || "未设置额外筛选条件";
 }
 
@@ -127,55 +113,33 @@ export const landPublicityModule = {
 
     function readConfig() {
       const next = {
-        ...config,
-        tradeForm: root.querySelector('input[name="landTradeForm"]:checked')?.value || "",
-        tradeMethods: checkedValues(root, "landTradeMethod"),
-        tradeStages: checkedValues(root, "landTradeStage"),
+        ...DEFAULT_CONFIG,
+        tradeForm: FIXED_TRADE_FORM,
+        tradeMethods: [...FIXED_TRADE_METHODS],
+        tradeStages: [...FIXED_TRADE_STAGES],
         district: elements.landPublicityDistrict.value.trim(),
         provinceWide: elements.landPublicityProvinceWide.checked,
         location: elements.landPublicityLocation.value.trim(),
         landUses: checkedValues(root, "landUse"),
         startDate: elements.landPublicityStartDate.value,
-        startYear: elements.landPublicityStartYear.value.trim(),
-        quotePreset: elements.landPublicityQuotePreset.value,
-        quoteStartDate: elements.landPublicityQuoteStartDate.value,
-        quoteEndDate: elements.landPublicityQuoteEndDate.value,
-        startPriceMin: elements.landPublicityStartPriceMin.value.trim(),
-        startPriceMax: elements.landPublicityStartPriceMax.value.trim(),
-        areaMin: elements.landPublicityAreaMin.value.trim(),
-        areaMax: elements.landPublicityAreaMax.value.trim(),
-        areaUnit: elements.landPublicityAreaUnit.value,
+        endDate: elements.landPublicityEndDate.value,
         districtExact: elements.landPublicityDistrictExact.checked,
         generateMap: elements.landPublicityGenerateMap.checked,
-        maxPages: elements.landPublicityMaxPages.value,
+        maxPages: "50",
         outputDirectory: elements.landPublicityOutputDirectory.value.trim(),
       };
       return next;
     }
 
     function renderConfig() {
-      const selectedForm = [...root.querySelectorAll('input[name="landTradeForm"]')]
-        .find((input) => input.value === (config.tradeForm || ""));
-      if (selectedForm) selectedForm.checked = true;
-      setCheckedValues(root, "landTradeMethod", config.tradeMethods);
-      setCheckedValues(root, "landTradeStage", config.tradeStages);
       setCheckedValues(root, "landUse", config.landUses);
       elements.landPublicityDistrict.value = config.district || "";
       elements.landPublicityProvinceWide.checked = Boolean(config.provinceWide);
       elements.landPublicityLocation.value = config.location || "";
       elements.landPublicityDistrictExact.checked = Boolean(config.districtExact);
       elements.landPublicityStartDate.value = config.startDate || "";
-      elements.landPublicityStartYear.value = config.startYear || "";
-      elements.landPublicityQuotePreset.value = config.quotePreset || "all";
-      elements.landPublicityQuoteStartDate.value = config.quoteStartDate || "";
-      elements.landPublicityQuoteEndDate.value = config.quoteEndDate || "";
-      elements.landPublicityStartPriceMin.value = config.startPriceMin ?? "";
-      elements.landPublicityStartPriceMax.value = config.startPriceMax ?? "";
-      elements.landPublicityAreaMin.value = config.areaMin ?? "";
-      elements.landPublicityAreaMax.value = config.areaMax ?? "";
-      elements.landPublicityAreaUnit.value = config.areaUnit || "sqm";
+      elements.landPublicityEndDate.value = config.endDate || "";
       elements.landPublicityGenerateMap.checked = Boolean(config.generateMap);
-      elements.landPublicityMaxPages.value = String(config.maxPages || "50");
       elements.landPublicityOutputDirectory.value = config.outputDirectory || "";
       elements.landPublicityDistrict.disabled = Boolean(config.provinceWide);
       elements.landPublicityDistrictExact.disabled = Boolean(config.provinceWide);
@@ -184,26 +148,14 @@ export const landPublicityModule = {
     function validateLocal(next) {
       if (!next.outputDirectory) throw new Error("请先选择本机输出目录");
       if (!next.provinceWide && !next.district && !next.location) throw new Error("请至少选择行政区、填写位置关键词，或勾选全省/不限制行政区");
-      if (!next.startDate && !next.startYear) throw new Error("请填写成交公示起始日期或起始年份");
-      if (next.startDate && next.startYear) {
-        // Both are allowed; the exact date is the stricter boundary.
-      }
-      if (next.quotePreset === "custom" && !next.quoteStartDate && !next.quoteEndDate) {
-        throw new Error("自定义报价开始时间至少填写一个日期");
-      }
-      const priceMin = numberOrEmpty(next.startPriceMin, "最低起始价");
-      const priceMax = numberOrEmpty(next.startPriceMax, "最高起始价");
-      const areaMin = numberOrEmpty(next.areaMin, "最低出让面积");
-      const areaMax = numberOrEmpty(next.areaMax, "最高出让面积");
-      if (priceMin !== "" && priceMax !== "" && priceMin > priceMax) throw new Error("起始价区间最小值不能大于最大值");
-      if (areaMin !== "" && areaMax !== "" && areaMin > areaMax) throw new Error("出让面积区间最小值不能大于最大值");
+      if (!next.startDate || !next.endDate) throw new Error("请填写成交公示起始日期和结束日期");
+      if (next.startDate > next.endDate) throw new Error("成交公示起始日期不能晚于结束日期");
       return {
         ...next,
-        startPriceMin: priceMin,
-        startPriceMax: priceMax,
-        areaMin,
-        areaMax,
-        maxPages: Number(next.maxPages),
+        tradeForm: FIXED_TRADE_FORM,
+        tradeMethods: [...FIXED_TRADE_METHODS],
+        tradeStages: [...FIXED_TRADE_STAGES],
+        maxPages: 50,
       };
     }
 
@@ -246,7 +198,10 @@ export const landPublicityModule = {
         config.outputDirectory = selected;
         elements.landPublicityOutputDirectory.value = selected;
         await context.storage.save(config);
-        setMessage(elements.landPublicityResultMessage, "输出目录已选择，请检查参数后开始抓取", "ok");
+        const folderMessage = result.directoryName
+          ? `${result.createdDirectory === false ? "已选择" : "已创建并选择"}专用子文件夹：${result.directoryName}`
+          : "输出目录已选择";
+        setMessage(elements.landPublicityResultMessage, `${folderMessage}，请检查参数后开始抓取`, "ok");
       } catch (error) {
         setMessage(elements.landPublicityResultMessage, `选择目录失败：${error?.message || String(error)}`, "error");
       }
@@ -255,7 +210,7 @@ export const landPublicityModule = {
     async function clearFilters() {
       if (running) return;
       const outputDirectory = elements.landPublicityOutputDirectory.value.trim() || config.outputDirectory || "";
-      config = { ...DEFAULT_CONFIG, outputDirectory };
+      config = normalizeConfig({ outputDirectory });
       renderConfig();
       setResultButtons(null);
       renderProgress({ percent: 0, message: "筛选已清空，尚未运行", fetched: 0, filtered: 0, written: 0 });
@@ -277,11 +232,6 @@ export const landPublicityModule = {
         context.setStatus(`土地公示参数无效：${error?.message || String(error)}`, "error");
         return;
       }
-      if (request.maxPages === 1 && !request.provinceWide && (request.district || request.location)) {
-        request.maxPages = 50;
-        elements.landPublicityMaxPages.value = "50";
-        setMessage(elements.landPublicityResultMessage, "行政区/位置筛选不会可靠命中最新第 1 页，已自动扩展到 50 页。", "warn");
-      }
       config = request;
       await context.storage.save(config);
       running = true;
@@ -301,7 +251,7 @@ export const landPublicityModule = {
         const writtenCount = Number(result.writtenCount || 0);
         const warningCount = (result.filterSummary?.warnings || []).length + (result.filterSummary?.unsupportedFilters || []).length;
         const emptySuggestion = writtenCount === 0
-          ? `结果为 0 条。当前筛选条件：${filterConditionSummary(request)}。${Number(request.maxPages) === 1 && (request.district || request.location) ? "当前只抓第 1 页；目标行政区可能不在最新 50 条中，请改为 50 页（行政区推荐）后重试。" : "建议检查起始年份/日期、行政区码或区县名称、抓取页数上限，以及接口返回是否存在记录。"}`
+          ? `结果为 0 条。当前筛选条件：${filterConditionSummary(request)}。建议检查成交公示日期、行政区或位置关键词，以及接口是否返回记录。`
           : "";
         setMessage(elements.landPublicityResultMessage, `已完成：Excel ${writtenCount} 条；无坐标 ${result.noCoordinateCount || 0} 条。${warningCount ? `有 ${warningCount} 项筛选限制已在结果页说明。` : ""}${emptySuggestion}`, warningCount || emptySuggestion ? "warn" : "ok");
         await openResultPath(result.htmlPath, "结果页");
@@ -329,7 +279,7 @@ export const landPublicityModule = {
         context.document.head.appendChild(stylesheet);
         context.scope.add(() => stylesheet.remove());
         elements = elementMap(context.document);
-        config = { ...DEFAULT_CONFIG, ...(await context.storage.load({})) };
+        config = normalizeConfig(await context.storage.load({}));
         renderConfig();
         context.scope.on(elements.openLandPublicity, "click", () => context.navigate("land-publicity"));
         context.scope.on(elements.backFromLandPublicity, "click", () => context.navigate("home"));

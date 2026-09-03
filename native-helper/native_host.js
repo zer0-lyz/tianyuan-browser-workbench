@@ -3233,3 +3233,4 @@ if (process.argv.includes("--connector-bridge")) {
       });
   });
 }
+    endDate: String(request.endDate || "").trim().slice(0, 20),

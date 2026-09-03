@@ -9,6 +9,7 @@ import os
 import json
 import argparse
 from pathlib import Path
+from urllib.parse import urlencode
 
 # ============================================================
 #  坐标提取相关（可选，依赖 PyMuPDF + 图像模型）
@@ -407,23 +408,90 @@ def calc_total_price_wan(unit_price_yuan_sqm, area_mu=None, area_sqm=None):
     return round(unit * sqm / 10000, 2)
 
 
-def fetch_records(district_filter=None, max_pages=200):
-    """抓取全量记录，可选行政区过滤
+def _release_date_key(value):
+    text = str(value or "")
+    match = re.search(r"(\d{4})\D*(\d{1,2})\D*(\d{1,2})", text)
+    if not match:
+        return None
+    try:
+        return tuple(int(part) for part in match.groups())
+    except ValueError:
+        return None
+
+
+def _region_text(value):
+    return re.sub(r"[\s（）()]", "", str(value or "")).casefold()
+
+
+def _collect_region_codes(node):
+    codes = []
+    code = str(node.get("districtCode") or "").strip()
+    if code:
+        codes.append(code)
+    for child in node.get("children") or []:
+        codes.extend(_collect_region_codes(child))
+    return codes
+
+
+def fetch_region_codes(region_name):
+    """读取官网行政区树，返回列表接口可接受的区域代码集合。"""
+    if not region_name:
+        return []
+    urls = (
+        "https://www.zjzrzyjy.com/trade/uniportal/index/districtList",
+        "https://www.zjzrzyjy.com/trade/view/preApply/preAnnouncement/districtList",
+    )
+    wanted = _region_text(region_name)
+    for url in urls:
+        try:
+            response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+            data = response.json()
+        except Exception:
+            continue
+        roots = data.get("data") or []
+        queue = list(roots)
+        while queue:
+            node = queue.pop(0)
+            if _region_text(node.get("districtName")) == wanted:
+                return list(dict.fromkeys(_collect_region_codes(node)))
+            queue.extend(node.get("children") or [])
+    return []
+
+
+def fetch_records(district_filter=None, max_pages=200, record_filter=None, stop_before=None, server_filters=None):
+    """分页读取成交公示列表，并在详情请求前执行可证明安全的候选过滤。
 
     Args:
         district_filter: dict，键为 'name' 或 'code'，值为匹配字符串
             例如: {'name': '兰溪'} 或 {'code': '330781'}
         max_pages: 最大页数
+        record_filter: 可选的列表记录过滤函数；未知字段应返回 True，交由详情阶段复核
+        stop_before: 可选日期字符串；列表按发布时间倒序且当前页最末记录早于该日期时停止翻页
+        server_filters: 网站列表接口支持的业务筛选参数
     """
     all_records = []
     page = 1
-    # Scoped searches can use a larger API page so an administrative filter
-    # does not miss older records merely because they are beyond page 1.
-    page_size = 500 if district_filter else 50
+    # The endpoint supports region/date filters; keep a large page size for the
+    # remaining local checks without turning them into unverified query params.
+    page_size = 500
+    stop_key = _release_date_key(stop_before)
+    query_filters = dict(server_filters or {})
+    region_name = query_filters.pop("regionName", "")
+    fallback_region_name = query_filters.pop("fallbackRegionName", "")
+    if region_name and not query_filters.get("regionCode"):
+        region_codes = fetch_region_codes(region_name)
+        if not region_codes and fallback_region_name:
+            region_codes = fetch_region_codes(fallback_region_name)
+        if not region_codes:
+            raise RuntimeError("LAND_REGION_FILTER_RESOLUTION_FAILED")
+        query_filters["regionCode"] = ",".join(region_codes)
 
     while page <= max_pages:
-        url = (f"https://www.zjzrzyjy.com/trade/view/publicity/queryPublicityList"
-               f"?type=3&current={page}&size={page_size}&sort=desc")
+        params = {"type": 3, "current": page, "size": page_size, "sort": "desc"}
+        if query_filters:
+            params.update({key: value for key, value in query_filters.items() if value not in (None, "")})
+        url = ("https://www.zjzrzyjy.com/trade/view/publicity/queryPublicityList?"
+               + urlencode(params))
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Referer": "https://www.zjzrzyjy.com/landWeb/publicityList"
@@ -451,10 +519,13 @@ def fetch_records(district_filter=None, max_pages=200):
                     matched = (bool(name_kw) and name_kw == district) or (bool(code_kw) and code_kw == district_code)
                 else:
                     matched = (bool(name_kw) and name_kw in district) or (bool(code_kw) and code_kw in district_code)
-            if matched:
+            if matched and (record_filter is None or record_filter(r)):
                 all_records.append(r)
 
         print(f"第{page}页: {len(records)}条, 累计{len(all_records)}条")
+        last_key = _release_date_key(records[-1].get("releaseTime"))
+        if stop_key and last_key and last_key < stop_key:
+            break
         page += 1
         time.sleep(0.3)
 

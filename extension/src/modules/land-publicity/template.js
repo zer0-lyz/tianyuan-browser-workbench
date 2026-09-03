@@ -9,77 +9,52 @@ export const landPublicityTemplate = `
 
   <section class="section land-publicity-notice">
     <div class="inline-feedback" data-kind="warn">
-      列表 API 只支持分页读取；行政区、交易方式、交易阶段、土地用途、报价时间和价格/面积区间均在抓取后筛选。默认限制抓取页数，避免无确认全量抓取。
+      交易条件固定为国有土地、挂牌出让/拍卖出让、结果公示；行政区和成交日期会直接用于列表查询。
     </div>
   </section>
 
   <section class="section land-publicity-filters">
-    <div class="section-title-row"><div><h2>交易条件</h2><p class="section-description">选项只作为本次任务参数，不会伪装成服务器端查询参数。</p></div></div>
-    <div class="land-publicity-field-grid">
-      <fieldset class="land-publicity-option-group">
-        <legend>交易形式</legend>
-        <label><input type="radio" name="landTradeForm" value="国有土地"><span>国有土地</span></label>
-        <label><input type="radio" name="landTradeForm" value="国有土地（组合）"><span>国有土地（组合）</span></label>
-        <label><input type="radio" name="landTradeForm" value=""><span>不限</span></label>
-      </fieldset>
-      <fieldset class="land-publicity-option-group">
-        <legend>交易方式</legend>
-        <label><input type="checkbox" name="landTradeMethod" value="挂牌出让"><span>挂牌出让</span></label>
-        <label><input type="checkbox" name="landTradeMethod" value="挂牌租赁"><span>挂牌租赁</span></label>
-        <label><input type="checkbox" name="landTradeMethod" value="拍卖出让"><span>拍卖出让</span></label>
-        <label><input type="checkbox" name="landTradeMethod" value="拍卖租赁"><span>拍卖租赁</span></label>
-      </fieldset>
-      <fieldset class="land-publicity-option-group">
-        <legend>交易阶段</legend>
-        <label title="当前 Skill 的 type=3 接口仅抓取结果公示"><input type="checkbox" name="landTradeStage" value="结果公示"><span>结果公示</span></label>
-        <label title="当前成交公示 Skill 不抓取此阶段"><input type="checkbox" disabled><span>公告期</span></label>
-        <label title="当前成交公示 Skill 不抓取此阶段"><input type="checkbox" disabled><span>挂牌期</span></label>
-        <label title="当前成交公示 Skill 不抓取此阶段"><input type="checkbox" disabled><span>竞价期</span></label>
-        <label title="当前成交公示 Skill 不抓取此阶段"><input type="checkbox" disabled><span>交易结束</span></label>
-      </fieldset>
+    <div class="section-title-row"><div><h2>交易条件</h2><p class="section-description">本模块按成交公示场景固定条件，无需重复选择。</p></div></div>
+    <div class="land-publicity-fixed-conditions" aria-label="固定交易条件">
+      <div class="land-publicity-fixed-condition"><span>交易形式</span><strong>国有土地</strong></div>
+      <div class="land-publicity-fixed-condition"><span>交易方式</span><strong>挂牌出让、拍卖出让</strong></div>
+      <div class="land-publicity-fixed-condition"><span>交易阶段</span><strong>结果公示</strong></div>
     </div>
   </section>
 
   <section class="section land-publicity-filters">
-    <div class="land-publicity-field-grid">
-      <label class="field-block"><span>行政区</span><input id="landPublicityDistrict" type="text" list="landPublicityDistrictOptions" maxlength="100" placeholder="选择地市或输入区县">
-        <datalist id="landPublicityDistrictOptions"><option>杭州市</option><option>宁波市</option><option>温州市</option><option>湖州市</option><option>嘉兴市</option><option>绍兴市</option><option>金华市</option><option>衢州市</option><option>舟山市</option><option>台州市</option><option>丽水市</option></datalist>
-      </label>
+    <div class="section-title-row"><div><h2>行政区域</h2><p class="section-description">选择地市或输入区县，也可以直接查询全省。</p></div></div>
+    <div class="land-publicity-field-grid land-publicity-administrative-fields">
+      <label class="field-block"><span>地市</span><select id="landPublicityDistrict"><option value="">请选择地市（可不选）</option><option value="杭州市">杭州市</option><option value="宁波市">宁波市</option><option value="温州市">温州市</option><option value="湖州市">湖州市</option><option value="嘉兴市">嘉兴市</option><option value="绍兴市">绍兴市</option><option value="金华市">金华市</option><option value="衢州市">衢州市</option><option value="舟山市">舟山市</option><option value="台州市">台州市</option><option value="丽水市">丽水市</option></select></label>
       <label class="field-block land-publicity-check-field"><span>行政区范围</span><span><input id="landPublicityProvinceWide" type="checkbox"> 全省/不限制行政区</span></label>
-      <p class="section-description land-publicity-district-help">地市按 districtCode 前四位匹配：杭州 3301、宁波 3302、温州 3303、嘉兴 3304、湖州 3305、绍兴 3306、金华 3307、衢州 3308、舟山 3309、台州 3310、丽水 3311；区县按 districtName 匹配，可勾选精确匹配。</p>
-      <label class="field-block"><span>位置关键词（抓取后）</span><input id="landPublicityLocation" type="text" maxlength="160" placeholder="例如：镇海区、滨江街道"></label>
+      <label class="field-block"><span>区县/位置关键词</span><input id="landPublicityLocation" type="text" maxlength="160" placeholder="区县名优先直接查询，例如：镇海区；也可填街道关键词"></label>
       <label class="field-block land-publicity-check-field"><span>districtName 匹配</span><span><input id="landPublicityDistrictExact" type="checkbox"> 精确匹配</span></label>
-      <fieldset class="land-publicity-option-group land-publicity-use-group">
-        <legend>土地用途</legend>
-        <label><input type="checkbox" name="landUse" value="住宅用地"><span>住宅用地</span></label>
-        <label><input type="checkbox" name="landUse" value="商服用地"><span>商服用地</span></label>
-        <label><input type="checkbox" name="landUse" value="工矿仓储"><span>工矿仓储</span></label>
-        <label><input type="checkbox" name="landUse" value="其他用地"><span>其他用地</span></label>
-      </fieldset>
     </div>
   </section>
 
   <section class="section land-publicity-filters">
-    <div class="land-publicity-field-grid">
-      <div class="field-block"><span>成交公示起始日期 / 年份（二选一）</span><div class="land-publicity-inline-fields"><input id="landPublicityStartDate" type="date"><input id="landPublicityStartYear" type="number" min="1900" max="2100" placeholder="例如 2025"></div></div>
-      <label class="field-block"><span>报价开始时间快捷范围</span><select id="landPublicityQuotePreset"><option value="all">不限</option><option value="today">今天</option><option value="future_3_days">未来三天</option><option value="future_7_days">未来七天</option><option value="future_30_days">未来三十天</option><option value="custom">自定义日期</option></select></label>
-      <div class="field-block"><span>报价开始时间（自定义）</span><div class="land-publicity-inline-fields"><input id="landPublicityQuoteStartDate" type="date"><input id="landPublicityQuoteEndDate" type="date"></div></div>
-      <label class="field-block"><span>抓取页数上限</span><select id="landPublicityMaxPages"><option value="1">1 页（仅连通性测试）</option><option value="5">5 页</option><option value="10">10 页</option><option value="20">20 页</option><option value="50">50 页（行政区推荐）</option><option value="200">200 页（人工确认）</option></select></label>
-    </div>
+    <div class="section-title-row"><div><h2>土地用途</h2><p class="section-description">可多选；不选择表示不按用途限制。</p></div></div>
+    <fieldset class="land-publicity-option-group land-publicity-use-group">
+      <legend>选择用途</legend>
+      <label><input type="checkbox" name="landUse" value="住宅用地"><span>住宅用地</span></label>
+      <label><input type="checkbox" name="landUse" value="商服用地"><span>商服用地</span></label>
+      <label><input type="checkbox" name="landUse" value="工矿仓储"><span>工矿仓储</span></label>
+      <label><input type="checkbox" name="landUse" value="其他用地"><span>其他用地</span></label>
+    </fieldset>
   </section>
 
   <section class="section land-publicity-filters">
-    <div class="land-publicity-field-grid">
-      <div class="field-block"><span>起始价区间（按详情原始数值）</span><div class="land-publicity-inline-fields"><input id="landPublicityStartPriceMin" type="number" min="0" step="0.01" placeholder="最低"><input id="landPublicityStartPriceMax" type="number" min="0" step="0.01" placeholder="最高"></div></div>
-      <div class="field-block"><span>出让面积区间</span><div class="land-publicity-inline-fields"><input id="landPublicityAreaMin" type="number" min="0" step="0.01" placeholder="最低"><input id="landPublicityAreaMax" type="number" min="0" step="0.01" placeholder="最高"></div></div>
-      <label class="field-block"><span>面积单位</span><select id="landPublicityAreaUnit"><option value="sqm">平方米</option><option value="mu">亩</option></select></label>
-      <label class="field-block land-publicity-check-field"><span>地图与结果</span><span><input id="landPublicityGenerateMap" type="checkbox"> 生成独立地图 HTML</span></label>
+    <div class="section-title-row"><div><h2>成交公示日期</h2><p class="section-description">直接查询所选起止日期内发布的成交公示。</p></div></div>
+    <div class="land-publicity-date-range">
+      <label class="field-block"><span>起始日期</span><input id="landPublicityStartDate" type="date"></label>
+      <label class="field-block"><span>结束日期</span><input id="landPublicityEndDate" type="date"></label>
     </div>
   </section>
 
   <section class="section land-publicity-output">
-    <div class="section-title-row"><div><h2>输出位置</h2><p class="section-description">Excel、结果 HTML 和可选地图会写入同一目录；不会覆盖已有文件。</p></div></div>
+    <div class="section-title-row"><div><h2>输出位置</h2><p class="section-description">选择上级目录后，系统会自动创建“浙江土地成交公示”子文件夹存放结果。</p></div></div>
     <div class="land-publicity-output-row"><input id="landPublicityOutputDirectory" type="text" readonly placeholder="请选择本机输出目录"><button id="chooseLandPublicityOutput" type="button" class="secondary">选择目录</button></div>
+    <label class="field-block land-publicity-map-option"><span>附加输出</span><span><input id="landPublicityGenerateMap" type="checkbox"> 生成独立地图 HTML</span></label>
   </section>
 
   <section class="section land-publicity-run">
