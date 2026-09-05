@@ -14,6 +14,8 @@ const installer = fs.readFileSync(path.join(repoRoot, "scripts", "install-local-
 const html = fs.readFileSync(path.join(repoRoot, "extension", "src", "sidepanel", "index.html"), "utf8");
 const sidepanel = fs.readFileSync(path.join(repoRoot, "extension", "src", "sidepanel", "sidepanel.js"), "utf8");
 const moduleSource = fs.readFileSync(path.join(moduleRoot, "module.js"), "utf8");
+const templateSource = fs.readFileSync(path.join(moduleRoot, "template.js"), "utf8");
+const stylesSource = fs.readFileSync(path.join(moduleRoot, "styles.css"), "utf8");
 const scriptPath = path.join(repoRoot, "skills", "table-format", "scripts", "format_word_tables.py");
 
 test("table format module is wired into the extension and native helper", () => {
@@ -27,6 +29,11 @@ test("table format module is wired into the extension and native helper", () => 
   assert.match(nativeHost, /run_table_format/);
   assert.match(installer, /src\/modules\/table-format\/module\.js/);
   assert.match(installer, /table-format\/scripts\/format_word_tables\.py/);
+  assert.match(templateSource, /table-format-preset-panel/);
+  assert.match(templateSource, /table-format-mode-row/);
+  assert.match(templateSource, /table-format-run-footer/);
+  assert.match(stylesSource, /grid-template-columns: repeat\(2, minmax\(0, 1fr\)/);
+  assert.match(stylesSource, /max-width: 460px/);
 });
 
 test("format_word_tables.py applies the requested OOXML preset", () => {

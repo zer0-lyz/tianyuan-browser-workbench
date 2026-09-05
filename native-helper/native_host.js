@@ -3,6 +3,7 @@
 const { execFile, spawn } = require("node:child_process");
 const fs = require("node:fs");
 const http = require("node:http");
+const https = require("node:https");
 const os = require("node:os");
 const path = require("node:path");
 const { createRequire } = require("node:module");
@@ -2564,6 +2565,80 @@ async function runLinkRestore(message, emit) {
   }
 }
 
+function fetchLandPublicityJson(url) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, {
+      headers: {
+        Accept: "application/json,text/plain,*/*",
+        "User-Agent": "Mozilla/5.0 TianyuanWorkbench",
+      },
+    }, (response) => {
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => { body += chunk; });
+      response.on("end", () => {
+        if ((response.statusCode || 0) < 200 || (response.statusCode || 0) >= 300) {
+          reject(new Error("LAND_REGION_HTTP_" + (response.statusCode || 0)));
+          return;
+        }
+        try {
+          resolve(JSON.parse(body));
+        } catch {
+          reject(new Error("LAND_REGION_RESPONSE_INVALID"));
+        }
+      });
+    });
+    request.setTimeout(15000, () => request.destroy(new Error("LAND_REGION_TIMEOUT")));
+    request.on("error", reject);
+  });
+}
+
+function normalizeLandPublicityRegionNode(node, depth = 0) {
+  if (!node || typeof node !== "object") return null;
+  const code = String(node.districtCode || "").trim();
+  const name = String(node.districtName || "").trim();
+  if (!code || !name || depth > 3) return null;
+  const children = Array.isArray(node.children)
+    ? node.children.map((child) => normalizeLandPublicityRegionNode(child, depth + 1)).filter(Boolean)
+    : [];
+  return { code, name, children };
+}
+
+async function listLandPublicityRegions() {
+  const urls = [
+    "https://www.zjzrzyjy.com/trade/uniportal/index/districtList",
+    "https://www.zjzrzyjy.com/trade/view/preApply/preAnnouncement/districtList",
+  ];
+  let lastReason = "LAND_REGION_CATALOG_UNAVAILABLE";
+  for (const url of urls) {
+    try {
+      const payload = await fetchLandPublicityJson(url);
+      const regions = Array.isArray(payload?.data)
+        ? payload.data.map((node) => normalizeLandPublicityRegionNode(node)).filter(Boolean)
+        : [];
+      if (regions.length) {
+        return {
+          ok: true,
+          action: "list_land_publicity_regions",
+          regions,
+          source: url,
+          security: { credentialsReturned: false },
+        };
+      }
+      lastReason = "LAND_REGION_CATALOG_EMPTY";
+    } catch (error) {
+      lastReason = error?.message || String(error);
+    }
+  }
+  return {
+    ok: false,
+    action: "list_land_publicity_regions",
+    reason: lastReason,
+    regions: [],
+    security: { credentialsReturned: false },
+  };
+}
+
 function normalizeLandPublicityRequest(input) {
   const request = input && typeof input === "object" ? input : {};
   let outputDirectory;
@@ -2576,6 +2651,7 @@ function normalizeLandPublicityRequest(input) {
   const normalized = {
     tradeForm: String(request.tradeForm || "").trim().slice(0, 40),
     district: String(request.district || "").trim().slice(0, 100),
+    county: String(request.county || "").trim().slice(0, 100),
     location: String(request.location || "").trim().slice(0, 160),
     startDate: String(request.startDate || "").trim().slice(0, 20),
     endDate: String(request.endDate || "").trim().slice(0, 20),
@@ -2604,7 +2680,7 @@ function normalizeLandPublicityRequest(input) {
       normalized[field] = number;
     }
   }
-  const maxPages = Number(request.maxPages || 5);
+  const maxPages = Number(request.maxPages || 200);
   if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 200) throw new Error("LAND_MAX_PAGES_INVALID");
   normalized.maxPages = maxPages;
   const serialized = JSON.stringify(normalized);
@@ -3357,6 +3433,9 @@ async function handle(message) {
   }
   if (message?.action === "select_print_output_directory") {
     return await choosePrintOutputDirectory();
+  }
+  if (message?.action === "list_land_publicity_regions") {
+    return await listLandPublicityRegions();
   }
   if (message?.action === "select_table_format_output_directory") {
     return await chooseTableFormatOutputDirectory();
