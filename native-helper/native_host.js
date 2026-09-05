@@ -2604,7 +2604,7 @@ function normalizeLandPublicityRequest(input) {
       normalized[field] = number;
     }
   }
-  const maxPages = Number(request.maxPages || 5);
+  const maxPages = Number(request.maxPages || 200);
   if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 200) throw new Error("LAND_MAX_PAGES_INVALID");
   normalized.maxPages = maxPages;
   const serialized = JSON.stringify(normalized);

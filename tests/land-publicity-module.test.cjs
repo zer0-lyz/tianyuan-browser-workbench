@@ -36,7 +36,8 @@ test("land publicity module and skill package are wired", () => {
     "openLandPublicityHtml", "openLandPublicityExcel", "openLandPublicityMap",
   ]) assert.match(`${html}\n${template}`, new RegExp(`id=\\"${id}\\"`), `missing ${id}`);
   assert.match(template, /国有土地/);
-  assert.match(template, /挂牌出让、挂牌租赁、拍卖出让、拍卖租赁/);
+  assert.match(template, /挂牌出让、拍卖出让/);
+  assert.doesNotMatch(template, /挂牌租赁、拍卖租赁/);
   assert.match(template, /结果公示/);
   assert.match(template, /<select id="landPublicityDistrict">/);
   assert.match(template, /浙江土地成交公示.*子文件夹/);
@@ -123,16 +124,142 @@ print(json.dumps(result, ensure_ascii=False))
     const html = fs.readFileSync(payload.htmlPath, "utf8");
     assert.match(html, /下载 Excel/);
     assert.match(html, /查看地图/);
+    assert.match(html, /section-heading[\s\S]*地图（1 条可定位结果）[\s\S]*map-actions/);
+    assert.doesNotMatch(html, /result-overview|page-note/);
+    assert.doesNotMatch(html, /style="margin-top:16px"/);
+    assert.match(html, /detail-filter/);
+    assert.match(html, /column-filter-trigger/);
+    assert.match(html, /filter-funnel/);
+    assert.match(html, /column-filter-popover/);
+    assert.doesNotMatch(html, /class="filter-row"/);
+    assert.match(html, /clear-table-filters/);
+    assert.match(html, /activeColumnFilters/);
+    assert.match(html, /numeric-cell/);
+    assert.match(html, /td\.numeric-cell\{text-align:right/);
+    assert.match(html, /detail-select/);
+    assert.match(html, /ZJ_LAND_MAP_FOCUS/);
+    assert.match(html, /ZJ_LAND_MAP_SET_SELECTED/);
+    assert.match(html, /ZJ_LAND_MAP_DISTANCE_REQUEST/);
+    assert.match(html, /show-selected-distances/);
     assert.match(html, /成交公示明细/);
     assert.match(html, /打开详情/);
     assert.match(html, /受让单位/);
-    assert.match(html, /共抓取 2 条，按当前条件保留 2 条/);
+    assert.doesNotMatch(html, /条件候选|详情复核通过/);
+    assert.match(html, /成交公示明细[\s\S]*下载 Excel[\s\S]*打开 Excel/);
     assert.match(html, /可定位/);
+    assert.doesNotMatch(html, /<th>起始单价\(元\/平方米\)<\/th>|<th>起始总价\(万元\)<\/th>|<th>报价开始时间<\/th>/);
+    assert.match(html, /1,000/);
+    assert.match(html, /2,500/);
+    assert.match(html, /map-frame-shell/);
+    assert.match(html, /map-resize-handle/);
+    assert.match(html, /pointerdown/);
+    assert.match(html, /min-height:440px/);
     assert.doesNotMatch(html, /筛选限制与回读说明/);
     const coords = JSON.parse(fs.readFileSync(payload.coordsPath, "utf8"));
     assert.equal(coords.length, 1);
     assert.match(html, /无坐标（详情接口未返回）/);
+    const map = fs.readFileSync(payload.mapPath, "utf8");
+    for (const marker of ["legend-panel", "work-panel", "case-tab", "unlocated-tab", "case-search", "case-sort", "unlocated-list", "syncLabels", "markercluster", "marker-highlight", "focusSourceCodes", "setSelectedSourceCodes", "add-reference-marker", "reference-marker-list", "ZJ_LAND_MAP_DISTANCE_REQUEST", "renderDistanceResults", "haversineKm"]) {
+      assert.match(map, new RegExp(marker), `map should include ${marker}`);
+    }
+    assert.match(map, /插入位置标记/);
+    assert.match(map, /请输入位置标记名称/);
+    assert.match(map, /请输入备注/);
+    assert.match(map, /拖动标记调整位置/);
+    assert.match(map, /L\.polyline/);
+    assert.match(map, /distance-label/);
+    assert.match(map, /referenceMarkerLabel/);
+    assert.doesNotMatch(map, /current\.lat\.toFixed\(6\)/);
+    assert.doesNotMatch(map, /summary-grid|summary-card|right-panel|点位按 resourceCoordinate\.center/);
+    assert.match(map, /\.legend-panel \{[^}]*right: 12px/);
+    assert.match(map, /top: 12px; width: 292px; height: calc\(100% - 24px\); max-height: none/);
+    assert.match(map, /\.case-list \{[^}]*overflow-y: auto/);
+    assert.match(map, /case-tab-count/);
+    assert.match(map, /text-overflow: ellipsis/);
+    assert.match(map, /zoomControl: false/);
+    assert.match(map, /position: 'bottomright'/);
+    assert.match(map, /ResizeObserver/);
+    assert.match(map, /function numberText/);
+    assert.doesNotMatch(map, /起始单价：|起始总价：/);
     assert.ok(fs.readFileSync(payload.excelPath).subarray(0, 2).equals(Buffer.from("PK")));
+  } finally {
+    fs.rmSync(outputDirectory, { recursive: true, force: true });
+  }
+});
+
+test("same land publicity query updates stable output paths instead of creating duplicate HTML", () => {
+  const outputDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "land-publicity-stable-output-"));
+  const python = process.env.TIANYUAN_PYTHON_BIN || "python3";
+  const script = String.raw`
+import json, os, sys
+from pathlib import Path
+sys.path.insert(0, "skills/zj-land-publicity")
+from land_publicity_runner import execute_request
+
+out = Path(os.environ["LAND_STABLE_OUTPUT"])
+records = [
+  {"publicityId":"GS1","sourceCode":"3301-001","districtName":"杭州","releaseTime":"2025-04-17","sourceId":"s1","content":"<table><tr><td>地块位置</td><td>滨江街道</td></tr><tr><td>土地用途</td><td>住宅</td></tr><tr><td>土地面积</td><td>1.5亩</td></tr></table>"},
+  {"publicityId":"GS2","sourceCode":"3301-002","districtName":"杭州","releaseTime":"2025-04-18","sourceId":"s2","content":"<table><tr><td>地块位置</td><td>钱塘街道</td></tr><tr><td>土地用途</td><td>住宅</td></tr><tr><td>土地面积</td><td>2亩</td></tr></table>"},
+]
+detail = {
+  "s1": {"resourceCoordinate":"", "resourceLocation":"滨江街道", "assignmentPurpose":"住宅"},
+  "s2": {"resourceCoordinate":"", "resourceLocation":"钱塘街道", "assignmentPurpose":"住宅"},
+}
+runs = 0
+def fetcher(**kwargs):
+  global runs
+  runs += 1
+  return records[:1 if runs == 1 else 2]
+
+def request(district="杭州"):
+  return {"outputDirectory":str(out),"startYear":"2025","district":district,"districtExact":True,"landUses":["住宅用地"],"generateMap":False,"maxPages":1}
+
+first = execute_request(request(), fetcher=fetcher, detail_fetcher=lambda source_id: detail[source_id], progress=lambda *args, **kwargs: None)
+first_html = Path(first["htmlPath"]).read_text(encoding="utf-8")
+second = execute_request(request(), fetcher=fetcher, detail_fetcher=lambda source_id: detail[source_id], progress=lambda *args, **kwargs: None)
+second_html = Path(second["htmlPath"]).read_text(encoding="utf-8")
+with_map = execute_request({**request(), "generateMap": True}, fetcher=fetcher, detail_fetcher=lambda source_id: detail[source_id], progress=lambda *args, **kwargs: None)
+map_path = Path(with_map["mapPath"])
+without_map = execute_request(request(), fetcher=fetcher, detail_fetcher=lambda source_id: detail[source_id], progress=lambda *args, **kwargs: None)
+different = execute_request(request("宁波"), fetcher=fetcher, detail_fetcher=lambda source_id: detail[source_id], progress=lambda *args, **kwargs: None)
+print(json.dumps({
+  "first": {"excel": first["excelPath"], "html": first["htmlPath"], "action": first["outputAction"]},
+  "second": {"excel": second["excelPath"], "html": second["htmlPath"], "action": second["outputAction"], "filtered": second["filteredCount"]},
+  "withMap": {"excel": with_map["excelPath"], "html": with_map["htmlPath"], "map": with_map["mapPath"]},
+  "withoutMap": {"excel": without_map["excelPath"], "html": without_map["htmlPath"], "mapExists": map_path.exists()},
+  "different": {"excel": different["excelPath"], "html": different["htmlPath"]},
+  "firstHasSecond": "3301-002" in first_html,
+  "secondHasSecond": "3301-002" in second_html,
+  "htmlCount": len(list(out.glob("*.html"))),
+  "excelCount": len(list(out.glob("*.xlsx"))),
+}, ensure_ascii=False))
+`;
+  try {
+    const result = spawnSync(python, ["-c", script], {
+      cwd: repoRoot,
+      env: { ...process.env, LAND_STABLE_OUTPUT: outputDirectory },
+      encoding: "utf8",
+      timeout: 30000,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout.trim());
+    assert.equal(payload.first.action, "created");
+    assert.equal(payload.second.action, "updated_existing");
+    assert.equal(payload.first.excel, payload.second.excel);
+    assert.equal(payload.first.html, payload.second.html);
+    assert.equal(payload.second.filtered, 2);
+    assert.equal(payload.firstHasSecond, false);
+    assert.equal(payload.secondHasSecond, true);
+    assert.equal(payload.first.excel, payload.withMap.excel);
+    assert.equal(payload.first.html, payload.withMap.html);
+    assert.equal(payload.first.excel, payload.withoutMap.excel);
+    assert.equal(payload.first.html, payload.withoutMap.html);
+    assert.ok(payload.withMap.map);
+    assert.equal(payload.withoutMap.mapExists, false);
+    assert.equal(payload.htmlCount, 2);
+    assert.equal(payload.excelCount, 2);
+    assert.notEqual(payload.first.excel, payload.different.excel);
+    assert.notEqual(payload.first.html, payload.different.html);
   } finally {
     fs.rmSync(outputDirectory, { recursive: true, force: true });
   }
@@ -217,7 +344,7 @@ base = {
   "tradeForm": "国有土地", "tradeMethods": [], "tradeStages": [],
   "district": "", "provinceWide": True, "location": "", "landUses": [], "startDate": "2025-01-01", "endDate": "2025-01-31",
   "startYear": "", "quotePreset": "all", "quoteStartDate": "", "quoteEndDate": "", "startPriceMin": None, "startPriceMax": None,
-  "areaMin": None, "areaMax": None, "areaUnit": "sqm", "districtExact": False, "generateMap": False, "maxPages": 50,
+  "areaMin": None, "areaMax": None, "areaUnit": "sqm", "districtExact": False, "generateMap": False, "maxPages": 200,
   "outputDirectory": os.getcwd(),
 }
 records = [
@@ -335,7 +462,7 @@ test("land publicity auto-opens HTML and clears filters without clearing output 
   await documentRef.getElementById("runLandPublicity").dispatch("click");
   assert.ok(nativeMessages.some((message) => message.action === "open_land_publicity_path" && message.path === "/tmp/land-result.html"));
   assert.match(documentRef.getElementById("landPublicityResultMessage").textContent, /结果为 0 条/);
-  assert.match(documentRef.getElementById("landPublicityResultMessage").textContent, /当前筛选条件：.*交易方式=挂牌出让、挂牌租赁、拍卖出让、拍卖租赁/);
+  assert.match(documentRef.getElementById("landPublicityResultMessage").textContent, /当前筛选条件：.*交易方式=挂牌出让、拍卖出让/);
   assert.equal(documentRef.getElementById("openLandPublicityHtml").disabled, false);
 
   documentRef.getElementById("landPublicityDistrict").value = "临安区";
@@ -416,7 +543,7 @@ print(json.dumps({
   assert.deepEqual(payload.codes, ["拱政工出[2026]1号", "拱政工出[2025]8号", "拱政租出[2026]1号"]);
   assert.match(payload.url, /querylandbidding/);
   assert.match(payload.url, /currentPage=1/);
-  assert.match(payload.url, /pageSize=50/);
+  assert.match(payload.url, /pageSize=500/);
   assert.match(payload.url, /resourceStage=CJ/);
   assert.match(payload.url, /regionCode=330105/);
   assert.match(payload.url, /enrollStartTime=1767196800000/);
@@ -424,6 +551,88 @@ print(json.dumps({
   assert.deepEqual(payload.normalized, { id: "r1", stage: "结果公示", use: "一类工业用地（标准厂房）", type: "挂牌租赁" });
   assert.deepEqual(payload.row, { areaMu: 2, areaSqm: 1333, startTotal: 100, dealTotal: 120, term: "10年", unit: "测试单位" });
   assert.deepEqual(payload.dateParams, { regionName: "拱墅区", fallbackRegionName: "杭州市", enrollStartTime: 1767196800000, nowTime: 1788623999999 });
+});
+
+test("explicit province-wide mode clears stale county filters", () => {
+  const python = process.env.TIANYUAN_PYTHON_BIN || "python3";
+  const script = String.raw`
+import json, sys
+sys.path.insert(0, "skills/zj-land-publicity")
+from land_publicity_runner import _list_district_filter, _list_record_matches_request, _list_server_filters
+
+request = {
+  "district": "杭州市", "location": "拱墅区", "provinceWide": True,
+  "districtExact": True, "startDate": "2026-01-01", "endDate": "2026-09-05",
+}
+records = [
+  {"districtName": "拱墅区", "content": ""},
+  {"districtName": "临安区", "content": ""},
+]
+print(json.dumps({
+  "listFilter": _list_district_filter(request),
+  "serverFilters": _list_server_filters(request),
+  "matches": [_list_record_matches_request(request, record) for record in records],
+}, ensure_ascii=False))
+`;
+  const result = spawnSync(python, ["-c", script], { cwd: repoRoot, encoding: "utf8", timeout: 30000 });
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1));
+  assert.equal(payload.listFilter, null);
+  assert.equal(payload.serverFilters.regionName, undefined);
+  assert.deepEqual(payload.matches, [true, true]);
+});
+
+test("land publicity mirrors the website query codes", () => {
+  const python = process.env.TIANYUAN_PYTHON_BIN || "python3";
+  const script = String.raw`
+import json, sys
+sys.path.insert(0, "skills/zj-land-publicity")
+from land_publicity_runner import _contains_any, _website_server_filters
+
+request = {
+  "district": "杭州市", "location": "拱墅区", "provinceWide": False,
+  "districtExact": True, "startDate": "", "endDate": "",
+  "tradeMethods": ["挂牌出让"], "landUses": ["工矿仓储"],
+}
+print(json.dumps({
+  "filters": _website_server_filters(request),
+  "businessFinanceMatches": _contains_any(["商务金融用地"], ["商服用地"]),
+}, ensure_ascii=False))
+`;
+  const result = spawnSync(python, ["-c", script], { cwd: repoRoot, encoding: "utf8", timeout: 30000 });
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1));
+  assert.equal(payload.filters.regionName, "拱墅区");
+  assert.equal(payload.filters.tradeMode, 1);
+  assert.equal(payload.filters.transactionType, "CR");
+  assert.equal(payload.filters.landUse, 3);
+  assert.equal(payload.filters.sortField, "ZYKSSJ");
+  assert.equal(payload.filters.sortWay, "desc");
+  assert.equal(payload.businessFinanceMatches, true);
+});
+
+test("land publicity allows the website's unlimited time range", () => {
+  const python = process.env.TIANYUAN_PYTHON_BIN || "python3";
+  const script = String.raw`
+import json, os, sys
+sys.path.insert(0, "skills/zj-land-publicity")
+from land_publicity_runner import _website_server_filters, validate_request
+
+request = {
+  "outputDirectory": os.getcwd(), "district": "拱墅区", "location": "拱墅区",
+  "provinceWide": False, "districtExact": True, "startDate": "", "endDate": "",
+  "tradeMethods": ["挂牌出让"], "tradeStages": ["结果公示"], "landUses": ["工矿仓储"],
+}
+validated = validate_request(request)
+print(json.dumps({"validated": True, "filters": _website_server_filters(validated)}, ensure_ascii=False))
+`;
+  const result = spawnSync(python, ["-c", script], { cwd: repoRoot, encoding: "utf8", timeout: 30000 });
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1));
+  assert.equal(payload.validated, true);
+  assert.equal(payload.filters.enrollStartTime, undefined);
+  assert.equal(payload.filters.nowTime, undefined);
+  assert.equal(payload.filters.landUse, 3);
 });
 
 console.log("Land publicity module tests passed.");

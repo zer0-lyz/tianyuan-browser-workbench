@@ -1,7 +1,7 @@
 import { landPublicityTemplate } from "./template.js";
 
 const FIXED_TRADE_FORM = "国有土地";
-const FIXED_TRADE_METHODS = ["挂牌出让", "挂牌租赁", "拍卖出让", "拍卖租赁"];
+const FIXED_TRADE_METHODS = ["挂牌出让", "拍卖出让"];
 const FIXED_TRADE_STAGES = ["结果公示"];
 
 const DEFAULT_CONFIG = {
@@ -16,7 +16,7 @@ const DEFAULT_CONFIG = {
   endDate: "",
   districtExact: false,
   generateMap: true,
-  maxPages: "50",
+  maxPages: "200",
   outputDirectory: "",
 };
 
@@ -45,6 +45,10 @@ function setCheckedValues(root, name, values) {
   });
 }
 
+function isAdministrativeLocation(value) {
+  return /.+(?:市|区|县)$/.test(String(value || "").trim());
+}
+
 function setMessage(element, text, kind = "") {
   if (!element) return;
   element.textContent = text;
@@ -66,7 +70,7 @@ function normalizeConfig(value = {}) {
     endDate: String(source.endDate || "").trim(),
     districtExact: source.districtExact === true,
     generateMap: source.generateMap !== false,
-    maxPages: "50",
+    maxPages: "200",
     outputDirectory: String(source.outputDirectory || "").trim(),
   };
 }
@@ -125,7 +129,7 @@ export const landPublicityModule = {
         endDate: elements.landPublicityEndDate.value,
         districtExact: elements.landPublicityDistrictExact.checked,
         generateMap: elements.landPublicityGenerateMap.checked,
-        maxPages: "50",
+        maxPages: "200",
         outputDirectory: elements.landPublicityOutputDirectory.value.trim(),
       };
       return next;
@@ -148,14 +152,19 @@ export const landPublicityModule = {
     function validateLocal(next) {
       if (!next.outputDirectory) throw new Error("请先选择本机输出目录");
       if (!next.provinceWide && !next.district && !next.location) throw new Error("请至少选择行政区、填写位置关键词，或勾选全省/不限制行政区");
-      if (!next.startDate || !next.endDate) throw new Error("请填写官网查询起始日期和结束日期");
-      if (next.startDate > next.endDate) throw new Error("官网查询起始日期不能晚于结束日期");
+      if (next.startDate && next.endDate && next.startDate > next.endDate) throw new Error("官网查询起始日期不能晚于结束日期");
+      const countyLocation = isAdministrativeLocation(next.location);
+      const provinceWide = next.provinceWide === true;
       return {
         ...next,
+        district: provinceWide ? "" : next.district,
+        location: provinceWide && countyLocation ? "" : next.location,
+        districtExact: provinceWide ? false : next.districtExact,
+        provinceWide,
         tradeForm: FIXED_TRADE_FORM,
         tradeMethods: [...FIXED_TRADE_METHODS],
         tradeStages: [...FIXED_TRADE_STAGES],
-        maxPages: 50,
+        maxPages: 200,
       };
     }
 
@@ -233,6 +242,7 @@ export const landPublicityModule = {
         return;
       }
       config = request;
+      renderConfig();
       await context.storage.save(config);
       running = true;
       setResultButtons(null);
@@ -250,10 +260,11 @@ export const landPublicityModule = {
         setResultButtons(result);
         const writtenCount = Number(result.writtenCount || 0);
         const warningCount = (result.filterSummary?.warnings || []).length + (result.filterSummary?.unsupportedFilters || []).length;
+        const filterSummary = filterConditionSummary(request);
         const emptySuggestion = writtenCount === 0
           ? `结果为 0 条。当前筛选条件：${filterConditionSummary(request)}。建议检查官网查询日期、行政区或位置关键词，以及接口是否返回记录。`
           : "";
-        setMessage(elements.landPublicityResultMessage, `已完成：Excel ${writtenCount} 条；无坐标 ${result.noCoordinateCount || 0} 条。${warningCount ? `有 ${warningCount} 项筛选限制已在结果页说明。` : ""}${emptySuggestion}`, warningCount || emptySuggestion ? "warn" : "ok");
+        setMessage(elements.landPublicityResultMessage, `已完成：Excel ${writtenCount} 条；实际条件：${filterSummary}。无坐标 ${result.noCoordinateCount || 0} 条。${warningCount ? `有 ${warningCount} 项筛选限制已在结果页说明。` : ""}${emptySuggestion}`, warningCount || emptySuggestion ? "warn" : "ok");
         await openResultPath(result.htmlPath, "结果页");
         context.setStatus("浙江土地成交公示抓取完成，Excel/HTML 已回读", "ok");
       } catch (error) {
@@ -287,6 +298,15 @@ export const landPublicityModule = {
         context.scope.on(elements.clearLandPublicityFilters, "click", clearFilters);
         context.scope.on(elements.landPublicityProvinceWide, "change", () => {
           config.provinceWide = elements.landPublicityProvinceWide.checked;
+          if (config.provinceWide && isAdministrativeLocation(elements.landPublicityLocation.value)) {
+            config.district = "";
+            config.location = "";
+            config.districtExact = false;
+            elements.landPublicityDistrict.value = "";
+            elements.landPublicityLocation.value = "";
+            elements.landPublicityDistrictExact.checked = false;
+            setMessage(elements.landPublicityResultMessage, "已切换为全省查询，已清除之前保存的市/区县条件。", "ok");
+          }
           elements.landPublicityDistrict.disabled = config.provinceWide;
           elements.landPublicityDistrictExact.disabled = config.provinceWide;
         });
