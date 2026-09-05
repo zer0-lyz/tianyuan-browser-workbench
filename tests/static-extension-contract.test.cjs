@@ -14,6 +14,9 @@ const updatesModule = fs.readFileSync(path.join(extensionRoot, "src", "modules",
 const updatesTemplate = fs.readFileSync(path.join(extensionRoot, "src", "modules", "updates", "template.js"), "utf8");
 const feedbackModule = fs.readFileSync(path.join(extensionRoot, "src", "modules", "feedback", "module.js"), "utf8");
 const feedbackTemplate = fs.readFileSync(path.join(extensionRoot, "src", "modules", "feedback", "template.js"), "utf8");
+const tableFormatModule = fs.readFileSync(path.join(extensionRoot, "src", "modules", "table-format", "module.js"), "utf8");
+const tableFormatTemplate = fs.readFileSync(path.join(extensionRoot, "src", "modules", "table-format", "template.js"), "utf8");
+const tableFormatScript = fs.readFileSync(path.join(repoRoot, "skills", "table-format", "scripts", "format_word_tables.py"), "utf8");
 const feedbackConfig = JSON.parse(fs.readFileSync(path.join(extensionRoot, "feedback.json"), "utf8"));
 const moduleRegistry = fs.readFileSync(path.join(extensionRoot, "src", "core", "module-registry.js"), "utf8");
 const legacyFeatureModules = fs.readFileSync(path.join(extensionRoot, "src", "app", "legacy-feature-modules.js"), "utf8");
@@ -58,7 +61,7 @@ for (const relativePath of referencedManifestFiles()) {
   assert.equal(fs.existsSync(path.join(extensionRoot, relativePath)), true, `manifest file missing: ${relativePath}`);
 }
 
-const ids = [html, updatesTemplate, feedbackTemplate]
+const ids = [html, updatesTemplate, feedbackTemplate, tableFormatTemplate]
   .flatMap((source) => [...source.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]));
 assert.equal(new Set(ids).size, ids.length, "sidepanel HTML contains duplicate ids");
 const referencedIds = [sidepanel, updatesModule, feedbackModule, moduleRegistry]
@@ -148,7 +151,17 @@ assert.equal(sidepanel.includes("check_github_update"), false);
 assert.equal(sidepanel.includes("function checkForUpdates"), false);
 assert.equal(sidepanel.includes("moduleRegistry.register(updatesModule)"), true);
 assert.equal(sidepanel.includes("moduleRegistry.register(feedbackModule)"), true);
-assert.equal(sidepanel.includes("moduleRegistry.register(fileArchiveModule)"), true);
+assert.equal(sidepanel.includes("moduleRegistry.register(fileArchiveModule)"), false);
+assert.equal(html.includes('id="openFileArchive"'), false);
+assert.equal(html.includes('id="page-file-archive"'), false);
+assert.equal(sidepanel.includes("openFileArchive"), false);
+assert.equal(sidepanel.includes("let connectionCheckPromise = null;"), true);
+assert.equal(sidepanel.includes("async function performConnectionCheck({ probe = false } = {})"), true);
+assert.equal(sidepanel.includes("lightweight: !probe"), true);
+assert.equal(sidepanel.includes("timeoutMs: lightweight ? 2000 : 8000"), true);
+assert.equal(sidepanel.includes("async function restoreConnectorSession(timeoutMs = 8000)"), true);
+assert.equal(sidepanel.includes("await Promise.all(["), true);
+assert.equal(sidepanel.includes("void refreshAll({ probe: false }).catch"), true);
 assert.equal(fs.existsSync(path.join(repoRoot, "native-helper", "codex_catalog.js")), true);
 assert.equal(html.includes('id="agentBindingProviderSelect"'), true);
 assert.equal(html.includes('id="saveAgentBinding"'), true);
@@ -165,6 +178,16 @@ assert.equal(sidepanel.includes("function feedbackMarkdown"), false);
 assert.equal(sidepanel.includes("function validateFeedbackDraft"), false);
 assert.equal(feedbackModule.includes("getSafeDiagnostics"), true);
 assert.equal(feedbackModule.includes("privacyConfirmed: true"), true);
+assert.equal(tableFormatModule.includes('id: "table-format"'), true);
+assert.equal(tableFormatModule.includes('messageNamespace: "table-format"'), true);
+assert.equal(tableFormatModule.includes("run_table_format"), true);
+assert.equal(tableFormatTemplate.includes('id="chooseTableFormatFiles"'), true);
+assert.equal(tableFormatTemplate.includes('id="tableFormatOutputMode"'), true);
+assert.equal(tableFormatScript.includes("Times New Roman"), true);
+assert.equal(tableFormatScript.includes("tblHeader"), true);
+assert.equal(nativeHost.includes('message?.action === "run_table_format"'), true);
+assert.equal(macosPlatform.includes("chooseWordFiles"), true);
+assert.equal(windowsPlatform.includes("chooseWordFiles"), true);
 assert.equal(feedbackModule.includes("projectId"), false);
 assert.equal(feedbackModule.includes("companyId"), false);
 assert.equal(feedbackModule.includes("subjectCode"), false);
