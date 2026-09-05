@@ -58,6 +58,7 @@ const NATIVE_RUNTIME_BACKUP_FILES = [
   "update_installer.js",
   "file-archive.js",
   "file-archive-conversations.js",
+  "depreciation-capex-forecast.js",
   "update-sources.json",
   "runtime-config.json",
   "com.tianyuan.workbench.helper.json",
@@ -320,8 +321,10 @@ function sourceBuildDigest() {
   const roots = [
     "extension",
     "native-helper",
+    "skills",
     "plugins/tianyuan-browser-connector",
     "scripts/install-local-runtime.mjs",
+    "skills/depreciation-capex-forecast",
   ];
   const files = [];
   for (const relativeRoot of roots) {
@@ -543,6 +546,7 @@ function writeWindowsNativeHost(nodeBin, pythonBin) {
     tycpvBin: process.env.TYCPV_BIN || undefined,
     pythonBin,
     printSkillsDir: printSkillsRoot,
+    depreciationSkillDir: path.join(runtimeProjectRoot, "skills", "depreciation-capex-forecast"),
   }, null, 2) + "\n");
   const nativeHostExe = path.join(nativeRuntimeRoot, "native_host.exe");
   const manifestHostPath = fs.existsSync(nativeHostExe) ? nativeHostExe : launcherPath;
@@ -633,14 +637,31 @@ function main() {
       "src/modules/feedback/module.js",
       "src/modules/feedback/template.js",
       "src/modules/feedback/styles.css",
+      "src/modules/table-format/module.js",
+      "src/modules/table-format/template.js",
+      "src/modules/table-format/styles.css",
     ],
   );
   copyDir(
     path.join(repoRoot, "native-helper"),
     path.join(runtimeProjectRoot, "native-helper"),
-    ["native_host.js", "native_host_bootstrap.js", "connector_bridge.js", "codex_catalog.js", "process_launcher.js", "update_checker.js", "update_installer.js", "file-archive.js", "file-archive-conversations.js", "update-sources.json"],
+    ["native_host.js", "native_host_bootstrap.js", "connector_bridge.js", "codex_catalog.js", "process_launcher.js", "update_checker.js", "update_installer.js", "file-archive.js", "file-archive-conversations.js", "depreciation-capex-forecast.js", "update-sources.json"],
   );
-  copyDir(path.join(repoRoot, "skills"), path.join(runtimeProjectRoot, "skills"));
+  copyDir(path.join(repoRoot, "skills"), path.join(runtimeProjectRoot, "skills"), [
+    "depreciation-capex-forecast/SKILL.md",
+    "depreciation-capex-forecast/agents/openai.yaml",
+    "depreciation-capex-forecast/references/workflow.md",
+    "depreciation-capex-forecast/tests/test_workbook.py",
+    "depreciation-capex-forecast/assets/折旧摊销预测输入模板.xlsx",
+    "depreciation-capex-forecast/scripts/workflow.py",
+    "depreciation-capex-forecast/scripts/depreciation_forecast/__init__.py",
+    "depreciation-capex-forecast/scripts/depreciation_forecast/__main__.py",
+    "depreciation-capex-forecast/scripts/depreciation_forecast/cli.py",
+    "depreciation-capex-forecast/scripts/depreciation_forecast/model.py",
+    "depreciation-capex-forecast/scripts/depreciation_forecast/workbook.py",
+    "table-format/SKILL.md",
+    "table-format/scripts/format_word_tables.py",
+  ]);
   copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), path.join(runtimeProjectRoot, "plugins", "tianyuan-browser-connector"));
   copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), userPluginRoot);
   copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), codexPluginRoot);
@@ -648,6 +669,8 @@ function main() {
     "appraisal-detail-print-format",
     "appraisal-declaration-print-format",
     "asset-link-restore",
+    "zj-land-publicity",
+    "table-format",
   ]) {
     copyDir(path.join(repoRoot, "skills", skillName), path.join(printSkillsRoot, skillName));
   }
@@ -662,6 +685,7 @@ function main() {
   copyFileAtomic(path.join(repoRoot, "native-helper", "update_installer.js"), path.join(nativeRuntimeRoot, "update_installer.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "file-archive.js"), path.join(nativeRuntimeRoot, "file-archive.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "file-archive-conversations.js"), path.join(nativeRuntimeRoot, "file-archive-conversations.js"));
+  copyFileAtomic(path.join(repoRoot, "native-helper", "depreciation-capex-forecast.js"), path.join(nativeRuntimeRoot, "depreciation-capex-forecast.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "update-sources.json"), path.join(nativeRuntimeRoot, "update-sources.json"));
   const packagedNativeHostExe = path.join(repoRoot, "native-helper", "native_host.exe");
   if (isWindows && fs.existsSync(packagedNativeHostExe)) {
