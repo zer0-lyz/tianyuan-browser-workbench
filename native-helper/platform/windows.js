@@ -79,6 +79,16 @@ function createWindowsAdapter(options = {}) {
     ].join("\n"));
   }
 
+  async function openPath(targetPath) {
+    return await new Promise((resolve) => {
+      runFile("explorer.exe", [String(targetPath)], { timeout: 15000, windowsHide: true }, (error) => {
+        resolve(error
+          ? { ok: false, reason: "LAND_OPEN_PATH_FAILED", security: common.security() }
+          : { ok: true, opened: true, security: common.security() });
+      });
+    });
+  }
+
   async function chooseWorkbookFiles() {
     return await runPowerShell([
       powerShellPreamble(),
@@ -88,6 +98,30 @@ function createWindowsAdapter(options = {}) {
       "$dialog.Multiselect = $true",
       "if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { exit 2 }",
       "$dialog.FileNames | ForEach-Object { [Console]::Out.WriteLine($_) }",
+    ].join("\n"));
+  }
+
+  async function chooseWordFiles() {
+    return await runPowerShell([
+      powerShellPreamble(),
+      "$dialog = New-Object System.Windows.Forms.OpenFileDialog",
+      "$dialog.Title = '选择需要统一表格格式的 Word 文档（.docx）'",
+      "$dialog.Filter = 'Word 文档 (*.docx)|*.docx'",
+      "$dialog.Multiselect = $true",
+      "if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { exit 2 }",
+      "$dialog.FileNames | ForEach-Object { [Console]::Out.WriteLine($_) }",
+    ].join("\n"));
+  }
+
+  async function chooseXlsxFile() {
+    return await runPowerShell([
+      powerShellPreamble(),
+      "$dialog = New-Object System.Windows.Forms.OpenFileDialog",
+      "$dialog.Title = '选择折旧摊销预测输入工作簿（.xlsx）'",
+      "$dialog.Filter = 'Excel 工作簿 (*.xlsx)|*.xlsx'",
+      "$dialog.Multiselect = $false",
+      "if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { exit 2 }",
+      "[Console]::Out.WriteLine($dialog.FileName)",
     ].join("\n"));
   }
 
@@ -465,7 +499,10 @@ function createWindowsAdapter(options = {}) {
     ].filter(Boolean),
     cliFallback: "tycpv.cmd",
     chooseDirectory,
+    openPath,
     chooseWorkbookFiles,
+    chooseWordFiles,
+    chooseXlsxFile,
     async inspectActiveConversation() {
       return {
         ok: false,

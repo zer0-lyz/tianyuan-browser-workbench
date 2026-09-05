@@ -420,6 +420,14 @@ async function handle(req, res) {
         }
       }
 
+      const cli = probe
+        ? await checkCli()
+        : {
+            ok: false,
+            reason: "CLI_NOT_PROBED",
+            authenticated: false,
+            authExpiresAt: null,
+          };
       jsonResponse(res, 200, {
         ok: true,
         service: "tianyuan-native-helper",
@@ -427,7 +435,7 @@ async function handle(req, res) {
         mcpUrl,
         sessionReady: Boolean(sessionId && initialized),
         mcp,
-        cli: await checkCli(),
+        cli,
         security: {
           credentialsReturned: false,
         },

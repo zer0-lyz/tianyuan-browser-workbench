@@ -65,7 +65,9 @@ test("batch save tools and browser action contract are aligned", async () => {
   assert.match(adapterSource, /DRAFT_SAVE_SUCCESS_EVIDENCE_NOT_FOUND/);
   assert.match(adapterSource, /EXIT_EDIT_SUCCESS_EVIDENCE_NOT_FOUND/);
   assert.match(adapterSource, /产成品/);
-  assert.match(adapterSource, /expandSubjectTreeForCollection\(\)/);
+  assert.doesNotMatch(adapterSource, /expandSubjectTreeForCollection/);
+  assert.match(adapterSource, /collectionMode = "visible_only"/);
+  assert.match(adapterSource, /Do not expand collapsed branches here/);
   assert.match(nativeHostSource, /SUBJECT_CODES_REQUIRED/);
   assert.match(bridgeSource, /SUBJECT_CODES_REQUIRED/);
 

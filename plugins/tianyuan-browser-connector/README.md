@@ -1,6 +1,6 @@
 # 天源浏览器连接器
 
-版本 `0.4.2`。此插件把已注册的本机 Agent 路由到其有权访问的天源浏览器页面。
+版本 `0.4.3`。此插件把已注册的本机 Agent 路由到其有权访问的天源浏览器页面。
 
 ## 来源与绑定
 
@@ -82,6 +82,18 @@ node runtime/scripts/financial-statement-import.mjs read \
 
 详细规则见 `skills/financial-statement-import/SKILL.md`。预检不会落库；只有用户明确确认后才允许执行，执行后必须回读关键科目金额。
 
+## 资产基础法申报表导入
+
+`0.4.3` 后的 MCP 工具还包括：
+
+- `tianyuan.prepare_asset_draft_import`：解析平台申报表 Excel、剔除系统不允许字段、预检项目/公司/科目行数和覆盖目标；不写入。`excludedSubjectCodes` / `excludedSubjectNames` 只控制本次调用的项目性排除，默认不排除科目。
+- `tianyuan.execute_asset_draft_import`：仅接受上一步返回的 `prepareId` 和精确确认文本 `确认执行申报表导入`；确认令牌保存在插件进程内，不返回给 Agent。
+- `tianyuan.export_asset_declare_table`：导出系统申报表，用于回读核验。
+
+项目如需保护人工已录入的银行存款或不做长期股权投资，应在本次调用中显式传入对应科目代码；连接器本身不把这些科目写死。编辑锁失败或预检过期时不会产生部分写入，必须重新预检。
+
+申报表导入和回读工具使用本机 `tycpv` 授权，不依赖浏览器页面在线或已绑定；浏览器绑定仅适用于页面上下文、附件、保存与退出编辑等页面动作。
+
 ## 更新
 
-工作台 `0.13.0` 起，“更新全部组件”会把 Connector 同步到 `~/plugins/tianyuan-browser-connector` 和 `~/.codex/plugins/cache/personal/tianyuan-browser-connector/0.4.2`。已启动的 Codex 或 WorkBuddy MCP 进程不会热替换；更新后仍显示旧版本时，需要重启对应 Agent。
+工作台 `0.13.0` 起，“更新全部组件”会把 Connector 同步到 `~/plugins/tianyuan-browser-connector` 和 `~/.codex/plugins/cache/personal/tianyuan-browser-connector/0.4.3`。已启动的 Codex 或 WorkBuddy MCP 进程不会热替换；更新后仍显示旧版本时，需要重启对应 Agent。
