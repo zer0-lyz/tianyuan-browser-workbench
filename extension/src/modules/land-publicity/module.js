@@ -9,6 +9,7 @@ const DEFAULT_CONFIG = {
   tradeMethods: [...FIXED_TRADE_METHODS],
   tradeStages: [...FIXED_TRADE_STAGES],
   district: "",
+  county: "",
   provinceWide: false,
   location: "",
   landUses: [],
@@ -22,9 +23,10 @@ const DEFAULT_CONFIG = {
 
 function elementMap(documentRef) {
   const ids = [
-    "openLandPublicity", "backFromLandPublicity", "landPublicityDistrict", "landPublicityProvinceWide", "landPublicityLocation",
-    "landPublicityDistrictExact", "landPublicityStartDate", "landPublicityEndDate",
+    "openLandPublicity", "backFromLandPublicity", "landPublicityDistrict", "landPublicityCounty", "landPublicityLocation",
+    "landPublicityStartDate", "landPublicityEndDate",
     "landPublicityGenerateMap", "landPublicityOutputDirectory", "chooseLandPublicityOutput", "clearLandPublicityFilters", "runLandPublicity",
+    "reloadLandPublicityRegions", "landPublicityRegionStatus",
     "openLandPublicityHtml", "openLandPublicityExcel", "openLandPublicityMap", "landPublicityProgressText",
     "landPublicityProgressPercent", "landPublicityProgressBar", "landPublicityFetchedCount", "landPublicityFilteredCount",
     "landPublicityWrittenCount", "landPublicityResultMessage",
@@ -45,14 +47,20 @@ function setCheckedValues(root, name, values) {
   });
 }
 
-function isAdministrativeLocation(value) {
-  return /.+(?:市|区|县)$/.test(String(value || "").trim());
-}
-
 function setMessage(element, text, kind = "") {
   if (!element) return;
   element.textContent = text;
   element.dataset.kind = kind;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[character]));
 }
 
 function normalizeConfig(value = {}) {
@@ -63,6 +71,7 @@ function normalizeConfig(value = {}) {
     tradeMethods: [...FIXED_TRADE_METHODS],
     tradeStages: [...FIXED_TRADE_STAGES],
     district: String(source.district || "").trim(),
+    county: String(source.county || "").trim(),
     provinceWide: source.provinceWide === true,
     location: String(source.location || "").trim(),
     landUses: Array.isArray(source.landUses) ? source.landUses : [],
@@ -80,8 +89,9 @@ function filterConditionSummary(request) {
   if (request.provinceWide) {
     conditions.push("行政区=全省/不限制行政区");
   } else if (request.district) {
-    conditions.push(`行政区=${request.district}${request.districtExact ? "（districtName精确匹配）" : ""}`);
+    conditions.push(`行政区=${request.district}`);
   }
+  if (!request.provinceWide && request.county) conditions.push(`区县=${request.county}`);
   if (request.location) conditions.push(`位置关键词=${request.location}`);
   conditions.push(`交易形式=${FIXED_TRADE_FORM}`);
   conditions.push(`交易方式=${FIXED_TRADE_METHODS.join("、")}`);
@@ -114,6 +124,59 @@ export const landPublicityModule = {
     let config = { ...DEFAULT_CONFIG };
     let lastResult = null;
     let running = false;
+    let regionCatalog = [];
+    let regionLoading = null;
+
+    function regionRoots() {
+      const province = regionCatalog.find((item) => item.name === "浙江省" || item.code === "330000");
+      return province?.children?.length ? province.children : regionCatalog;
+    }
+
+    function selectedCityRegion() {
+      return regionRoots().find((item) => item.name === config.district) || null;
+    }
+
+    function setRegionStatus(text, kind = "") {
+      if (!elements?.landPublicityRegionStatus) return;
+      elements.landPublicityRegionStatus.textContent = text;
+      elements.landPublicityRegionStatus.dataset.kind = kind;
+    }
+
+    function renderRegionOptions() {
+      const district = elements?.landPublicityDistrict;
+      const county = elements?.landPublicityCounty;
+      if (!district || !county) return;
+      const cities = regionRoots();
+      if (cities.length) {
+        district.innerHTML = `<option value="">请选择地市（可不选）</option>${cities.map((item) => `<option value="${escapeHtml(item.name)}">${escapeHtml(item.name)}</option>`).join("")}`;
+        district.value = cities.some((item) => item.name === config.district) ? config.district : "";
+      }
+      const city = selectedCityRegion();
+      const counties = city?.children || [];
+      county.innerHTML = `<option value="">${city ? "请选择区县（可不选）" : "请先选择地市"}</option>${counties.map((item) => `<option value="${escapeHtml(item.name)}">${escapeHtml(item.name)}</option>`).join("")}`;
+      county.disabled = !city;
+      county.value = counties.some((item) => item.name === config.county) ? config.county : "";
+    }
+
+    async function loadRegionCatalog() {
+      if (regionLoading) return regionLoading;
+      setRegionStatus("正在从浙江土地市场网加载行政区…");
+      regionLoading = context.sendNativeMessage({ action: "list_land_publicity_regions" }, 25000)
+        .then((result) => {
+          if (!result?.ok || !Array.isArray(result.regions) || !result.regions.length) throw new Error(result?.reason || "LAND_REGION_CATALOG_EMPTY");
+          regionCatalog = result.regions;
+          renderRegionOptions();
+          setRegionStatus(`已加载 ${regionRoots().length} 个地市，可继续选择区县。`, "ok");
+          return result;
+        })
+        .catch((error) => {
+          renderRegionOptions();
+          setRegionStatus(`行政区加载失败：${error?.message || String(error)}；可点击“刷新行政区”重试。`, "error");
+          return null;
+        })
+        .finally(() => { regionLoading = null; });
+      return regionLoading;
+    }
 
     function readConfig() {
       const next = {
@@ -122,12 +185,13 @@ export const landPublicityModule = {
         tradeMethods: [...FIXED_TRADE_METHODS],
         tradeStages: [...FIXED_TRADE_STAGES],
         district: elements.landPublicityDistrict.value.trim(),
-        provinceWide: elements.landPublicityProvinceWide.checked,
+        county: elements.landPublicityCounty.value.trim(),
+        provinceWide: false,
         location: elements.landPublicityLocation.value.trim(),
         landUses: checkedValues(root, "landUse"),
         startDate: elements.landPublicityStartDate.value,
         endDate: elements.landPublicityEndDate.value,
-        districtExact: elements.landPublicityDistrictExact.checked,
+        districtExact: false,
         generateMap: elements.landPublicityGenerateMap.checked,
         maxPages: "200",
         outputDirectory: elements.landPublicityOutputDirectory.value.trim(),
@@ -137,29 +201,27 @@ export const landPublicityModule = {
 
     function renderConfig() {
       setCheckedValues(root, "landUse", config.landUses);
+      renderRegionOptions();
       elements.landPublicityDistrict.value = config.district || "";
-      elements.landPublicityProvinceWide.checked = Boolean(config.provinceWide);
+      elements.landPublicityCounty.value = config.county || "";
       elements.landPublicityLocation.value = config.location || "";
-      elements.landPublicityDistrictExact.checked = Boolean(config.districtExact);
       elements.landPublicityStartDate.value = config.startDate || "";
       elements.landPublicityEndDate.value = config.endDate || "";
       elements.landPublicityGenerateMap.checked = Boolean(config.generateMap);
       elements.landPublicityOutputDirectory.value = config.outputDirectory || "";
-      elements.landPublicityDistrict.disabled = Boolean(config.provinceWide);
-      elements.landPublicityDistrictExact.disabled = Boolean(config.provinceWide);
+      elements.landPublicityCounty.disabled = !selectedCityRegion();
     }
 
     function validateLocal(next) {
       if (!next.outputDirectory) throw new Error("请先选择本机输出目录");
-      if (!next.provinceWide && !next.district && !next.location) throw new Error("请至少选择行政区、填写位置关键词，或勾选全省/不限制行政区");
       if (next.startDate && next.endDate && next.startDate > next.endDate) throw new Error("官网查询起始日期不能晚于结束日期");
-      const countyLocation = isAdministrativeLocation(next.location);
-      const provinceWide = next.provinceWide === true;
+      const provinceWide = !next.district && !next.county && !next.location;
+      const districtExact = Boolean(next.county);
       return {
         ...next,
         district: provinceWide ? "" : next.district,
-        location: provinceWide && countyLocation ? "" : next.location,
-        districtExact: provinceWide ? false : next.districtExact,
+        county: provinceWide ? "" : next.county,
+        districtExact,
         provinceWide,
         tradeForm: FIXED_TRADE_FORM,
         tradeMethods: [...FIXED_TRADE_METHODS],
@@ -296,26 +358,28 @@ export const landPublicityModule = {
         context.scope.on(elements.backFromLandPublicity, "click", () => context.navigate("home"));
         context.scope.on(elements.chooseLandPublicityOutput, "click", chooseOutputDirectory);
         context.scope.on(elements.clearLandPublicityFilters, "click", clearFilters);
-        context.scope.on(elements.landPublicityProvinceWide, "change", () => {
-          config.provinceWide = elements.landPublicityProvinceWide.checked;
-          if (config.provinceWide && isAdministrativeLocation(elements.landPublicityLocation.value)) {
-            config.district = "";
-            config.location = "";
-            config.districtExact = false;
-            elements.landPublicityDistrict.value = "";
-            elements.landPublicityLocation.value = "";
-            elements.landPublicityDistrictExact.checked = false;
-            setMessage(elements.landPublicityResultMessage, "已切换为全省查询，已清除之前保存的市/区县条件。", "ok");
-          }
-          elements.landPublicityDistrict.disabled = config.provinceWide;
-          elements.landPublicityDistrictExact.disabled = config.provinceWide;
+        context.scope.on(elements.reloadLandPublicityRegions, "click", loadRegionCatalog);
+        context.scope.on(elements.landPublicityDistrict, "change", async () => {
+          config.district = elements.landPublicityDistrict.value.trim();
+          config.county = "";
+          config.provinceWide = false;
+          config.districtExact = false;
+          renderRegionOptions();
+          await context.storage.save({ ...config });
+        });
+        context.scope.on(elements.landPublicityCounty, "change", async () => {
+          config.county = elements.landPublicityCounty.value.trim();
+          config.provinceWide = false;
+          config.districtExact = Boolean(config.county);
+          await context.storage.save({ ...config });
         });
         context.scope.on(elements.runLandPublicity, "click", run);
         context.scope.on(elements.openLandPublicityHtml, "click", () => openResultPath(lastResult?.htmlPath, "结果页"));
         context.scope.on(elements.openLandPublicityExcel, "click", () => openResultPath(lastResult?.excelPath, "Excel"));
         context.scope.on(elements.openLandPublicityMap, "click", () => openResultPath(lastResult?.mapPath, "地图"));
+        void loadRegionCatalog();
       },
-      activate() { renderConfig(); },
+      activate() { renderConfig(); if (!regionCatalog.length) void loadRegionCatalog(); },
       deactivate() {},
       dispose() {},
     };

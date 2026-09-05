@@ -8,6 +8,19 @@
   gap: 14px;
 }
 
+[data-module-id="land-publicity"] .land-publicity-administrative-fields {
+  grid-template-columns: minmax(130px, 0.85fr) minmax(130px, 0.85fr) minmax(200px, 1.4fr);
+  gap: 8px;
+  align-items: end;
+}
+
+[data-module-id="land-publicity"] .land-publicity-region-refresh {
+  min-height: 26px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 [data-module-id="land-publicity"] .land-publicity-option-group {
   min-width: 0;
   margin: 0;
@@ -93,8 +106,16 @@
   flex: 1;
 }
 
-[data-module-id="land-publicity"] .land-publicity-check-field {
-  justify-content: space-between;
+[data-module-id="land-publicity"] .land-publicity-region-status {
+  font-size: 12px;
+}
+
+[data-module-id="land-publicity"] .land-publicity-region-status[data-kind="error"] {
+  color: #b42318;
+}
+
+[data-module-id="land-publicity"] .land-publicity-region-status[data-kind="ok"] {
+  color: #027a48;
 }
 
 [data-module-id="land-publicity"] .land-publicity-output-row input {
@@ -142,6 +163,10 @@
 
 @media (max-width: 640px) {
   [data-module-id="land-publicity"] .land-publicity-field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  [data-module-id="land-publicity"] .land-publicity-administrative-fields {
     grid-template-columns: 1fr;
   }
 

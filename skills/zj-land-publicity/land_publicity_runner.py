@@ -174,31 +174,46 @@ def _district_code_prefix(value: Any) -> str:
 
 
 def _district_matches(request: Dict[str, Any], record: Dict[str, Any]) -> bool:
-    if request.get("provinceWide") or not request.get("district"):
+    if request.get("provinceWide"):
         return True
-    requested = _normalise_district_name(request["district"])
     district_name = _normalise_district_name(record.get("districtName"))
-    city_code = _city_code_for_district(request["district"])
-    if city_code:
-        actual_code = _district_code_prefix(record.get("districtCode"))
-        if actual_code:
-            return actual_code == city_code
-        # Older captures may omit districtCode. Keep the name fallback for
-        # those records, while a present code remains authoritative.
-        requested_city = requested[:-1] if requested.endswith("市") else requested
-        actual_city = district_name[:-1] if district_name.endswith("市") else district_name
-        return requested_city == actual_city
-    if request.get("districtExact"):
-        return requested == district_name
-    return requested in district_name
+    if request.get("district"):
+        requested = _normalise_district_name(request["district"])
+        city_code = _city_code_for_district(request["district"])
+        if city_code:
+            actual_code = _district_code_prefix(record.get("districtCode"))
+            if actual_code:
+                if actual_code != city_code:
+                    return False
+            else:
+                # Older captures may omit districtCode. Keep the name fallback
+                # for those records, while a present code remains authoritative.
+                requested_city = requested[:-1] if requested.endswith("市") else requested
+                actual_city = district_name[:-1] if district_name.endswith("市") else district_name
+                if requested_city != actual_city:
+                    return False
+        elif request.get("districtExact"):
+            if requested != district_name:
+                return False
+        elif requested not in district_name:
+            return False
+    if request.get("county"):
+        requested_county = _normalise_district_name(request["county"])
+        if request.get("districtExact"):
+            return requested_county == district_name
+        return requested_county in district_name
+    return True
 
 
 def _list_district_filter(request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """减少详情请求：列表接口先按已知行政区代码/名称预筛选。"""
     if request.get("provinceWide"):
         return None
+    county = _text(request.get("county"), 100)
     location = _text(request.get("location"), 160)
     # 区县/市级位置关键词本身就是明确的行政区条件。
+    if county:
+        return {"name": county, "exact": bool(request.get("districtExact"))}
     if re.search(r"(市|区|县)$", location):
         return {"name": location, "exact": bool(request.get("districtExact"))}
     district = _text(request.get("district"), 100)
@@ -236,6 +251,16 @@ def _list_record_matches_request(request: Dict[str, Any], record: Dict[str, Any]
     if request.get("tradeForm"):
         values = _field_values(record, {}, ("tradeForm", "transactionForm", "交易形式"))
         if values and not _contains_any(values, (request["tradeForm"],)):
+            return False
+
+    if request.get("county"):
+        record_district = _text(record.get("districtName"), 100)
+        requested_county = _normalise_district_name(request["county"])
+        actual_county = _normalise_district_name(record_district)
+        if request.get("districtExact"):
+            if requested_county != actual_county:
+                return False
+        elif requested_county not in actual_county:
             return False
 
     raw_location = _text(request.get("location"), 160)
@@ -279,8 +304,13 @@ def _list_server_filters(request: Dict[str, Any]) -> Dict[str, Any]:
     if request.get("provinceWide"):
         return filters
     region_name = _text(request.get("district"), 100)
+    county = _text(request.get("county"), 100)
     location = _text(request.get("location"), 160)
-    if re.fullmatch(r".+(?:市|区|县)", location):
+    if county:
+        filters["regionName"] = county
+        if region_name and region_name != county:
+            filters["fallbackRegionName"] = region_name
+    elif re.fullmatch(r".+(?:市|区|县)", location):
         filters["regionName"] = location
         if region_name and region_name != location:
             filters["fallbackRegionName"] = region_name
@@ -406,6 +436,7 @@ def validate_request(request: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("LAND_MAX_PAGES_INVALID")
 
     district = _text(request.get("district"), 100)
+    county = _text(request.get("county"), 100)
     location = _text(request.get("location"), 160)
     province_wide = bool(request.get("provinceWide", False))
     if province_wide:
@@ -415,15 +446,18 @@ def validate_request(request: Dict[str, Any]) -> Dict[str, Any]:
         district_exact = False
     else:
         district_exact = bool(request.get("districtExact", False))
-    if not province_wide and not district and not location:
+    if not province_wide and not district and not county and not location:
         raise ValueError("LAND_DISTRICT_OR_LOCATION_REQUIRED")
     if district and len(district) > 100:
         raise ValueError("LAND_DISTRICT_TOO_LONG")
+    if county and len(county) > 100:
+        raise ValueError("LAND_COUNTY_TOO_LONG")
     return {
         "tradeForm": trade_form,
         "tradeMethods": _list(request.get("tradeMethods"), TRADE_METHODS, "tradeMethods"),
         "tradeStages": _list(request.get("tradeStages"), TRADE_STAGES, "tradeStages"),
         "district": district,
+        "county": county,
         "location": location,
         "landUses": _list(request.get("landUses"), LAND_USES, "landUses"),
         "startDate": start_date,
@@ -450,7 +484,7 @@ def _query_signature(request: Dict[str, Any]) -> str:
     query_fields = {
         key: request.get(key)
         for key in (
-            "tradeForm", "tradeMethods", "tradeStages", "district", "provinceWide", "location",
+            "tradeForm", "tradeMethods", "tradeStages", "district", "county", "provinceWide", "location",
             "landUses", "startDate", "endDate", "startYear", "quotePreset", "quoteStartDate",
             "quoteEndDate", "startPriceMin", "startPriceMax", "areaMin", "areaMax", "areaUnit",
             "districtExact", "maxPages",
@@ -469,7 +503,7 @@ def _safe_filename_fragment(value: str, fallback: str) -> str:
 
 def _result_stem(request: Dict[str, Any]) -> str:
     """生成可读且稳定的结果文件名；指纹保证相近条件不会互相覆盖。"""
-    scope = "全省" if request.get("provinceWide") else (request.get("district") or request.get("location") or "指定范围")
+    scope = "全省" if request.get("provinceWide") else (request.get("county") or request.get("district") or request.get("location") or "指定范围")
     uses = "、".join(sorted(request.get("landUses") or [])) or "全部用途"
     if request.get("startDate") or request.get("endDate"):
         date_scope = f"{request.get('startDate') or '不限'}至{request.get('endDate') or '不限'}"
@@ -784,6 +818,10 @@ def _filter_condition_summary(request: Dict[str, Any]) -> str:
         district = _text(request.get("district"), 100)
         suffix = "（districtName精确匹配）" if request.get("districtExact") else ""
         conditions.append(f"行政区={district}{suffix}")
+    if request.get("county"):
+        county = _text(request.get("county"), 100)
+        suffix = "（districtName精确匹配）" if request.get("districtExact") else ""
+        conditions.append(f"区县={county}{suffix}")
     if request.get("location"):
         conditions.append(f"位置关键词={_text(request.get('location'), 160)}")
     if request.get("tradeForm"):
