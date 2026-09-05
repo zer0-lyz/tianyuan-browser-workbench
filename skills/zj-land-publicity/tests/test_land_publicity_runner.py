@@ -15,8 +15,8 @@ class LandPublicityDateTests(unittest.TestCase):
         filters = _list_server_filters(request)
         self.assertEqual(filters["regionName"], "镇海区")
         self.assertEqual(filters["fallbackRegionName"], "宁波市")
-        self.assertEqual(filters["publishStartTime"], 1735660800000)
-        self.assertEqual(filters["publishEndTime"], 1738339199999)
+        self.assertEqual(filters["enrollStartTime"], 1735660800000)
+        self.assertEqual(filters["nowTime"], 1738339199999)
 
     def test_region_tree_resolves_all_descendant_codes(self):
         class Response:
@@ -143,7 +143,7 @@ class LandPublicityDateTests(unittest.TestCase):
         rows, _ = filter_records(enriched, request)
         self.assertEqual([row["record"]["releaseTime"] for row in rows], ["2025-01-01", "2025-01-31"])
         validated = validate_request({"outputDirectory": os.getcwd(), "provinceWide": True, **request})
-        self.assertEqual(validated["maxPages"], 50)
+        self.assertEqual(validated["maxPages"], 200)
 
     def test_start_date_cannot_follow_end_date(self):
         with self.assertRaisesRegex(ValueError, "LAND_DATE_RANGE_INVALID"):
