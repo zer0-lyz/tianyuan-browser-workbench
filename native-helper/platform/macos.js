@@ -49,6 +49,17 @@ function createMacOSAdapter(options = {}) {
     ].join("\n"));
   }
 
+  async function chooseWordFiles() {
+    return await runAppleScript([
+      "set selectedFiles to choose file with prompt \"选择需要统一表格格式的 Word 文档（.docx）\" of type {\"org.openxmlformats.wordprocessingml.document\"} with multiple selections allowed",
+      "set outputText to \"\"",
+      "repeat with selectedFile in selectedFiles",
+      "set outputText to outputText & POSIX path of selectedFile & linefeed",
+      "end repeat",
+      "return outputText",
+    ].join("\n"));
+  }
+
   async function chooseXlsxFile() {
     return await runAppleScript([
       "set selectedFile to choose file with prompt \"选择折旧摊销预测输入工作簿（.xlsx）\"",
@@ -282,6 +293,7 @@ function createMacOSAdapter(options = {}) {
     chooseDirectory,
     openPath,
     chooseWorkbookFiles,
+    chooseWordFiles,
     chooseXlsxFile,
     inspectActiveConversation,
     createCredentialReference,

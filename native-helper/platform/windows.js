@@ -101,6 +101,18 @@ function createWindowsAdapter(options = {}) {
     ].join("\n"));
   }
 
+  async function chooseWordFiles() {
+    return await runPowerShell([
+      powerShellPreamble(),
+      "$dialog = New-Object System.Windows.Forms.OpenFileDialog",
+      "$dialog.Title = '选择需要统一表格格式的 Word 文档（.docx）'",
+      "$dialog.Filter = 'Word 文档 (*.docx)|*.docx'",
+      "$dialog.Multiselect = $true",
+      "if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { exit 2 }",
+      "$dialog.FileNames | ForEach-Object { [Console]::Out.WriteLine($_) }",
+    ].join("\n"));
+  }
+
   async function chooseXlsxFile() {
     return await runPowerShell([
       powerShellPreamble(),
@@ -489,6 +501,7 @@ function createWindowsAdapter(options = {}) {
     chooseDirectory,
     openPath,
     chooseWorkbookFiles,
+    chooseWordFiles,
     chooseXlsxFile,
     async inspectActiveConversation() {
       return {

@@ -1,7 +1,7 @@
 import { landPublicityTemplate } from "./template.js";
 
 const FIXED_TRADE_FORM = "国有土地";
-const FIXED_TRADE_METHODS = ["挂牌出让", "拍卖出让"];
+const FIXED_TRADE_METHODS = ["挂牌出让", "挂牌租赁", "拍卖出让", "拍卖租赁"];
 const FIXED_TRADE_STAGES = ["结果公示"];
 
 const DEFAULT_CONFIG = {
@@ -83,7 +83,7 @@ function filterConditionSummary(request) {
   conditions.push(`交易方式=${FIXED_TRADE_METHODS.join("、")}`);
   conditions.push(`交易阶段=${FIXED_TRADE_STAGES.join("、")}`);
   if (request.landUses?.length) conditions.push(`土地用途=${request.landUses.join("、")}`);
-  if (request.startDate || request.endDate) conditions.push(`成交公示日期=${request.startDate || "不限"}至${request.endDate || "不限"}`);
+  if (request.startDate || request.endDate) conditions.push(`官网查询日期=${request.startDate || "不限"}至${request.endDate || "不限"}`);
   conditions.push("抓取页数上限=50");
   return conditions.join("；") || "未设置额外筛选条件";
 }
@@ -148,8 +148,8 @@ export const landPublicityModule = {
     function validateLocal(next) {
       if (!next.outputDirectory) throw new Error("请先选择本机输出目录");
       if (!next.provinceWide && !next.district && !next.location) throw new Error("请至少选择行政区、填写位置关键词，或勾选全省/不限制行政区");
-      if (!next.startDate || !next.endDate) throw new Error("请填写成交公示起始日期和结束日期");
-      if (next.startDate > next.endDate) throw new Error("成交公示起始日期不能晚于结束日期");
+      if (!next.startDate || !next.endDate) throw new Error("请填写官网查询起始日期和结束日期");
+      if (next.startDate > next.endDate) throw new Error("官网查询起始日期不能晚于结束日期");
       return {
         ...next,
         tradeForm: FIXED_TRADE_FORM,
@@ -251,7 +251,7 @@ export const landPublicityModule = {
         const writtenCount = Number(result.writtenCount || 0);
         const warningCount = (result.filterSummary?.warnings || []).length + (result.filterSummary?.unsupportedFilters || []).length;
         const emptySuggestion = writtenCount === 0
-          ? `结果为 0 条。当前筛选条件：${filterConditionSummary(request)}。建议检查成交公示日期、行政区或位置关键词，以及接口是否返回记录。`
+          ? `结果为 0 条。当前筛选条件：${filterConditionSummary(request)}。建议检查官网查询日期、行政区或位置关键词，以及接口是否返回记录。`
           : "";
         setMessage(elements.landPublicityResultMessage, `已完成：Excel ${writtenCount} 条；无坐标 ${result.noCoordinateCount || 0} 条。${warningCount ? `有 ${warningCount} 项筛选限制已在结果页说明。` : ""}${emptySuggestion}`, warningCount || emptySuggestion ? "warn" : "ok");
         await openResultPath(result.htmlPath, "结果页");

@@ -246,6 +246,13 @@ const LAND_PUBLICITY_SCRIPT = path.join(
   "land_publicity_runner.py",
 );
 const PRINT_OUTPUT_MODES = new Set(["overwrite", "copy_in_source", "new_directory"]);
+const TABLE_FORMAT_SCRIPT = path.join(
+  PRINT_SKILLS_DIR,
+  "table-format",
+  "scripts",
+  "format_word_tables.py",
+);
+const TABLE_FORMAT_OUTPUT_MODES = new Set(["overwrite", "copy_in_source", "new_directory"]);
 const DEPRECIATION_CAPEX_ACTIONS = Object.freeze({
   depreciation_capex_forecast_prepare: "prepare",
   depreciation_capex_forecast_status: "status",
@@ -1710,6 +1717,14 @@ async function chooseWorkbookFiles() {
   };
 }
 
+async function chooseTableFormatWordFiles() {
+  const result = await platformAdapter.chooseWordFiles();
+  return {
+    ...result,
+    action: "table_format_word_files_selected",
+  };
+}
+
 async function chooseWorkbookDirectory() {
   const result = await chooseDirectory("选择包含待处理 Excel 文件的文件夹");
   return {
@@ -1781,6 +1796,56 @@ async function choosePrintOutputDirectory() {
   };
 }
 
+async function chooseTableFormatOutputDirectory() {
+  const result = await chooseDirectory("选择表格设置处理后文件的存放位置");
+  return {
+    ...result,
+    action: "table_format_output_directory_selected",
+  };
+}
+
+async function chooseLandPublicityOutputDirectory() {
+  const result = await chooseDirectory("选择浙江土地成交公示输出目录");
+  const rawParentPath = result.paths?.[0] || "";
+  if (!result.ok || !rawParentPath) {
+    return {
+      ...result,
+      action: "land_publicity_output_directory_selected",
+      path: "",
+      paths: [],
+      security: { credentialsReturned: false },
+    };
+  }
+  try {
+    const parentPath = validateExportDirectory(rawParentPath);
+    const outputPath = path.join(parentPath, "浙江土地成交公示");
+    const directoryName = path.basename(outputPath);
+    const alreadyExists = fs.existsSync(outputPath);
+    fs.mkdirSync(outputPath, { recursive: true, mode: 0o700 });
+    const selectedPath = fs.realpathSync(outputPath);
+    return {
+      ...result,
+      ok: true,
+      action: "land_publicity_output_directory_selected",
+      path: selectedPath,
+      paths: [selectedPath],
+      parentPath,
+      directoryName,
+      createdDirectory: !alreadyExists,
+      security: { credentialsReturned: false },
+    };
+  } catch {
+    return {
+      ok: false,
+      action: "land_publicity_output_directory_selected",
+      path: "",
+      paths: [],
+      reason: "LAND_OUTPUT_DIRECTORY_CREATE_FAILED",
+      security: { credentialsReturned: false },
+    };
+  }
+}
+
 function isWorkbookPath(value) {
   const extension = path.extname(String(value || "")).toLowerCase();
   return extension === ".xlsx" || extension === ".xlsm";
@@ -1831,6 +1896,29 @@ function collectWorkbookFiles(inputPaths) {
   return results;
 }
 
+function isWordDocumentPath(value) {
+  return path.extname(String(value || "")).toLowerCase() === ".docx";
+}
+
+function collectWordDocumentFiles(inputPaths) {
+  const results = [];
+  const seen = new Set();
+  for (const value of Array.isArray(inputPaths) ? inputPaths : []) {
+    const raw = String(value || "").trim();
+    if (!raw || raw.includes("\0") || !path.isAbsolute(raw)) throw new Error("TABLE_FORMAT_INPUT_INVALID");
+    const resolved = fs.realpathSync(raw);
+    const stat = fs.statSync(resolved);
+    if (!stat.isFile()) throw new Error("TABLE_FORMAT_INPUT_MUST_BE_FILE");
+    if (!isWordDocumentPath(resolved)) throw new Error("TABLE_FORMAT_DOCX_ONLY");
+    if (path.basename(resolved).startsWith("~$")) continue;
+    if (seen.has(resolved)) continue;
+    seen.add(resolved);
+    results.push(resolved);
+  }
+  if (!results.length) throw new Error("NO_TABLE_FORMAT_DOCUMENTS_FOUND");
+  return results;
+}
+
 function uniquePrintTarget(directory, sourcePath) {
   const extension = path.extname(sourcePath);
   const stem = path.basename(sourcePath, extension);
@@ -1850,6 +1938,18 @@ function uniqueLinkRestoreTarget(directory, sourcePath) {
   let index = 2;
   while (fs.existsSync(target)) {
     target = path.join(directory, `${stem}-链接恢复 (${index})${extension}`);
+    index += 1;
+  }
+  return target;
+}
+
+function uniqueTableFormatTarget(directory, sourcePath) {
+  const extension = path.extname(sourcePath);
+  const stem = path.basename(sourcePath, extension);
+  let target = path.join(directory, `${stem}-表格设置${extension}`);
+  let index = 2;
+  while (fs.existsSync(target)) {
+    target = path.join(directory, `${stem}-表格设置 (${index})${extension}`);
     index += 1;
   }
   return target;
@@ -1934,6 +2034,198 @@ function runPythonPrintScript({ scriptPath, workbookPath, onLine }) {
       }
     });
   });
+}
+
+function runPythonTableFormatScript(documentPath, onLine) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(PYTHON_BIN, [TABLE_FORMAT_SCRIPT, documentPath], {
+      env: {
+        ...process.env,
+        PYTHONUNBUFFERED: "1",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const logLines = [];
+    const consume = (line, stream) => {
+      const text = String(line || "").trim();
+      if (!text) return;
+      logLines.push({ stream, text });
+      onLine?.(text, stream);
+    };
+    readline.createInterface({ input: child.stdout }).on("line", (line) => consume(line, "stdout"));
+    readline.createInterface({ input: child.stderr }).on("line", (line) => consume(line, "stderr"));
+    child.on("error", reject);
+    child.on("close", (code, signal) => {
+      if (code === 0) {
+        resolve({ code, signal: signal || null, logLines });
+        return;
+      }
+      const diagnostic = [...logLines].reverse().find((item) => item.stream === "stderr")?.text || "";
+      const error = new Error(diagnostic ? `TABLE_FORMAT_SCRIPT_FAILED:${diagnostic}` : "TABLE_FORMAT_SCRIPT_FAILED");
+      error.exitCode = code;
+      error.signal = signal || null;
+      error.logLines = logLines;
+      reject(error);
+    });
+  });
+}
+
+function readTableFormatSummary(logLines = []) {
+  for (const item of [...logLines].reverse()) {
+    try {
+      const parsed = JSON.parse(item.text);
+      if (parsed?.event === "saved") return parsed;
+    } catch {}
+  }
+  return {};
+}
+
+async function runTableFormat(message, emit) {
+  const outputMode = String(message?.outputMode || "");
+  const results = [];
+  try {
+    if (!fs.existsSync(TABLE_FORMAT_SCRIPT)) throw new Error("TABLE_FORMAT_SCRIPT_NOT_FOUND");
+    if (!TABLE_FORMAT_OUTPUT_MODES.has(outputMode)) throw new Error("TABLE_FORMAT_OUTPUT_MODE_INVALID");
+    const sourceFiles = collectWordDocumentFiles(message.inputPaths);
+    const outputDir = outputMode === "new_directory"
+      ? validateExportDirectory(message.outputDir)
+      : "";
+    emit({
+      ok: true,
+      event: "progress",
+      phase: "ready",
+      percent: 3,
+      current: 0,
+      total: sourceFiles.length,
+      message: `已发现 ${sourceFiles.length} 个 Word 文档`,
+    });
+
+    for (let index = 0; index < sourceFiles.length; index += 1) {
+      const sourcePath = sourceFiles[index];
+      const destinationDirectory = outputMode === "new_directory"
+        ? outputDir
+        : path.dirname(sourcePath);
+      const finalPath = outputMode === "overwrite"
+        ? sourcePath
+        : uniqueTableFormatTarget(destinationDirectory, sourcePath);
+      const temporaryPath = path.join(
+        path.dirname(finalPath),
+        `.${path.basename(finalPath, path.extname(finalPath))}.tianyuan-${randomUUID()}${path.extname(finalPath)}`,
+      );
+      const startPercent = 5 + Math.round(index / sourceFiles.length * 90);
+      emit({
+        ok: true,
+        event: "progress",
+        phase: "processing",
+        percent: startPercent,
+        current: index + 1,
+        total: sourceFiles.length,
+        sourcePath,
+        outputPath: finalPath,
+        message: `正在设置 ${path.basename(sourcePath)}`,
+      });
+
+      fs.copyFileSync(sourcePath, temporaryPath);
+      try {
+        const scriptResult = await runPythonTableFormatScript(temporaryPath, (text, stream) => {
+          let messageText = text;
+          try {
+            const parsed = JSON.parse(text);
+            if (parsed?.event === "repaired") messageText = `已修复 ${parsed.repairedRelationships || 0} 个无效内部关系`;
+            if (parsed?.event === "formatted") messageText = `已识别并设置 ${parsed.tableCount || 0} 个表格`;
+            if (parsed?.event === "saved") messageText = `已保存 ${parsed.fileName || path.basename(sourcePath)}`;
+          } catch {}
+          emit({
+            ok: true,
+            event: "progress",
+            phase: "processing",
+            percent: Math.min(94, startPercent + 2),
+            current: index + 1,
+            total: sourceFiles.length,
+            sourcePath,
+            outputPath: finalPath,
+            message: messageText,
+            stream,
+          });
+        });
+        await verifyWorkbookArchive(temporaryPath);
+        const summary = readTableFormatSummary(scriptResult.logLines);
+        replaceProcessedFile(temporaryPath, finalPath);
+        results.push({
+          ok: true,
+          sourcePath,
+          outputPath: finalPath,
+          tableCount: Number(summary.tableCount || 0),
+          repairedRelationships: Number(summary.repairedRelationships || 0),
+          cleanedRemarkValues: Number(summary.cleanedRemarkValues || 0),
+          overwritten: outputMode === "overwrite",
+          archiveVerified: true,
+        });
+        emit({
+          ok: true,
+          event: "progress",
+          phase: "verified",
+          percent: 5 + Math.round((index + 1) / sourceFiles.length * 90),
+          current: index + 1,
+          total: sourceFiles.length,
+          sourcePath,
+          outputPath: finalPath,
+          message: `已完成并校验 ${path.basename(finalPath)}`,
+        });
+      } catch (error) {
+        if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath);
+        results.push({
+          ok: false,
+          sourcePath,
+          outputPath: finalPath,
+          reason: error?.message || String(error),
+          exitCode: error?.exitCode ?? null,
+        });
+        emit({
+          ok: false,
+          event: "progress",
+          phase: "file_failed",
+          percent: 5 + Math.round((index + 1) / sourceFiles.length * 90),
+          current: index + 1,
+          total: sourceFiles.length,
+          sourcePath,
+          outputPath: finalPath,
+          message: `${path.basename(sourcePath)} 处理失败`,
+        });
+      }
+    }
+
+    const successCount = results.filter((item) => item.ok).length;
+    const finalOk = successCount === results.length;
+    emit({
+      ok: finalOk,
+      event: "complete",
+      phase: finalOk ? "completed" : "completed_with_errors",
+      percent: 100,
+      outputMode,
+      outputDir: outputDir || null,
+      total: results.length,
+      successCount,
+      failedCount: results.length - successCount,
+      results,
+      message: finalOk
+        ? `全部完成：${successCount} 个 Word 文档已处理并校验`
+        : `处理完成：成功 ${successCount} 个，失败 ${results.length - successCount} 个`,
+      reason: finalOk ? null : "TABLE_FORMAT_BATCH_PARTIAL_FAILURE",
+      security: { credentialsReturned: false },
+    });
+  } catch (error) {
+    emit({
+      ok: false,
+      event: "complete",
+      phase: "failed",
+      percent: 0,
+      outputMode,
+      reason: error?.message || String(error),
+      results,
+      security: { credentialsReturned: false },
+    });
+  }
 }
 
 async function runPrintFormat(message, emit) {
@@ -2286,6 +2578,7 @@ function normalizeLandPublicityRequest(input) {
     district: String(request.district || "").trim().slice(0, 100),
     location: String(request.location || "").trim().slice(0, 160),
     startDate: String(request.startDate || "").trim().slice(0, 20),
+    endDate: String(request.endDate || "").trim().slice(0, 20),
     startYear: String(request.startYear || "").trim().slice(0, 4),
     quotePreset: String(request.quotePreset || "all").trim().slice(0, 30),
     quoteStartDate: String(request.quoteStartDate || "").trim().slice(0, 20),
@@ -2957,6 +3250,16 @@ async function health({ probe = false } = {}) {
     }
   }
 
+  const auth = probe ? null : readCliAuthState();
+  const cli = probe
+    ? await checkCli()
+    : {
+        ok: false,
+        reason: "CLI_NOT_PROBED",
+        authenticated: auth.authenticated,
+        authExpiresAt: auth.expiresAt,
+      };
+
   return {
     ok: true,
     service: "tianyuan-native-host",
@@ -2965,7 +3268,7 @@ async function health({ probe = false } = {}) {
     mcpUrl,
     sessionReady: Boolean(sessionId && initialized),
     mcp,
-    cli: await checkCli(),
+    cli,
     security: {
       credentialsReturned: false,
     },
@@ -3040,6 +3343,9 @@ async function handle(message) {
   if (message?.action === "select_print_workbook_files") {
     return await chooseWorkbookFiles();
   }
+  if (message?.action === "select_table_format_word_files") {
+    return await chooseTableFormatWordFiles();
+  }
   if (message?.action === "select_print_workbook_directory") {
     return await chooseWorkbookDirectory();
   }
@@ -3052,8 +3358,11 @@ async function handle(message) {
   if (message?.action === "select_print_output_directory") {
     return await choosePrintOutputDirectory();
   }
+  if (message?.action === "select_table_format_output_directory") {
+    return await chooseTableFormatOutputDirectory();
+  }
   if (message?.action === "select_land_publicity_output_directory") {
-    return await chooseDirectory("选择浙江土地成交公示输出目录");
+    return await chooseLandPublicityOutputDirectory();
   }
   if (message?.action === "open_land_publicity_path") {
     const resolved = landOpenPathReadback(message.path);
@@ -3151,6 +3460,7 @@ async function runSelfTest() {
       && fs.existsSync(PRINT_FORMAT_SCRIPTS.detail)
       && fs.existsSync(PRINT_FORMAT_SCRIPTS.declaration)
       && fs.existsSync(LINK_RESTORE_SCRIPT)
+      && fs.existsSync(TABLE_FORMAT_SCRIPT)
       && fs.existsSync(LAND_PUBLICITY_SCRIPT)
       && platform.supported
       && depreciation.ok,
@@ -3163,6 +3473,7 @@ async function runSelfTest() {
       detail: fs.existsSync(PRINT_FORMAT_SCRIPTS.detail),
       declaration: fs.existsSync(PRINT_FORMAT_SCRIPTS.declaration),
       linkRestore: fs.existsSync(LINK_RESTORE_SCRIPT),
+      tableFormat: fs.existsSync(TABLE_FORMAT_SCRIPT),
       landPublicity: fs.existsSync(LAND_PUBLICITY_SCRIPT),
     },
     depreciationCapexForecast: depreciation,
@@ -3213,6 +3524,9 @@ if (process.argv.includes("--connector-bridge")) {
     if (message?.action === "run_print_format") {
       return runPrintFormat(message, writeMessage);
     }
+    if (message?.action === "run_table_format") {
+      return runTableFormat(message, writeMessage);
+    }
     if (message?.action === "run_link_restore") {
       return runLinkRestore(message, writeMessage);
     }
@@ -3233,4 +3547,3 @@ if (process.argv.includes("--connector-bridge")) {
       });
   });
 }
-    endDate: String(request.endDate || "").trim().slice(0, 20),

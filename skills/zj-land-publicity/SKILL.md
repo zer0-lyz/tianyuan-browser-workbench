@@ -7,7 +7,7 @@ description: "抓取浙江省自然资源网上交易系统（zjzrzyjy.com）土
 
 ## 概述
 
-抓取浙江省自然资源网上交易系统（zjzrzyjy.com）的土地成交公示数据，从列表 API 获取记录，按列表字段和 content 内容收窄候选，再读取详情复核并整理为 Excel。工作台界面固定查询国有土地、挂牌出让/拍卖出让、结果公示，并使用成交公示起始日期和结束日期筛选。坐标功能优先读取详情接口 `queryResourceDetail` 的 `resourceCoordinate`，并可额外生成坐标 JSON / 地图 HTML；如果接口缺失，再回退到宗地界址图 PDF 渲染流程。
+抓取浙江省自然资源网上交易系统（zjzrzyjy.com）土地成交页面实际使用的成交结果数据，从 `land-bidding` 列表 API 获取记录，按行政区和官网查询日期收窄候选，再读取详情复核并整理为 Excel。工作台界面固定查询国有土地、挂牌出让/挂牌租赁/拍卖出让/拍卖租赁、结果公示；查询日期按官网列表的报名/挂牌开始时间，结果表同时保留成交公示发布时间。坐标功能优先读取详情接口 `queryResourceDetail` 的 `resourceCoordinate`，并可额外生成坐标 JSON / 地图 HTML；如果接口缺失，再回退到宗地界址图 PDF 渲染流程。
 
 ## 运行前确认
 
@@ -19,27 +19,25 @@ description: "抓取浙江省自然资源网上交易系统（zjzrzyjy.com）土
 - 是否需要导出坐标，或同时生成地图
 - 输出文件路径，若不提供则脚本会自动命名
 
-工作台中的交易条件不提供选择项，抓取页数由模块内部固定为 50 页。列表接口支持 `regionCode`、`publishStartTime` 和 `publishEndTime`，运行器会先按行政区和成交公示日期向服务器请求候选；土地用途、位置关键词等接口未提供的条件，再在候选列表和详情阶段复核。旧版请求中的年份、报价时间、价格和面积参数仍由运行器兼容处理，但新版界面不再展示这些筛选项。
+工作台中的交易条件不提供选择项，抓取页数由模块内部固定为 50 页。当前网页使用的列表接口支持 `regionCode`、`enrollStartTime`、`nowTime` 和 `resourceStage=CJ`，运行器会先按行政区和官网查询日期向服务器请求候选；列表返回的 `ggPubTime` 作为结果表中的成交公示发布时间，查询日期本身使用 `_queryDate` 保存的报名/挂牌开始时间做本地闭区间复核。土地用途、位置关键词等条件再在候选列表和详情阶段复核。旧的 `queryPublicityList` 接口仍保留在脚本中供历史调用，但工作台不再使用它。
 
 如果信息不全，先询问用户，不要直接使用默认值跑全量。
 
 ## API 信息
 
-### 列表接口
-- **URL**: `https://www.zjzrzyjy.com/trade/view/publicity/queryPublicityList`
+### 成交结果列表接口
+- **URL**: `https://www.zjzrzyjy.com/trade/view/landbidding/querylandbidding`
 - **方法**: GET
 - **参数**:
-  - `type=3`: 成交公示类型
-  - `current`: 页码
-  - `size`: 每页条数（建议 50）
+  - `currentPage`: 页码，从 1 开始
+  - `pageSize`: 每页条数（运行器使用 50）
   - `regionCode`: 行政区代码，可传逗号分隔的代码集合
-  - `publishStartTime` / `publishEndTime`: 发布时间起止时间戳（毫秒）
-  - `sort=desc`: 按发布时间降序
-- **Referer**: `https://www.zjzrzyjy.com/landWeb/publicityList`
+  - `enrollStartTime`: 查询起始时间戳（毫秒）
+  - `nowTime`: 查询结束时间戳（毫秒）
+  - `resourceStage=CJ`: 只读取成交结果阶段
+- **Referer**: `https://www.zjzrzyjy.com/landView/land-bidding`
 
-列表接口支持的条件参数为：
-  - `regionCode`: 行政区代码集合；运行器从官网行政区树解析地市/区县代码
-  - `publishStartTime`、`publishEndTime`: 发布时间起止时间戳（毫秒）
+运行器从官网行政区树解析地市/区县代码；接口返回的 `ggPubTime` 是成交公示发布时间，日期筛选最终以该字段复核。
 
 土地用途、位置关键词、交易方式等未被该接口支持的条件，不会伪装成服务器端筛选；运行器通过 `record_filter` 在详情请求前收窄候选，缺失字段的记录保留并交由详情阶段判断。
 
@@ -61,23 +59,26 @@ description: "抓取浙江省自然资源网上交易系统（zjzrzyjy.com）土
 
 | API字段 | 说明 |
 |---------|------|
-| `publicityId` | 公示编号（如 GS330114260509B017） |
-| `sourceId` | 地块资源 ID（用于拼接 source-detail URL、获取附件列表） |
-| `sourceCode` | 地块编号/宗地编码（也是公示标题） |
-| `districtName` | 行政区名称 |
-| `districtCode` | 行政区代码 |
-| `releaseTime` | 发布时间 |
-| `content` | HTML 格式的土地详情表格（最重要） |
-| `tradeType` | 交易方式 |
+| `resourceId` | 地块资源 ID，归一化为 `sourceId`（用于详情和附件接口） |
+| `resourceNumber` | 地块编号/公示编号，归一化为 `sourceCode` 和 `publicityId` |
+| `xzqName` | 行政区名称，归一化为 `districtName` |
+| `regionCode` | 行政区代码，归一化为 `districtCode` |
+| `ggPubTime` | 成交公示发布时间，归一化为 `releaseTime` |
+| `planUse` | JSON 土地用途，归一化为 `landUse` |
+| `resourceLocation` | 地块位置 |
+| `landAreaForAre` / `landArea` | 土地面积（亩）/平方米 |
+| `startPrice` / `cjj` | 起始价/成交价，接口单位通常为万元 |
+| `transactionMode` | `GP`/`PM`，结合 `transactionType` 归一化为交易方式 |
+| `resourceStage` | `CJ` 归一化为“结果公示” |
 
-工作台按 `releaseTime` 对成交公示日期执行起止日期闭区间筛选，起始日和结束日均包含。
+工作台按归一化后的 `_queryDate`（来源为 `enrollStartTime`/`listingStartTime`）对官网查询日期执行起止日期闭区间筛选，起始日和结束日均包含；Excel 的“发布时间”列使用 `releaseTime`（来源为 `ggPubTime`）。
 
 ### 字段清洗规则
 
-1. **成交结果**: 去除"万元"、"元/平方米"等单位，只保留数字
-2. **土地面积(平方米)**: 根据亩数计算 = 亩 × 666.67（保留 2 位小数）
-3. **土地面积(亩)**: 从 HTML 提取数值
-4. **出让年限**: 提取"数字+年"格式中的数字
+1. **成交结果**: 新接口的 `cjj` 按万元记录，直接写入成交总价；单价按成交总价×10000÷平方米计算
+2. **起始价**: 新接口的 `startPrice` 按万元记录，直接写入起始总价；单价按起始总价×10000÷平方米计算
+3. **土地面积**: 优先使用 `landAreaForAre` 和 `landArea`；缺失平方米时按亩×666.67计算
+4. **出让年限**: 优先读取详情 `transferPeriodTo`，否则从 `assignmentPeriod` 提取“数字+年”
 
 ## 输出字段
 

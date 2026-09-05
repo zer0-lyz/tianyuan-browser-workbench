@@ -637,6 +637,9 @@ function main() {
       "src/modules/feedback/module.js",
       "src/modules/feedback/template.js",
       "src/modules/feedback/styles.css",
+      "src/modules/table-format/module.js",
+      "src/modules/table-format/template.js",
+      "src/modules/table-format/styles.css",
     ],
   );
   copyDir(
@@ -656,6 +659,8 @@ function main() {
     "depreciation-capex-forecast/scripts/depreciation_forecast/cli.py",
     "depreciation-capex-forecast/scripts/depreciation_forecast/model.py",
     "depreciation-capex-forecast/scripts/depreciation_forecast/workbook.py",
+    "table-format/SKILL.md",
+    "table-format/scripts/format_word_tables.py",
   ]);
   copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), path.join(runtimeProjectRoot, "plugins", "tianyuan-browser-connector"));
   copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), userPluginRoot);
@@ -665,6 +670,7 @@ function main() {
     "appraisal-declaration-print-format",
     "asset-link-restore",
     "zj-land-publicity",
+    "table-format",
   ]) {
     copyDir(path.join(repoRoot, "skills", skillName), path.join(printSkillsRoot, skillName));
   }

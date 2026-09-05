@@ -1,0 +1,68 @@
+[data-module-id="table-format"] .table-format-panel {
+  display: grid;
+  gap: 12px;
+}
+
+[data-module-id="table-format"] .table-format-preset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+[data-module-id="table-format"] .table-format-preset span {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 5px 8px;
+}
+
+[data-module-id="table-format"] .table-format-file-list,
+[data-module-id="table-format"] .table-format-result-list {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 0;
+}
+
+[data-module-id="table-format"] .table-format-file-list li,
+[data-module-id="table-format"] .table-format-result-list li {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  padding: 7px 9px;
+}
+
+[data-module-id="table-format"] .table-format-file-list li {
+  color: var(--text);
+}
+
+[data-module-id="table-format"] .table-format-result-list li[data-kind="ok"] {
+  color: var(--success, #16803c);
+}
+
+[data-module-id="table-format"] .table-format-result-list li[data-kind="error"] {
+  color: var(--danger, #b42318);
+}
+
+[data-module-id="table-format"] .table-format-run-panel progress {
+  height: 12px;
+  width: 100%;
+}
+
+[data-module-id="table-format"] .table-format-counts {
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 12px;
+}
+
+[data-module-id="table-format"] .table-format-counts strong {
+  color: var(--text);
+}

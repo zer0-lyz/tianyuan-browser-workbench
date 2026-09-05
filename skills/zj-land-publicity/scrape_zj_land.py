@@ -458,6 +458,166 @@ def fetch_region_codes(region_name):
     return []
 
 
+def _land_bidding_json_list(value):
+    """解析 land-bidding 接口中的 JSON 数组字段。"""
+    if isinstance(value, list):
+        return value
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value) if isinstance(value, str) else value
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _land_bidding_use_names(record):
+    names = []
+    for item in _land_bidding_json_list(record.get("planUse")):
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("NAME_") or item.get("name") or "").strip()
+        if name and name not in names:
+            names.append(name)
+    for value in (record.get("primaryLandUse"), record.get("landUse")):
+        name = str(value or "").strip()
+        if name and name not in names:
+            names.append(name)
+    return "、".join(names)
+
+
+def _land_bidding_transaction_label(record):
+    mode = str(record.get("transactionMode") or record.get("tradeMode") or "").upper()
+    transaction_type = str(record.get("transactionType") or "").upper()
+    is_lease = transaction_type in {"ZL", "LEASE", "RENT"} or "租" in str(record.get("resourceNumber") or "")
+    if mode == "GP":
+        return "挂牌租赁" if is_lease else "挂牌出让"
+    if mode == "PM":
+        return "拍卖租赁" if is_lease else "拍卖出让"
+    return str(record.get("tradeType") or record.get("transactionMode") or "").strip()
+
+
+def normalize_land_bidding_record(record):
+    """将 land-bidding 列表记录转换为运行器使用的统一字段。"""
+    normalized = dict(record or {})
+    resource_number = str(record.get("resourceNumber") or record.get("sourceCode") or "").strip()
+    release_time = (
+        record.get("ggPubTime")
+        or record.get("pubTime")
+        or record.get("announcementPubTime")
+        or record.get("releaseTime")
+        or ""
+    )
+    resource_stage = str(record.get("resourceStage") or record.get("tradeStage") or "").strip().upper()
+    normalized.update({
+        "publicityId": record.get("publicityId") or resource_number,
+        "sourceId": record.get("resourceId") or record.get("sourceId") or "",
+        "sourceCode": resource_number,
+        "districtName": record.get("xzqName") or record.get("districtName") or "",
+        "districtCode": record.get("regionCode") or record.get("districtCode") or "",
+        "releaseTime": release_time,
+        # The website filters this list by enrollment/listing start time. Keep
+        # it separately from ggPubTime, which is the date shown in the result.
+        "_queryDate": record.get("enrollStartTime") or record.get("listingStartTime") or release_time,
+        "quoteStartTime": record.get("listingStartTime") or record.get("enrollStartTime") or record.get("quoteStartTime") or "",
+        "content": record.get("content") or "",
+        "landUse": _land_bidding_use_names(record),
+        "assignmentPurpose": _land_bidding_use_names(record),
+        "tradeType": _land_bidding_transaction_label(record),
+        "tradeStage": "结果公示" if resource_stage == "CJ" else (record.get("tradeStage") or resource_stage),
+        "tradeForm": record.get("tradeForm") or ("国有土地" if record.get("resourceCategory") == "TD" else ""),
+        "_sourceEndpoint": "landbidding",
+    })
+    return normalized
+
+
+def fetch_land_bidding_records(
+    district_filter=None,
+    max_pages=200,
+    record_filter=None,
+    stop_before=None,
+    server_filters=None,
+):
+    """读取官网 land-bidding 页面实际使用的成交结果列表接口。
+
+    该接口与旧的 queryPublicityList 字段和分页参数不同，必须使用
+    currentPage/pageSize、enrollStartTime/nowTime 和 resourceStage=CJ。
+    返回值已归一化为旧运行器兼容的字段名。
+    """
+    all_records = []
+    page = 1
+    page_size = 50
+    stop_key = _release_date_key(stop_before)
+    query_filters = dict(server_filters or {})
+    region_name = query_filters.pop("regionName", "")
+    fallback_region_name = query_filters.pop("fallbackRegionName", "")
+    if region_name and not query_filters.get("regionCode"):
+        region_codes = fetch_region_codes(region_name)
+        if not region_codes and fallback_region_name:
+            region_codes = fetch_region_codes(fallback_region_name)
+        if not region_codes:
+            raise RuntimeError("LAND_REGION_FILTER_RESOLUTION_FAILED")
+        query_filters["regionCode"] = ",".join(region_codes)
+
+    while page <= max_pages:
+        params = {
+            "currentPage": page,
+            "pageSize": page_size,
+            "resourceStage": "CJ",
+        }
+        params.update({key: value for key, value in query_filters.items() if value not in (None, "")})
+        url = (
+            "https://www.zjzrzyjy.com/trade/view/landbidding/querylandbidding?"
+            + urlencode(params)
+        )
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://www.zjzrzyjy.com/landView/land-bidding",
+        }
+        try:
+            response = requests.get(url, headers=headers, timeout=30)
+            response.raise_for_status()
+            payload = response.json()
+            data = payload.get("data") or {}
+            records = data.get("records") or []
+        except Exception as error:
+            print(f"成交列表第{page}页请求失败: {error}")
+            break
+        if not records:
+            break
+
+        normalized_records = [normalize_land_bidding_record(record) for record in records]
+        for record in normalized_records:
+            district = str(record.get("districtName") or "")
+            district_code = str(record.get("districtCode") or "")
+            matched = True
+            if district_filter:
+                name_kw = str(district_filter.get("name") or "")
+                code_kw = str(district_filter.get("code") or "")
+                exact = bool(district_filter.get("exact", False))
+                if exact:
+                    matched = (bool(name_kw) and name_kw == district) or (bool(code_kw) and code_kw == district_code)
+                else:
+                    matched = (bool(name_kw) and name_kw in district) or (bool(code_kw) and code_kw in district_code)
+            if matched and (record_filter is None or record_filter(record)):
+                all_records.append(record)
+
+        print(f"成交列表第{page}页: {len(records)}条, 累计{len(all_records)}条")
+        last_key = _release_date_key(normalized_records[-1].get("_queryDate") or normalized_records[-1].get("releaseTime"))
+        if stop_key and last_key and last_key < stop_key:
+            break
+        try:
+            total = int(data.get("total") or 0)
+        except (TypeError, ValueError):
+            total = 0
+        if len(records) < page_size or (total and page * page_size >= total):
+            break
+        page += 1
+        time.sleep(0.3)
+
+    return all_records
+
+
 def fetch_records(district_filter=None, max_pages=200, record_filter=None, stop_before=None, server_filters=None):
     """分页读取成交公示列表，并在详情请求前执行可证明安全的候选过滤。
 
