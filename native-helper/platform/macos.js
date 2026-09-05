@@ -28,6 +28,16 @@ function createMacOSAdapter(options = {}) {
     ].join("\n"));
   }
 
+  async function openPath(targetPath) {
+    return await new Promise((resolve) => {
+      runFile("/usr/bin/open", [String(targetPath)], { timeout: 15000 }, (error) => {
+        resolve(error
+          ? { ok: false, reason: "LAND_OPEN_PATH_FAILED", security: common.security() }
+          : { ok: true, opened: true, security: common.security() });
+      });
+    });
+  }
+
   async function chooseWorkbookFiles() {
     return await runAppleScript([
       "set selectedFiles to choose file with prompt \"选择需要调整打印格式的 Excel 文件\" with multiple selections allowed",
@@ -36,6 +46,24 @@ function createMacOSAdapter(options = {}) {
       "set outputText to outputText & POSIX path of selectedFile & linefeed",
       "end repeat",
       "return outputText",
+    ].join("\n"));
+  }
+
+  async function chooseWordFiles() {
+    return await runAppleScript([
+      "set selectedFiles to choose file with prompt \"选择需要统一表格格式的 Word 文档（.docx）\" of type {\"org.openxmlformats.wordprocessingml.document\"} with multiple selections allowed",
+      "set outputText to \"\"",
+      "repeat with selectedFile in selectedFiles",
+      "set outputText to outputText & POSIX path of selectedFile & linefeed",
+      "end repeat",
+      "return outputText",
+    ].join("\n"));
+  }
+
+  async function chooseXlsxFile() {
+    return await runAppleScript([
+      "set selectedFile to choose file with prompt \"选择折旧摊销预测输入工作簿（.xlsx）\"",
+      "POSIX path of selectedFile",
     ].join("\n"));
   }
 
@@ -263,7 +291,10 @@ function createMacOSAdapter(options = {}) {
     cliCandidates: ["/usr/local/bin/tycpv"],
     cliFallback: "/usr/local/bin/tycpv",
     chooseDirectory,
+    openPath,
     chooseWorkbookFiles,
+    chooseWordFiles,
+    chooseXlsxFile,
     inspectActiveConversation,
     createCredentialReference,
     diagnostics,

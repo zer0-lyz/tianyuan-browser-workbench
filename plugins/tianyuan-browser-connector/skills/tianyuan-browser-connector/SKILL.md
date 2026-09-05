@@ -28,6 +28,7 @@ description: Connect Codex to the exact Tianyuan browser session bound to the cu
 - 经明确确认的单文件上传、分类、底稿保存和回读。
 - 经明确确认的测试资料索引清理、底稿保存和回读。
 - 已解析财务报表的 valuation-mcp 预检、用户确认后导入和回读校验。
+- 资产基础法申报表 Excel 的预检、确认后导入和申报表导出回读。
 
 当前版本不提供：
 
@@ -81,3 +82,14 @@ runtime/scripts/financial-statement-import.mjs
 ```
 
 标准流程是“读取已解析数据 → `prepare` 预检 → 展示完整预览 → 用户明确确认 → `execute` 保存 → `read` 回读”。预检阶段不会写入；未获得明确确认不得执行。脚本从本机 `~/.tycpv/` 登录态读取凭据，不在参数、日志或项目文件中保存 MCP token。
+
+## 资产基础法申报表导入
+
+申报表导入直接使用 MCP 工具，不要求通过浏览器页面点击。固定流程：
+
+1. 调用 `tianyuan.prepare_asset_draft_import`，传入已生成的平台申报表 Excel、项目 ID 和公司 ID；工具会过滤为系统允许的第一阶段字段，并返回行数、科目、覆盖目标和 `prepareId`。
+2. 向用户展示预检范围。科目排除不是连接器固定规则；如某项目已有人工录入或明确不做的科目，在本次调用中传入 `excludedSubjectCodes` / `excludedSubjectNames`，工具只对本次预检排除，默认不排除任何科目。
+3. 获得明确确认后，调用 `tianyuan.execute_asset_draft_import`，确认文本必须为 `确认执行申报表导入`。`prepareId` 对应的远端确认令牌仅保存在插件进程内，10 分钟后自动失效；失效或编辑锁失败必须重新预检。
+4. 调用 `tianyuan.export_asset_declare_table` 导出系统申报表。按导入科目行数、关键对象/业务内容/日期及银行存款原有数据进行回读核验。
+
+工具通过本机 `~/.tycpv/` 独立登录态连接 valuation-mcp。浏览器页面登录和 CLI/MCP 登录是两套会话：若返回授权无效，先执行 `tycpv login` 刷新本机授权，再重新预检；不应将浏览器已登录误判为导入授权已有效。
