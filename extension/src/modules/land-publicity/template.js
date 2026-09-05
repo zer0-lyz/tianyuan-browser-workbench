@@ -9,7 +9,7 @@ export const landPublicityTemplate = `
 
   <section class="section land-publicity-notice">
     <div class="inline-feedback" data-kind="warn">
-      交易条件固定为国有土地、挂牌出让/挂牌租赁/拍卖出让/拍卖租赁、结果公示；行政区和官网查询日期会直接用于列表查询。
+      交易条件固定为国有土地、挂牌出让/拍卖出让、结果公示；行政区和官网查询日期会直接用于列表查询。
     </div>
   </section>
 
@@ -17,13 +17,13 @@ export const landPublicityTemplate = `
     <div class="section-title-row"><div><h2>交易条件</h2><p class="section-description">本模块按成交公示场景固定条件，无需重复选择。</p></div></div>
     <div class="land-publicity-fixed-conditions" aria-label="固定交易条件">
       <div class="land-publicity-fixed-condition"><span>交易形式</span><strong>国有土地</strong></div>
-      <div class="land-publicity-fixed-condition"><span>交易方式</span><strong>挂牌出让、挂牌租赁、拍卖出让、拍卖租赁</strong></div>
+      <div class="land-publicity-fixed-condition"><span>交易方式</span><strong>挂牌出让、拍卖出让</strong></div>
       <div class="land-publicity-fixed-condition"><span>交易阶段</span><strong>结果公示</strong></div>
     </div>
   </section>
 
   <section class="section land-publicity-filters">
-    <div class="section-title-row"><div><h2>行政区域</h2><p class="section-description">选择地市或输入区县，也可以直接查询全省。</p></div></div>
+    <div class="section-title-row"><div><h2>行政区域</h2><p class="section-description">选择地市或输入区县，也可以直接查询全省；勾选全省时会清除旧的市/区县条件。</p></div></div>
     <div class="land-publicity-field-grid land-publicity-administrative-fields">
       <label class="field-block"><span>地市</span><select id="landPublicityDistrict"><option value="">请选择地市（可不选）</option><option value="杭州市">杭州市</option><option value="宁波市">宁波市</option><option value="温州市">温州市</option><option value="湖州市">湖州市</option><option value="嘉兴市">嘉兴市</option><option value="绍兴市">绍兴市</option><option value="金华市">金华市</option><option value="衢州市">衢州市</option><option value="舟山市">舟山市</option><option value="台州市">台州市</option><option value="丽水市">丽水市</option></select></label>
       <label class="field-block land-publicity-check-field"><span>行政区范围</span><span><input id="landPublicityProvinceWide" type="checkbox"> 全省/不限制行政区</span></label>
@@ -44,10 +44,10 @@ export const landPublicityTemplate = `
   </section>
 
   <section class="section land-publicity-filters">
-    <div class="section-title-row"><div><h2>官网查询日期</h2><p class="section-description">按官网成交列表的报名/挂牌开始时间查询；结果表另列成交公示发布时间。</p></div></div>
+    <div class="section-title-row"><div><h2>报价开始时间范围</h2><p class="section-description">对应官网“报价开始时间”筛选；不填写表示不限，结果表另列成交公示发布时间。</p></div></div>
     <div class="land-publicity-date-range">
-      <label class="field-block"><span>起始日期</span><input id="landPublicityStartDate" type="date"></label>
-      <label class="field-block"><span>结束日期</span><input id="landPublicityEndDate" type="date"></label>
+      <label class="field-block"><span>起始日期（可选）</span><input id="landPublicityStartDate" type="date"></label>
+      <label class="field-block"><span>结束日期（可选）</span><input id="landPublicityEndDate" type="date"></label>
     </div>
   </section>
 
