@@ -30,7 +30,7 @@ from scrape_zj_land import (
     calc_total_price_wan,
     clean_text,
     extract_number,
-    fetch_records as skill_fetch_records,
+    fetch_land_bidding_records as skill_fetch_land_bidding_records,
     fetch_resource_detail,
     normalize_resource_coordinate,
     parse_content_fields,
@@ -114,6 +114,12 @@ def _date_text(value: Any) -> str:
     return parsed.isoformat() if parsed else _text(value, 80)
 
 
+def _record_filter_date(record: Dict[str, Any]) -> Optional[dt.date]:
+    """Use the same date field as the source endpoint uses for filtering."""
+    value = record.get("_queryDate") if record.get("_sourceEndpoint") == "landbidding" else record.get("releaseTime")
+    return _date(value)
+
+
 def _normalise_district_name(value: Any) -> str:
     return re.sub(r"\s+", "", _text(value, 100)).casefold()
 
@@ -168,7 +174,7 @@ def _list_district_filter(request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 def _list_record_matches_request(request: Dict[str, Any], record: Dict[str, Any]) -> bool:
     """在列表记录阶段安全收窄候选，缺失字段一律留给详情阶段复核。"""
-    release_date = _date(record.get("releaseTime"))
+    release_date = _record_filter_date(record)
     start_boundary = _date(request.get("startDate"))
     if start_boundary is None and request.get("startYear"):
         start_boundary = dt.date(int(request["startYear"]), 1, 1)
@@ -219,7 +225,7 @@ def _date_epoch_ms(value: Any, end_of_day: bool = False) -> Optional[int]:
 
 
 def _list_server_filters(request: Dict[str, Any]) -> Dict[str, Any]:
-    """生成官网列表 API 已验证支持的业务筛选参数。"""
+    """生成 land-bidding 列表 API 已验证支持的查询参数。"""
     filters: Dict[str, Any] = {}
     if not request.get("provinceWide"):
         region_name = _text(request.get("district"), 100)
@@ -233,11 +239,11 @@ def _list_server_filters(request: Dict[str, Any]) -> Dict[str, Any]:
     start_ms = _date_epoch_ms(request.get("startDate"))
     end_ms = _date_epoch_ms(request.get("endDate"), end_of_day=True)
     if start_ms is not None:
-        filters["publishStartTime"] = start_ms
+        filters["enrollStartTime"] = start_ms
     elif request.get("startYear"):
-        filters["publishStartTime"] = _date_epoch_ms(f"{request['startYear']}-01-01")
+        filters["enrollStartTime"] = _date_epoch_ms(f"{request['startYear']}-01-01")
     if end_ms is not None:
-        filters["publishEndTime"] = end_ms
+        filters["nowTime"] = end_ms
     return filters
 
 
@@ -437,7 +443,7 @@ def filter_records(
     for item in enriched:
         record = item["record"]
         detail = item["detail"]
-        release_date = _date(record.get("releaseTime"))
+        release_date = _record_filter_date(record)
         if start_boundary and (release_date is None or release_date < start_boundary):
             continue
         if end_boundary and (release_date is None or release_date > end_boundary):
@@ -522,6 +528,22 @@ def filter_records(
     }
 
 
+def _unit_price_from_total(total_wan: Optional[float], area_sqm: Optional[float]) -> Optional[float]:
+    if total_wan is None or area_sqm in (None, 0):
+        return None
+    return round(total_wan * 10000 / area_sqm, 2)
+
+
+def _land_bidding_term(record: Dict[str, Any], detail_data: Dict[str, Any]) -> str:
+    value = detail_data.get("transferPeriodTo") or record.get("transferPeriodTo")
+    if value not in (None, ""):
+        text = _text(value, 40)
+        return text if "年" in text else f"{text}年"
+    assignment_period = _text(detail_data.get("assignmentPeriod"), 100)
+    match = re.search(r"(\d+(?:\.\d+)?)\s*年", assignment_period)
+    return f"{match.group(1)}年" if match else ""
+
+
 def enrich_record(record: Dict[str, Any], detail_fetcher: Callable[[str], Dict[str, Any]]) -> Dict[str, Any]:
     detail = parse_content_fields(record.get("content", ""))
     source_id = _text(record.get("sourceId"), 200)
@@ -532,20 +554,38 @@ def enrich_record(record: Dict[str, Any], detail_fetcher: Callable[[str], Dict[s
         except Exception:
             detail_data = {}
     coordinate = normalize_resource_coordinate(detail_data.get("resourceCoordinate", ""))
-    area_mu = _number(detail.get("土地面积(亩)"))
-    area_sqm = _number(detail_data.get("assignmentArea") or detail_data.get("transferArea") or detail_data.get("出让面积"))
+    is_land_bidding = record.get("_sourceEndpoint") == "landbidding"
+    area_mu = _number(
+        record.get("landAreaForAre") if is_land_bidding else detail.get("土地面积(亩)")
+    )
+    area_sqm = _number(
+        (record.get("landArea") if is_land_bidding else None)
+        or detail_data.get("assignmentArea")
+        or detail_data.get("transferArea")
+        or detail_data.get("出让面积")
+    )
     if area_sqm is None and area_mu is not None:
         area_sqm = round(area_mu * 666.67, 2)
-    start_price = _number(detail_data.get("startPrice") or detail_data.get("startingPrice") or detail_data.get("起始价"))
-    deal_price = _number(detail_data.get("dealPrice") or detail_data.get("成交价"))
-    if deal_price is None:
-        deal_price = _number(detail.get("成交结果"))
+    if is_land_bidding:
+        start_total_price_value = _number(record.get("startPrice") or detail_data.get("startPrice"))
+        deal_total_price_value = _number(record.get("cjj") or detail_data.get("dealPrice") or detail_data.get("成交价"))
+        start_price = _unit_price_from_total(start_total_price_value, area_sqm)
+        deal_price = _unit_price_from_total(deal_total_price_value, area_sqm)
+        start_total_price = start_total_price_value if start_total_price_value is not None else ""
+        deal_total_price = deal_total_price_value if deal_total_price_value is not None else ""
+    else:
+        start_price = _number(detail_data.get("startPrice") or detail_data.get("startingPrice") or detail_data.get("起始价"))
+        deal_price = _number(detail_data.get("dealPrice") or detail_data.get("成交价"))
+        if deal_price is None:
+            deal_price = _number(detail.get("成交结果"))
+        start_total_price = calc_total_price_wan(start_price, area_sqm=area_sqm) if start_price is not None else ""
+        deal_total_price = calc_total_price_wan(deal_price, area_sqm=area_sqm) if deal_price is not None else ""
     detail_url = (
         f"https://www.zjzrzyjy.com/landView/land-bidding/source-detail?resourceId={source_id}"
         if source_id else ""
     )
-    location = _text(detail_data.get("resourceLocation") or detail.get("地块位置"))
-    land_use = _text(detail_data.get("assignmentPurpose") or detail_data.get("landUse") or detail.get("土地用途"))
+    location = _text(record.get("resourceLocation") if is_land_bidding else "") or _text(detail_data.get("resourceLocation") or detail.get("地块位置"))
+    land_use = _text(record.get("landUse") if is_land_bidding else "") or _text(detail_data.get("assignmentPurpose") or detail_data.get("landUse") or detail.get("土地用途"))
     return {
         "record": record,
         "detail": detail,
@@ -558,9 +598,12 @@ def enrich_record(record: Dict[str, Any], detail_fetcher: Callable[[str], Dict[s
         "area_mu": area_mu,
         "area_sqm": area_sqm,
         "start_price": start_price,
-        "start_total_price": calc_total_price_wan(start_price, area_sqm=area_sqm) if start_price is not None else "",
+        "start_total_price": start_total_price,
         "deal_price": deal_price,
-        "deal_total_price": calc_total_price_wan(deal_price, area_sqm=area_sqm) if deal_price is not None else "",
+        "deal_total_price": deal_total_price,
+        "term": _land_bidding_term(record, detail_data) if is_land_bidding else _text(detail.get("出让年限")),
+        "transferee": _text(detail_data.get("theUnit") or detail_data.get("受让单位") or detail.get("受让单位")),
+        "trade_form": _text(record.get("tradeForm") or detail_data.get("tradeForm") or ""),
     }
 
 
@@ -603,15 +646,15 @@ def row_from_item(item: Dict[str, Any], coord_path: str = "", map_path: str = ""
         "土地用途": item["land_use"],
         "土地面积(亩)": item["area_mu"] if item["area_mu"] is not None else "",
         "土地面积(平方米)": item["area_sqm"] if item["area_sqm"] is not None else "",
-        "出让年限": _text(detail.get("出让年限")),
+        "出让年限": item.get("term") or _text(detail.get("出让年限")),
         "起始单价(元/平方米)": item["start_price"] if item["start_price"] is not None else "",
         "起始总价(万元)": item["start_total_price"],
         "成交单价(元/平方米)": item["deal_price"] if item["deal_price"] is not None else "",
         "成交总价(万元)": item["deal_total_price"],
-        "受让单位": _text(detail.get("受让单位")),
+        "受让单位": item.get("transferee") or _text(detail.get("受让单位")),
         "发布时间": _date_text(record.get("releaseTime")),
         "详情页网址": item["detail_url"],
-        "交易形式": _text(record.get("tradeForm") or detail_data.get("tradeForm") or ""),
+        "交易形式": item.get("trade_form") or _text(record.get("tradeForm") or detail_data.get("tradeForm") or ""),
         "交易方式": _text(record.get("tradeType") or detail_data.get("tradeType") or ""),
         "交易阶段": _text(record.get("tradeStage") or detail_data.get("tradeStage") or ""),
         "报价开始时间": _date_text(record.get("quoteStartTime") or detail_data.get("quoteStartTime") or ""),
@@ -643,7 +686,7 @@ def _filter_condition_summary(request: Dict[str, Any]) -> str:
     if request.get("startDate") or request.get("endDate"):
         start_date = request.get("startDate") or "不限"
         end_date = request.get("endDate") or "不限"
-        conditions.append(f"成交公示日期={start_date}至{end_date}")
+        conditions.append(f"官网查询日期={start_date}至{end_date}")
     if request.get("startYear"):
         conditions.append(f"起始年份≥{request['startYear']}")
     quote_preset = request.get("quotePreset") or "all"
@@ -703,7 +746,7 @@ def write_excel(path: Path, rows: List[Dict[str, Any]], request: Dict[str, Any],
         ("抓取后记录数", summary.get("fetched", 0)),
         ("写出记录数", len(rows)),
         ("当前筛选条件", _filter_condition_summary(request)),
-        ("过滤说明", "行政区和成交公示日期先作为列表查询条件；土地用途、位置关键词、交易方式和交易阶段等条件再由候选列表及详情复核。"),
+        ("过滤说明", "行政区和官网查询日期先作为列表查询条件；土地用途、位置关键词、交易方式和交易阶段等条件再由候选列表及详情复核。"),
         ("限制与警告", "；".join(summary.get("warnings", []) + summary.get("unsupportedFilters", [])) or "无"),
     ]:
         summary_sheet.append([key, value])
@@ -798,7 +841,7 @@ def _move_asset(source: Path, target: Path) -> None:
 
 def execute_request(
     request: Dict[str, Any],
-    fetcher: Callable[..., List[Dict[str, Any]]] = skill_fetch_records,
+    fetcher: Callable[..., List[Dict[str, Any]]] = skill_fetch_land_bidding_records,
     detail_fetcher: Callable[[str], Dict[str, Any]] = fetch_resource_detail,
     progress: Callable[..., None] = emit_progress,
 ) -> Dict[str, Any]:

@@ -7,6 +7,7 @@ import { updatesModule } from "../modules/updates/module.js";
 import { feedbackModule } from "../modules/feedback/module.js";
 import { landPublicityModule } from "../modules/land-publicity/module.js";
 import { depreciationCapexModule } from "../modules/depreciation-capex-forecast/module.js";
+import { tableFormatModule } from "../modules/table-format/module.js";
 
 const REQUEST_TYPE = "TIANYUAN_WORKBENCH_GET_CONTEXT_V2";
 const ACTION_REQUEST_TYPE = "TIANYUAN_WORKBENCH_RUN_ACTION_V2";
@@ -340,6 +341,8 @@ const elements = {
 let latestPayload = null;
 let latestContext = null;
 let busy = false;
+let connectionCheckPromise = null;
+let connectionCheckProbe = false;
 let cliAuthBusy = false;
 let cliAuthorizationUrl = "";
 let availableSubjects = [];
@@ -430,6 +433,7 @@ moduleRegistry.register(updatesModule);
 moduleRegistry.register(feedbackModule);
 moduleRegistry.register(landPublicityModule);
 moduleRegistry.register(depreciationCapexModule);
+moduleRegistry.register(tableFormatModule);
 elements.extensionId.textContent = chrome.runtime.id;
 
 function on(element, eventName, handler) {
@@ -3222,7 +3226,7 @@ async function pollCliAuthorization(sessionId) {
     if (status?.state === "authenticated" || status?.authenticated) {
       setConnection(elements.cliStatus, "已授权", "ok");
       updateCliStatusMessage("CLI 授权成功，点击“启动/检查”确认连接", "ok");
-      await checkConnections();
+      await checkConnections({ probe: true });
       return true;
     }
     if (status?.state === "failed" || status?.ok === false) {
@@ -3270,7 +3274,7 @@ async function authorizeCli() {
     if (result.state === "authenticated" || result.authenticated) {
       setConnection(elements.cliStatus, "已授权", "ok");
       updateCliStatusMessage("CLI 已授权，点击“启动/检查”确认连接", "ok");
-      await checkConnections();
+      await checkConnections({ probe: true });
       return;
     }
     if (!result.authorizationUrl) throw new Error("CLI_AUTHORIZATION_URL_MISSING");
@@ -3404,7 +3408,7 @@ async function runCliExport(exportType) {
   const startedAt = new Date().toISOString();
 
   try {
-    const health = await checkConnections();
+    const health = await checkConnections({ probe: true });
     if (!health?.cli?.ok) throw new Error("CLI 未连接，请先在连接配置页完成授权。");
     const projectId = String(latestContext?.route?.projectId || "").trim();
     if (!/^\d+$/.test(projectId)) throw new Error("当前页面未读取到项目 ID。");
@@ -3598,7 +3602,7 @@ async function runPrintFormat(formatType) {
   const startedAt = new Date().toISOString();
 
   try {
-    const health = await checkConnections();
+    const health = await checkConnections({ probe: true });
     if (!health?.ok) throw new Error("Helper 未连接。");
     const inputPaths = [...printTaskStates[formatType].inputPaths];
     if (!inputPaths.length) throw new Error("请先选择文件或文件夹。");
@@ -4254,18 +4258,30 @@ function renderConnectorSession(session) {
 }
 
 async function connectorFetch(path, options = {}) {
+  const { timeoutMs = 8000, ...requestOptions } = options;
   const runtimeContract = await extensionRuntimeContractPromise;
-  const response = await fetch(`${CONNECTOR_BASE_URL}${path}`, {
-    cache: "no-store",
-    ...options,
-    headers: {
-      "content-type": "application/json",
-      "x-tianyuan-extension-id": chrome.runtime.id,
-      "x-tianyuan-extension-version": extensionRuntimeVersion,
-      "x-tianyuan-runtime-build-id": runtimeContract?.runtimeBuildId || "",
-      ...(options.headers || {}),
-    },
-  });
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(`${CONNECTOR_BASE_URL}${path}`, {
+      cache: "no-store",
+      ...requestOptions,
+      signal: controller.signal,
+      headers: {
+        "content-type": "application/json",
+        "x-tianyuan-extension-id": chrome.runtime.id,
+        "x-tianyuan-extension-version": extensionRuntimeVersion,
+        "x-tianyuan-runtime-build-id": runtimeContract?.runtimeBuildId || "",
+        ...(requestOptions.headers || {}),
+      },
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error("CONNECTOR_TIMEOUT");
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload?.ok) {
     const error = new Error(payload?.reason || `CONNECTOR_HTTP_${response.status}`);
@@ -4683,12 +4699,33 @@ async function loadConnectorSessionId() {
   return connectorSessionId;
 }
 
-async function checkConnectorConnection({ silent = false } = {}) {
+async function restoreConnectorSession(timeoutMs = 8000) {
+  await loadConnectorSessionId();
+  if (!connectorSessionId) return;
+  try {
+    const sessionResult = await connectorFetch(
+      `/api/sessions/${encodeURIComponent(connectorSessionId)}`,
+      { timeoutMs },
+    );
+    renderConnectorSession(sessionResult.session);
+  } catch (error) {
+    if (error.status === 404) {
+      connectorSessionId = "";
+      connectorSession = null;
+      await storageRemove(STORAGE_CONNECTOR_SESSION_KEY);
+      renderConnectorSession(null);
+      return;
+    }
+    throw error;
+  }
+}
+
+async function checkConnectorConnection({ silent = false, lightweight = false } = {}) {
   if (!silent) setConnection(elements.connectorStatus, "检查中", "idle");
   try {
     const [health, protocol] = await Promise.all([
-      connectorFetch("/health"),
-      connectorFetch("/api/protocol"),
+      connectorFetch("/health", { timeoutMs: lightweight ? 2000 : 8000 }),
+      connectorFetch("/api/protocol", { timeoutMs: lightweight ? 2000 : 8000 }),
     ]);
     if (protocol.protocolVersion !== EXPECTED_CONNECTOR_PROTOCOL_VERSION) {
       throw new Error("CONNECTOR_RUNTIME_VERSION_MISMATCH");
@@ -4707,25 +4744,14 @@ async function checkConnectorConnection({ silent = false } = {}) {
     connectorProtocol = protocol;
     setConnection(elements.connectorStatus, health.sessionCount ? "已绑定" : "已启动", "ok");
     renderConnectorCapabilities(protocol.capabilities || {});
+    if (lightweight) {
+      await restoreConnectorSession(2000);
+      return { ok: true, health, protocol, session: connectorSession };
+    }
     await ensureLocalScriptSource().catch(() => null);
     await loadAgentSources();
 
-    await loadConnectorSessionId();
-    if (connectorSessionId) {
-      try {
-        const sessionResult = await connectorFetch(`/api/sessions/${encodeURIComponent(connectorSessionId)}`);
-        renderConnectorSession(sessionResult.session);
-      } catch (error) {
-        if (error.status === 404) {
-          connectorSessionId = "";
-          connectorSession = null;
-          await storageRemove(STORAGE_CONNECTOR_SESSION_KEY);
-          renderConnectorSession(null);
-        } else {
-          throw error;
-        }
-      }
-    }
+    await restoreConnectorSession();
     return { ok: true, health, protocol, session: connectorSession };
   } catch (error) {
     const mismatch = [
@@ -5022,8 +5048,8 @@ async function processConnectorActionQueue() {
   }
 }
 
-async function checkConnections() {
-  const connectorCheck = checkConnectorConnection({ silent: true });
+async function performConnectionCheck({ probe = false } = {}) {
+  const connectorCheck = checkConnectorConnection({ silent: true, lightweight: !probe });
   setConnection(elements.connectorStatus, "检查中", "idle");
   setConnection(elements.helperStatus, "检查中", "idle");
   setConnection(elements.mcpStatus, "检查中", "idle");
@@ -5031,14 +5057,16 @@ async function checkConnections() {
   elements.connectionMessage.textContent = "正在连接 helper...";
 
   try {
-    const health = await fetchHelperJson("/health?probe=1");
+    const health = await fetchHelperJson(`/health?probe=${probe ? "1" : "0"}`);
     setConnection(elements.helperStatus, health.transport === "native_messaging" ? "已启动" : "已连接", "ok");
     elements.connectionMessage.textContent = health.transport === "native_messaging"
-      ? "Native Messaging 已拉起"
-      : "HTTP helper 已连接";
+      ? (probe ? "Native Messaging 已拉起，正在验证连接" : "本地助手已连接，等待主动验证")
+      : (probe ? "HTTP helper 已连接，正在验证连接" : "本地助手已连接，等待主动验证");
 
     if (health.mcp?.connected) {
       setConnection(elements.mcpStatus, "已连接", "ok");
+    } else if (health.mcp?.configured && !probe) {
+      setConnection(elements.mcpStatus, "已配置，待检查", "warn");
     } else if (health.mcp?.configured) {
       setConnection(elements.mcpStatus, health.mcp.reason || "连接失败", "error");
     } else {
@@ -5047,6 +5075,8 @@ async function checkConnections() {
 
     if (health.cli?.ok) {
       setConnection(elements.cliStatus, health.cli.version || "可用", "ok");
+    } else if (!probe && health.cli?.reason === "CLI_NOT_PROBED") {
+      setConnection(elements.cliStatus, "待主动检查", "warn");
     } else {
       setConnection(elements.cliStatus, health.cli?.reason || "不可用", "warn");
     }
@@ -5074,6 +5104,26 @@ async function checkConnections() {
     setStatus(`helper 启动失败：${message}`, "error");
     return payload;
   }
+}
+
+function checkConnections({ probe = false } = {}) {
+  if (connectionCheckPromise) {
+    // A user-triggered full probe must not be downgraded to an already
+    // running background status refresh.
+    return probe && !connectionCheckProbe
+      ? connectionCheckPromise.then(() => checkConnections({ probe: true }))
+      : connectionCheckPromise;
+  }
+  connectionCheckProbe = probe;
+  const task = performConnectionCheck({ probe });
+  const shared = task.finally(() => {
+    if (connectionCheckPromise === shared) {
+      connectionCheckPromise = null;
+      connectionCheckProbe = false;
+    }
+  });
+  connectionCheckPromise = shared;
+  return shared;
 }
 
 async function openMcpTokenDialog() {
@@ -5104,7 +5154,7 @@ async function confirmMcpToken() {
   elements.mcpTokenInput.value = "";
   elements.mcpTokenDialog.close();
   setStatus(elements.rememberMcpToken.checked ? "已记住本机 token，正在连接 MCP..." : "正在用本次 token 连接 MCP...", "idle");
-  await checkConnections();
+  await checkConnections({ probe: true });
 }
 
 async function clearMcpToken() {
@@ -5464,7 +5514,7 @@ async function loadCompanyList() {
   setBusy(true);
   setStatus("正在通过 MCP 加载公司清单...", "idle");
   try {
-    const health = await checkConnections();
+    const health = await checkConnections({ probe: true });
     if (!health?.mcp?.connected) throw new Error("MCP 未连接，不能加载公司清单。");
     const context = await refreshContext() || latestContext;
     const projectId = context?.route?.projectId;
@@ -5556,7 +5606,7 @@ async function loadSubjectList() {
   setBusy(true);
   setStatus("正在通过 MCP 加载科目清单...", "idle");
   try {
-    const health = await checkConnections();
+    const health = await checkConnections({ probe: true });
     if (!health?.mcp?.connected) throw new Error("MCP 未连接，不能加载科目清单。");
     const context = await refreshContext() || latestContext;
     const projectId = context?.route?.projectId;
@@ -5959,9 +6009,12 @@ async function copyJson(event) {
   setStatus("证据 JSON 已复制", "ok");
 }
 
-async function refreshAll() {
-  await checkConnections();
-  return await refreshContext();
+async function refreshAll({ probe = false } = {}) {
+  const [, context] = await Promise.all([
+    checkConnections({ probe }),
+    refreshContext(),
+  ]);
+  return context;
 }
 
 on(elements.goHome, "click", () => navigateToRoute("home"));
@@ -5992,16 +6045,16 @@ window.addEventListener("hashchange", () => {
   renderRoute(window.location.hash.slice(1) || "home");
 });
 window.addEventListener("focus", () => {
-  if (!busy) checkConnections();
+  if (!busy) checkConnections({ probe: false });
 });
 window.setInterval(() => {
-  if (!busy && document.visibilityState === "visible") checkConnections();
+  if (!busy && document.visibilityState === "visible") checkConnections({ probe: false });
 }, 30000);
 window.setInterval(connectorHeartbeat, 20000);
 window.setInterval(processConnectorActionQueue, 1500);
 
-on(elements.refresh, "click", refreshAll);
-on(elements.checkConnections, "click", checkConnections);
+on(elements.refresh, "click", () => refreshAll({ probe: true }));
+on(elements.checkConnections, "click", () => checkConnections({ probe: true }));
 on(elements.startConnector, "click", startConnector);
 on(elements.bindCurrentPage, "click", bindCurrentPage);
 on(elements.refreshConnectorCatalog, "click", refreshSelectedAgentCatalog);
@@ -6240,7 +6293,13 @@ async function bootstrapApplication() {
     });
     renderRoute(requestedRoute);
     await restoreRememberedMcpToken();
-    await refreshAll();
+    setStatus("工作台已就绪，正在后台读取连接和页面状态…", "idle");
+    window.setTimeout(() => {
+      void refreshAll({ probe: false }).catch((error) => {
+        setStatus(`后台读取失败：${error?.message || String(error)}`, "error");
+        console.error(error);
+      });
+    }, 0);
   } catch (error) {
     // Keep the shell usable even if a non-core startup task fails.
     renderRoute("home");

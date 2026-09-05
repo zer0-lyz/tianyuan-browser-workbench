@@ -36,7 +36,7 @@ test("land publicity module and skill package are wired", () => {
     "openLandPublicityHtml", "openLandPublicityExcel", "openLandPublicityMap",
   ]) assert.match(`${html}\n${template}`, new RegExp(`id=\\"${id}\\"`), `missing ${id}`);
   assert.match(template, /国有土地/);
-  assert.match(template, /挂牌出让、拍卖出让/);
+  assert.match(template, /挂牌出让、挂牌租赁、拍卖出让、拍卖租赁/);
   assert.match(template, /结果公示/);
   assert.match(template, /<select id="landPublicityDistrict">/);
   assert.match(template, /浙江土地成交公示.*子文件夹/);
@@ -335,7 +335,7 @@ test("land publicity auto-opens HTML and clears filters without clearing output 
   await documentRef.getElementById("runLandPublicity").dispatch("click");
   assert.ok(nativeMessages.some((message) => message.action === "open_land_publicity_path" && message.path === "/tmp/land-result.html"));
   assert.match(documentRef.getElementById("landPublicityResultMessage").textContent, /结果为 0 条/);
-  assert.match(documentRef.getElementById("landPublicityResultMessage").textContent, /当前筛选条件：.*交易方式=挂牌出让、拍卖出让/);
+  assert.match(documentRef.getElementById("landPublicityResultMessage").textContent, /当前筛选条件：.*交易方式=挂牌出让、挂牌租赁、拍卖出让、拍卖租赁/);
   assert.equal(documentRef.getElementById("openLandPublicityHtml").disabled, false);
 
   documentRef.getElementById("landPublicityDistrict").value = "临安区";
@@ -368,6 +368,62 @@ test("installers include the land publicity skill", () => {
   assert.match(nativeHost, /chooseLandPublicityOutputDirectory/);
   assert.match(nativeHost, /path\.join\(parentPath, "浙江土地成交公示"\)/);
   assert.match(nativeHost, /LAND_OUTPUT_OUTSIDE_DIRECTORY/);
+});
+
+test("land publicity uses the website land-bidding endpoint and normalizes its records", () => {
+  const python = process.env.TIANYUAN_PYTHON_BIN || "python3";
+  const script = String.raw`
+import json, sys
+from urllib.parse import parse_qs, urlparse
+sys.path.insert(0, "skills/zj-land-publicity")
+import scrape_zj_land
+from land_publicity_runner import _list_server_filters, enrich_record, row_from_item
+
+payload = {"code": 0, "message": "成功", "data": {"total": 3, "records": [
+  {"resourceId": "r1", "resourceNumber": "拱政工出[2026]1号", "xzqName": "拱墅区", "regionCode": "330105", "ggPubTime": "2026年04月30日 09时00分00秒", "resourceLocation": "测试位置", "planUse": "[{\"NAME_\":\"一类工业用地（标准厂房）\"}]", "landAreaForAre": 2, "landArea": 1333, "startPrice": "100", "cjj": 120, "transactionMode": "GP", "transactionType": "ZL", "resourceStage": "CJ"},
+  {"resourceId": "r2", "resourceNumber": "拱政工出[2025]8号", "xzqName": "拱墅区", "regionCode": "330105", "ggPubTime": "2025年12月25日 15时00分00秒", "resourceLocation": "测试位置2", "planUse": "[{\"NAME_\":\"一类工业用地（标准厂房）\"}]", "landAreaForAre": 3, "landArea": 2000, "startPrice": "200", "cjj": 220, "transactionMode": "GP", "resourceStage": "CJ"},
+  {"resourceId": "r3", "resourceNumber": "拱政租出[2026]1号", "xzqName": "拱墅区", "regionCode": "330105", "ggPubTime": "2026年06月26日 15时00分00秒", "resourceLocation": "测试位置3", "planUse": "[{\"NAME_\":\"商务金融用地\"}]", "landAreaForAre": 7.22, "landArea": 4813, "startPrice": "2826", "cjj": 2826, "transactionMode": "GP", "transactionType": "ZL", "resourceStage": "CJ"}
+]}}
+class Response:
+  def __init__(self, value): self.value = value
+  def raise_for_status(self): pass
+  def json(self): return self.value
+calls = []
+def fake_get(url, **kwargs):
+  calls.append(url)
+  return Response(payload)
+scrape_zj_land.requests.get = fake_get
+scrape_zj_land.fetch_region_codes = lambda name: ["330105"]
+rows = scrape_zj_land.fetch_land_bidding_records(
+  district_filter={"code": "330105", "exact": True}, max_pages=1,
+  server_filters={"regionName": "拱墅区", "enrollStartTime": 1767196800000, "nowTime": 1788623999999},
+)
+item = enrich_record(rows[0], lambda source_id: {"assignmentArea": 1333, "transferPeriodTo": 10, "theUnit": "测试单位"})
+row = row_from_item(item)
+print(json.dumps({
+  "count": len(rows),
+  "codes": [r["sourceCode"] for r in rows],
+  "url": calls[0],
+  "normalized": {"id": rows[0]["sourceId"], "stage": rows[0]["tradeStage"], "use": rows[0]["landUse"], "type": rows[0]["tradeType"]},
+  "row": {"areaMu": row["土地面积(亩)"], "areaSqm": row["土地面积(平方米)"], "startTotal": row["起始总价(万元)"], "dealTotal": row["成交总价(万元)"], "term": row["出让年限"], "unit": row["受让单位"]},
+  "dateParams": _list_server_filters({"district": "杭州市", "location": "拱墅区", "provinceWide": False, "startDate": "2026-01-01", "endDate": "2026-09-05"}),
+}, ensure_ascii=False))
+`;
+  const result = spawnSync(python, ["-c", script], { cwd: repoRoot, encoding: "utf8", timeout: 30000 });
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1));
+  assert.equal(payload.count, 3);
+  assert.deepEqual(payload.codes, ["拱政工出[2026]1号", "拱政工出[2025]8号", "拱政租出[2026]1号"]);
+  assert.match(payload.url, /querylandbidding/);
+  assert.match(payload.url, /currentPage=1/);
+  assert.match(payload.url, /pageSize=50/);
+  assert.match(payload.url, /resourceStage=CJ/);
+  assert.match(payload.url, /regionCode=330105/);
+  assert.match(payload.url, /enrollStartTime=1767196800000/);
+  assert.match(payload.url, /nowTime=1788623999999/);
+  assert.deepEqual(payload.normalized, { id: "r1", stage: "结果公示", use: "一类工业用地（标准厂房）", type: "挂牌租赁" });
+  assert.deepEqual(payload.row, { areaMu: 2, areaSqm: 1333, startTotal: 100, dealTotal: 120, term: "10年", unit: "测试单位" });
+  assert.deepEqual(payload.dateParams, { regionName: "拱墅区", fallbackRegionName: "杭州市", enrollStartTime: 1767196800000, nowTime: 1788623999999 });
 });
 
 console.log("Land publicity module tests passed.");

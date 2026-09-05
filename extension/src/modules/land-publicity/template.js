@@ -9,7 +9,7 @@ export const landPublicityTemplate = `
 
   <section class="section land-publicity-notice">
     <div class="inline-feedback" data-kind="warn">
-      交易条件固定为国有土地、挂牌出让/拍卖出让、结果公示；行政区和成交日期会直接用于列表查询。
+      交易条件固定为国有土地、挂牌出让/挂牌租赁/拍卖出让/拍卖租赁、结果公示；行政区和官网查询日期会直接用于列表查询。
     </div>
   </section>
 
@@ -17,7 +17,7 @@ export const landPublicityTemplate = `
     <div class="section-title-row"><div><h2>交易条件</h2><p class="section-description">本模块按成交公示场景固定条件，无需重复选择。</p></div></div>
     <div class="land-publicity-fixed-conditions" aria-label="固定交易条件">
       <div class="land-publicity-fixed-condition"><span>交易形式</span><strong>国有土地</strong></div>
-      <div class="land-publicity-fixed-condition"><span>交易方式</span><strong>挂牌出让、拍卖出让</strong></div>
+      <div class="land-publicity-fixed-condition"><span>交易方式</span><strong>挂牌出让、挂牌租赁、拍卖出让、拍卖租赁</strong></div>
       <div class="land-publicity-fixed-condition"><span>交易阶段</span><strong>结果公示</strong></div>
     </div>
   </section>
@@ -44,7 +44,7 @@ export const landPublicityTemplate = `
   </section>
 
   <section class="section land-publicity-filters">
-    <div class="section-title-row"><div><h2>成交公示日期</h2><p class="section-description">直接查询所选起止日期内发布的成交公示。</p></div></div>
+    <div class="section-title-row"><div><h2>官网查询日期</h2><p class="section-description">按官网成交列表的报名/挂牌开始时间查询；结果表另列成交公示发布时间。</p></div></div>
     <div class="land-publicity-date-range">
       <label class="field-block"><span>起始日期</span><input id="landPublicityStartDate" type="date"></label>
       <label class="field-block"><span>结束日期</span><input id="landPublicityEndDate" type="date"></label>
