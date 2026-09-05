@@ -28,10 +28,11 @@ test("land publicity module and skill package are wired", () => {
   assert.match(moduleSource, /route: "land-publicity"/);
   assert.match(moduleSource, /stage: "stable"/);
   assert.match(moduleSource, /streamNativeMessage/);
+  assert.match(moduleSource, /list_land_publicity_regions/);
   assert.match(moduleSource, /if \(!result\?\.ok\) throw/);
   for (const id of [
-    "openLandPublicity", "page-land-publicity", "landPublicityDistrict", "landPublicityStartDate", "landPublicityEndDate",
-    "landPublicityDistrictExact", "landPublicityProvinceWide", "landPublicityGenerateMap", "runLandPublicity",
+    "openLandPublicity", "page-land-publicity", "landPublicityDistrict", "landPublicityCounty", "landPublicityStartDate", "landPublicityEndDate",
+    "landPublicityGenerateMap", "runLandPublicity",
     "clearLandPublicityFilters",
     "openLandPublicityHtml", "openLandPublicityExcel", "openLandPublicityMap",
   ]) assert.match(`${html}\n${template}`, new RegExp(`id=\\"${id}\\"`), `missing ${id}`);
@@ -40,6 +41,10 @@ test("land publicity module and skill package are wired", () => {
   assert.doesNotMatch(template, /挂牌租赁、拍卖租赁/);
   assert.match(template, /结果公示/);
   assert.match(template, /<select id="landPublicityDistrict">/);
+  assert.match(template, /<select id="landPublicityCounty"/);
+  assert.match(template, /id="landPublicityLocation"/);
+  assert.match(template, /id="reloadLandPublicityRegions"[^>]*>刷新<\/button>/);
+  assert.doesNotMatch(template, /landPublicityProvinceWide|landPublicityDistrictExact/);
   assert.match(template, /浙江土地成交公示.*子文件夹/);
   assert.doesNotMatch(template, /landPublicityStartYear|landPublicityQuotePreset|landPublicityStartPriceMin|landPublicityAreaMin|landPublicityMaxPages/);
   assert.doesNotMatch(template, /name="landTradeForm"|name="landTradeMethod"|name="landTradeStage"/);
@@ -49,6 +54,8 @@ test("land publicity module and skill package are wired", () => {
   const styles = fs.readFileSync(path.join(repoRoot, "extension/src/modules/land-publicity/styles.css"), "utf8");
   assert.match(styles, /\[data-module-id="land-publicity"\]/);
   assert.match(styles, /land-publicity-date-range[\s\S]*flex-wrap: nowrap/);
+  assert.match(styles, /land-publicity-administrative-fields[\s\S]*grid-template-columns/);
+  assert.match(styles, /land-publicity-region-refresh[\s\S]*font-size: 12px/);
 });
 
 test("Native Helper validates land action and emits a complete protocol message", () => {
@@ -163,8 +170,11 @@ print(json.dumps(result, ensure_ascii=False))
       assert.match(map, new RegExp(marker), `map should include ${marker}`);
     }
     assert.match(map, /插入位置标记/);
-    assert.match(map, /请输入位置标记名称/);
-    assert.match(map, /请输入备注/);
+    assert.match(map, /marker-dialog-backdrop/);
+    assert.match(map, /marker-dialog-name/);
+    assert.match(map, /marker-dialog-note/);
+    assert.match(map, /添加位置标记/);
+    assert.doesNotMatch(map, /window\.prompt/);
     assert.match(map, /拖动标记调整位置/);
     assert.match(map, /L\.polyline/);
     assert.match(map, /distance-label/);
@@ -428,6 +438,7 @@ test("land publicity auto-opens HTML and clears filters without clearing output 
   };
   const saved = [];
   const nativeMessages = [];
+  const streamedRequests = [];
   const context = {
     manifest: landPublicityModule.manifest,
     document: documentRef,
@@ -439,8 +450,15 @@ test("land publicity auto-opens HTML and clears filters without clearing output 
     },
     navigate() {},
     setStatus() {},
-    async sendNativeMessage(message) { nativeMessages.push(message); return { ok: true }; },
-    async streamNativeMessage() {
+    async sendNativeMessage(message) {
+      nativeMessages.push(message);
+      if (message.action === "list_land_publicity_regions") {
+        return { ok: true, regions: [{ code: "330000", name: "浙江省", children: [{ code: "330100", name: "杭州市", children: [{ code: "330105", name: "拱墅区", children: [] }] }] }] };
+      }
+      return { ok: true };
+    },
+    async streamNativeMessage(message) {
+      streamedRequests.push(message.request);
       return {
         ok: true, htmlPath: "/tmp/land-result.html", excelPath: "/tmp/land-result.xlsx", mapPath: "",
         fetchedCount: 3, filteredCount: 0, writtenCount: 0, noCoordinateCount: 0,
@@ -460,6 +478,8 @@ test("land publicity auto-opens HTML and clears filters without clearing output 
   documentRef.getElementById("landPublicityEndDate").value = "2025-12-31";
   documentRef.getElementById("landPublicityOutputDirectory").value = outputDirectory;
   await documentRef.getElementById("runLandPublicity").dispatch("click");
+  assert.equal(streamedRequests.at(-1).provinceWide, false);
+  assert.equal(streamedRequests.at(-1).districtExact, false);
   assert.ok(nativeMessages.some((message) => message.action === "open_land_publicity_path" && message.path === "/tmp/land-result.html"));
   assert.match(documentRef.getElementById("landPublicityResultMessage").textContent, /结果为 0 条/);
   assert.match(documentRef.getElementById("landPublicityResultMessage").textContent, /当前筛选条件：.*交易方式=挂牌出让、拍卖出让/);
@@ -479,6 +499,18 @@ test("land publicity auto-opens HTML and clears filters without clearing output 
   assert.equal(documentRef.getElementById("landPublicityProgressPercent").textContent, "0%");
   assert.equal(documentRef.getElementById("openLandPublicityHtml").disabled, true);
   assert.equal(saved.at(-1).outputDirectory, outputDirectory);
+
+  documentRef.getElementById("landPublicityDistrict").value = "杭州市";
+  documentRef.getElementById("landPublicityCounty").value = "拱墅区";
+  await documentRef.getElementById("runLandPublicity").dispatch("click");
+  assert.equal(streamedRequests.at(-1).provinceWide, false);
+  assert.equal(streamedRequests.at(-1).districtExact, true);
+
+  documentRef.getElementById("landPublicityDistrict").value = "";
+  documentRef.getElementById("landPublicityCounty").value = "";
+  await documentRef.getElementById("runLandPublicity").dispatch("click");
+  assert.equal(streamedRequests.at(-1).provinceWide, true);
+  assert.equal(streamedRequests.at(-1).districtExact, false);
   context.scope.dispose();
 });
 
@@ -489,6 +521,7 @@ test("installers include the land publicity skill", () => {
   assert.match(nativeInstaller, /zj-land-publicity\/land_publicity_runner\.py/);
   const nativeHost = fs.readFileSync(path.join(repoRoot, "native-helper/native_host.js"), "utf8");
   assert.match(nativeHost, /message\?\.action === "run_land_publicity"/);
+  assert.match(nativeHost, /message\?\.action === "list_land_publicity_regions"/);
   assert.match(nativeHost, /TY_LAND_PROGRESS/);
   assert.match(nativeHost, /provinceWide: request\.provinceWide === true/);
   assert.match(nativeHost, /endDate: String\(request\.endDate/);
@@ -633,6 +666,35 @@ print(json.dumps({"validated": True, "filters": _website_server_filters(validate
   assert.equal(payload.filters.enrollStartTime, undefined);
   assert.equal(payload.filters.nowTime, undefined);
   assert.equal(payload.filters.landUse, 3);
+});
+
+test("land publicity uses dynamically selected county as the website region filter", () => {
+  const python = process.env.TIANYUAN_PYTHON_BIN || "python3";
+  const script = String.raw`
+import json, os, sys
+sys.path.insert(0, "skills/zj-land-publicity")
+from land_publicity_runner import _list_district_filter, _list_record_matches_request, _list_server_filters, validate_request
+
+request = {
+  "outputDirectory": os.getcwd(), "district": "宁波市", "county": "镇海区",
+  "location": "", "provinceWide": False, "districtExact": True,
+  "startDate": "", "endDate": "", "tradeMethods": [], "tradeStages": [], "landUses": [],
+}
+validated = validate_request(request)
+records = [{"districtName": "镇海区", "districtCode": "330211"}, {"districtName": "鄞州区", "districtCode": "330212"}]
+print(json.dumps({
+  "listFilter": _list_district_filter(validated),
+  "serverFilters": _list_server_filters(validated),
+  "matches": [_list_record_matches_request(validated, record) for record in records],
+}, ensure_ascii=False))
+`;
+  const result = spawnSync(python, ["-c", script], { cwd: repoRoot, encoding: "utf8", timeout: 30000 });
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1));
+  assert.deepEqual(payload.listFilter, { name: "镇海区", exact: true });
+  assert.equal(payload.serverFilters.regionName, "镇海区");
+  assert.equal(payload.serverFilters.fallbackRegionName, "宁波市");
+  assert.deepEqual(payload.matches, [true, false]);
 });
 
 console.log("Land publicity module tests passed.");

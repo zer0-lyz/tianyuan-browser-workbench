@@ -496,6 +496,17 @@ def build_map_assets(rows, output_path):
     .leaflet-tooltip.reference-label { border: 1px solid rgba(225,29,72,.28); border-radius: 7px; background: rgba(255,255,255,.96); color: #881337; box-shadow: 0 3px 10px rgba(15,23,42,.14); font-size: 10px; line-height: 1.3; padding: 3px 6px; }
     .reference-label-name { font-weight: 700; }
     .reference-label-note { margin-top: 2px; color: #64748b; max-width: 180px; white-space: normal; word-break: break-word; }
+    .marker-dialog-backdrop { position: fixed; z-index: 2000; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; background: rgba(15,23,42,.28); }
+    .marker-dialog-backdrop[hidden] { display: none; }
+    .marker-dialog-card { width: min(360px, calc(100vw - 32px)); box-sizing: border-box; padding: 16px; border: 1px solid rgba(203,213,225,.92); border-radius: 12px; background: rgba(255,255,255,.98); box-shadow: 0 16px 42px rgba(15,23,42,.22); }
+    .marker-dialog-title { margin: 0; color: #1f2937; font-size: 15px; font-weight: 700; }
+    .marker-dialog-description { margin: 4px 0 12px; color: #64748b; font-size: 11px; line-height: 1.4; }
+    .marker-dialog-field { display: grid; gap: 5px; margin-top: 9px; color: #475569; font-size: 11px; font-weight: 600; }
+    .marker-dialog-field input, .marker-dialog-field textarea { width: 100%; box-sizing: border-box; border: 1px solid #cbd5e0; border-radius: 7px; padding: 7px 8px; color: #1f2937; background: #fff; font: inherit; font-weight: 400; outline: none; resize: vertical; }
+    .marker-dialog-field input:focus, .marker-dialog-field textarea:focus { border-color: #3182ce; box-shadow: 0 0 0 2px rgba(49,130,206,.14); }
+    .marker-dialog-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 14px; }
+    .marker-dialog-actions .map-tool-primary { border-color: #2563eb; background: #2563eb; color: #fff; }
+    .marker-dialog-actions .map-tool-primary:hover { border-color: #1d4ed8; background: #1d4ed8; }
     .distance-panel { position: absolute; z-index: 1000; right: 12px; bottom: 12px; width: min(560px, calc(100vw - 320px)); max-height: min(300px, calc(100% - 130px)); overflow: auto; box-sizing: border-box; padding: 8px 10px; background: rgba(255,255,255,.96); border-radius: 10px; box-shadow: 0 4px 14px rgba(0,0,0,.10); }
     .distance-panel[hidden] { display: none; }
     .distance-panel-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 5px; color: #1f2937; font-size: 12px; font-weight: 700; }
@@ -553,6 +564,7 @@ def build_map_assets(rows, output_path):
   <div id="map"></div>
   <div class="legend-panel" aria-label="土地用途图例"><div id="legend" class="legend"></div><div class="map-tool-row"><button id="add-reference-marker" class="map-tool" type="button">插入位置标记</button><button id="clear-reference-markers" class="map-tool" type="button" disabled>清除标记</button></div><div id="map-tool-status" class="map-tool-status">点击“插入位置标记”后，再点击地图放置标记。</div><div id="reference-marker-list" class="reference-marker-list"></div></div>
   <div id="distance-panel" class="distance-panel" hidden><div class="distance-panel-title"><span>选中位置到标记点距离</span><button id="close-distance-panel" class="distance-panel-close" type="button" aria-label="关闭距离结果">×</button></div><div id="distance-panel-note" class="distance-panel-note"></div><div id="distance-results"></div></div>
+  <div id="marker-dialog" class="marker-dialog-backdrop" hidden><form id="marker-dialog-form" class="marker-dialog-card" role="dialog" aria-modal="true" aria-labelledby="marker-dialog-title"><h2 id="marker-dialog-title" class="marker-dialog-title">添加位置标记</h2><p class="marker-dialog-description">为地图上的位置填写名称，也可以补充备注。</p><label class="marker-dialog-field"><span>标记名称</span><input id="marker-dialog-name" type="text" maxlength="80" required autocomplete="off" /></label><label class="marker-dialog-field"><span>备注（可选）</span><textarea id="marker-dialog-note" rows="2" maxlength="160" placeholder="留空则不显示"></textarea></label><div class="marker-dialog-actions"><button id="marker-dialog-cancel" class="map-tool" type="button">取消</button><button class="map-tool map-tool-primary" type="submit">确定</button></div></form></div>
   <div class="work-panel collapsed" id="work-panel"><div class="floating-title"><h3 style="margin:0;">数据清单</h3><button class="panel-toggle" id="work-toggle" type="button">展开</button></div><div class="panel-body hidden" id="work-body"><div class="list-tabs" role="tablist" aria-label="数据清单类型"><button class="list-tab active" id="case-tab" type="button" role="tab" aria-selected="true">案例 <span id="case-tab-count">0</span></button><button class="list-tab" id="unlocated-tab" type="button" role="tab" aria-selected="false">未定位 <span id="unlocated-tab-count">0</span></button></div><section class="list-section" id="case-section"><input id="case-search" class="case-search" type="text" placeholder="输入位置 / 用途 / 日期筛选" /><div class="case-toolbar"><select id="case-sort" class="case-sort" title="案例排序"><option value="date_desc">时间：新到旧</option><option value="date_asc">时间：旧到新</option><option value="price_desc">单价：高到低</option><option value="price_asc">单价：低到高</option></select></div><div class="case-meta">共 <span id="case-count">0</span> 个展示点，点击任意条即可定位到地图。</div><ul id="case-list" class="case-list"></ul></section><section class="list-section hidden" id="unlocated-section"><div class="case-meta">共 <span id="unlocated-count">0</span> 条，未返回坐标的记录保留在这里。</div><ul id="unlocated-list" class="unlocated-list"></ul></section></div></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
   <script>
@@ -574,6 +586,7 @@ def build_map_assets(rows, output_path):
     const referenceMarkerLayers = new Map();
     let placementMode = false;
     let distanceLinesVisible = false;
+    let pendingMarkerPosition = null;
     const distanceLayer = L.layerGroup().addTo(map);
     function markerStorageKey() { return `zj-land-reference-markers:${location.pathname}`; }
     function saveReferenceMarkers() { try { localStorage.setItem(markerStorageKey(), JSON.stringify(referenceMarkerData)); } catch (_) {} }
@@ -628,11 +641,18 @@ def build_map_assets(rows, output_path):
       note.textContent = `已绘制 ${lineCount} 条距离线；每条线中间显示直线距离，标记点可拖动后自动更新。`;
       results.innerHTML = '';
     }
+    function closeMarkerDialog() { const dialog = document.getElementById('marker-dialog'); if (dialog) dialog.hidden = true; pendingMarkerPosition = null; setPlacementMode(false); }
+    function openMarkerDialog(latlng) { const dialog = document.getElementById('marker-dialog'), name = document.getElementById('marker-dialog-name'), note = document.getElementById('marker-dialog-note'); if (!dialog || !name || !note) return; pendingMarkerPosition = { lat: Number(latlng.lat), lon: Number(latlng.lng) }; name.value = `位置标记 ${referenceMarkerData.length + 1}`; note.value = ''; dialog.hidden = false; requestAnimationFrame(() => { name.focus(); name.select(); }); }
+    function confirmMarkerDialog(event) { event.preventDefault(); const name = document.getElementById('marker-dialog-name'), note = document.getElementById('marker-dialog-note'); const trimmed = String(name?.value || '').trim(); if (!trimmed) { name?.focus(); return; } if (!pendingMarkerPosition) { closeMarkerDialog(); return; } addReferenceMarker({ name: trimmed, note: String(note?.value || '').trim(), lat: pendingMarkerPosition.lat, lon: pendingMarkerPosition.lon }); closeMarkerDialog(); updateReferenceMarkerStatus(`已添加“${trimmed}”，可拖动标记调整位置。`); }
     function initReferenceMarkers() {
       document.getElementById('add-reference-marker')?.addEventListener('click', () => setPlacementMode(!placementMode));
       document.getElementById('clear-reference-markers')?.addEventListener('click', () => { referenceMarkerData.slice().forEach((item) => removeReferenceMarker(item.id)); updateReferenceMarkerStatus('标记已清除。点击“插入位置标记”后可重新放置。'); });
       document.getElementById('close-distance-panel')?.addEventListener('click', () => { const panel = document.getElementById('distance-panel'); if (panel) panel.hidden = true; });
-      map.on('click', (event) => { if (!placementMode) return; const defaultName = `位置标记 ${referenceMarkerData.length + 1}`; const name = window.prompt('请输入位置标记名称：', defaultName); if (name === null) return; const trimmed = name.trim(); if (!trimmed) { updateReferenceMarkerStatus('标记名称不能为空，请重新点击地图放置。'); return; } const note = window.prompt('请输入备注（可选，留空则不显示）：', '') || ''; addReferenceMarker({ name: trimmed, note: note.trim(), lat: event.latlng.lat, lon: event.latlng.lng }); setPlacementMode(false); updateReferenceMarkerStatus(`已添加“${trimmed}”，可拖动标记调整位置。`); });
+      document.getElementById('marker-dialog-form')?.addEventListener('submit', confirmMarkerDialog);
+      document.getElementById('marker-dialog-cancel')?.addEventListener('click', closeMarkerDialog);
+      document.getElementById('marker-dialog')?.addEventListener('click', (event) => { if (event.target?.id === 'marker-dialog') closeMarkerDialog(); });
+      document.addEventListener('keydown', (event) => { const dialog = document.getElementById('marker-dialog'); if (event.key === 'Escape' && dialog && !dialog.hidden) closeMarkerDialog(); });
+      map.on('click', (event) => { if (!placementMode) return; openMarkerDialog(event.latlng); });
       loadReferenceMarkers();
     }
     function buildPopup(item) {

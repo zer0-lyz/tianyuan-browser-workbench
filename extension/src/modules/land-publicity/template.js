@@ -23,13 +23,13 @@ export const landPublicityTemplate = `
   </section>
 
   <section class="section land-publicity-filters">
-    <div class="section-title-row"><div><h2>行政区域</h2><p class="section-description">选择地市或输入区县，也可以直接查询全省；勾选全省时会清除旧的市/区县条件。</p></div></div>
+    <div class="section-title-row"><div><h2>行政区域</h2><p class="section-description">行政区从官网自动加载；未选择地市、区县且未填写关键词时，按全省查询。</p></div><button id="reloadLandPublicityRegions" type="button" class="secondary land-publicity-region-refresh" title="刷新行政区列表" aria-label="刷新行政区列表">刷新</button></div>
     <div class="land-publicity-field-grid land-publicity-administrative-fields">
-      <label class="field-block"><span>地市</span><select id="landPublicityDistrict"><option value="">请选择地市（可不选）</option><option value="杭州市">杭州市</option><option value="宁波市">宁波市</option><option value="温州市">温州市</option><option value="湖州市">湖州市</option><option value="嘉兴市">嘉兴市</option><option value="绍兴市">绍兴市</option><option value="金华市">金华市</option><option value="衢州市">衢州市</option><option value="舟山市">舟山市</option><option value="台州市">台州市</option><option value="丽水市">丽水市</option></select></label>
-      <label class="field-block land-publicity-check-field"><span>行政区范围</span><span><input id="landPublicityProvinceWide" type="checkbox"> 全省/不限制行政区</span></label>
-      <label class="field-block"><span>区县/位置关键词</span><input id="landPublicityLocation" type="text" maxlength="160" placeholder="区县名优先直接查询，例如：镇海区；也可填街道关键词"></label>
-      <label class="field-block land-publicity-check-field"><span>districtName 匹配</span><span><input id="landPublicityDistrictExact" type="checkbox"> 精确匹配</span></label>
+      <label class="field-block"><span>地市</span><select id="landPublicityDistrict"><option value="">正在加载地市…</option></select></label>
+      <label class="field-block"><span>区县</span><select id="landPublicityCounty" disabled><option value="">请先选择地市</option></select></label>
+      <label class="field-block"><span>位置关键词（可选）</span><input id="landPublicityLocation" type="text" maxlength="160" placeholder="例如：街道、村、道路或交叉口"></label>
     </div>
+    <p id="landPublicityRegionStatus" class="section-description land-publicity-region-status" role="status">正在从官网加载行政区…</p>
   </section>
 
   <section class="section land-publicity-filters">
