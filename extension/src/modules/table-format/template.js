@@ -1,36 +1,33 @@
 export const tableFormatTemplate = `
-  <div class="page-heading">
+  <div class="page-heading table-format-page-heading">
     <div>
       <h2>表格设置</h2>
-      <p>批量统一 Word 文档中全部表格的字体、对齐、行高和边框</p>
+      <p>批量统一 Word 文档中的表格格式</p>
     </div>
     <button id="backFromTableFormat" type="button" class="secondary">功能中心</button>
   </div>
 
-  <section class="section table-format-panel">
-    <div class="section-title-row">
-      <div>
-        <h2>格式预设</h2>
-        <p class="section-description">会处理文档内的所有表格，包括表格中的嵌套表格。原文件只会在处理成功并校验通过后替换。</p>
-      </div>
-      <span class="badge">Word</span>
+  <section class="section table-format-panel table-format-preset-panel">
+    <div class="table-format-panel-header">
+      <h2>格式预设</h2>
+      <span class="badge">Word · 全部表格</span>
     </div>
+    <p class="table-format-note">包含嵌套表格；仅在处理成功并校验通过后替换原文件。</p>
     <div class="table-format-preset" aria-label="表格格式预设">
-      <span>宋体文本</span><span>Times New Roman 数字</span><span>10 号字</span><span>按窗口调整</span>
-      <span>最小行高 0.6 厘米</span><span>重复标题行</span><span>标题加粗居中</span><span>数字右对齐</span>
-      <span>上下线 1.5 磅</span><span>内部线 0.5 磅</span><span>左右无线</span>
+      <div><strong>字体</strong><span>宋体文本 · Times New Roman 数字 · 10 号</span></div>
+      <div><strong>布局</strong><span>按窗口调整 · 最小行高 0.6 厘米 · 重复标题</span></div>
+      <div><strong>对齐</strong><span>标题加粗居中 · 数字右对齐</span></div>
+      <div><strong>边框</strong><span>上下线 1.5 磅 · 内部线 0.5 磅 · 左右无线</span></div>
     </div>
   </section>
 
   <section class="section table-format-panel">
-    <div class="section-title-row">
-      <div>
-        <h2>选择 Word 文档</h2>
-        <p class="section-description">支持一次选择一个或多个 .docx 文件。暂不处理旧式 .doc 文件。</p>
-      </div>
+    <div class="table-format-panel-header">
+      <h2>选择 Word 文档</h2>
       <span id="tableFormatInputCount" class="badge">未选择</span>
     </div>
-    <div class="button-row">
+    <p class="table-format-note">支持多选 .docx；暂不处理旧式 .doc 文件。</p>
+    <div class="button-row table-format-toolbar">
       <button id="chooseTableFormatFiles" type="button" class="secondary">选择 Word 文档</button>
       <button id="clearTableFormatFiles" type="button" class="tiny secondary" disabled>清空选择</button>
     </div>
@@ -40,13 +37,11 @@ export const tableFormatTemplate = `
   </section>
 
   <section class="section table-format-panel">
-    <div class="section-title-row">
-      <div>
-        <h2>输出方式</h2>
-        <p class="section-description">覆盖模式会先生成临时文件，成功后再替换原文件。</p>
-      </div>
+    <div class="table-format-panel-header">
+      <h2>输出方式</h2>
+      <span class="table-format-note">覆盖前会先生成临时文件</span>
     </div>
-    <label class="field-block">
+    <label class="table-format-mode-row">
       <span>处理后文件</span>
       <select id="tableFormatOutputMode">
         <option value="copy_in_source">在原文件夹创建副本</option>
@@ -64,12 +59,12 @@ export const tableFormatTemplate = `
   </section>
 
   <section class="section table-format-panel table-format-run-panel">
-    <div class="section-title-row">
+    <div class="table-format-panel-header table-format-progress-header">
       <div>
         <h2>执行与进度</h2>
-        <p id="tableFormatProgressText" class="section-description">等待选择文件</p>
+        <p id="tableFormatProgressText" class="table-format-note">等待选择文件</p>
       </div>
-      <strong id="tableFormatProgressPercent">0%</strong>
+      <strong id="tableFormatProgressPercent" class="table-format-progress-percent">0%</strong>
     </div>
     <progress id="tableFormatProgressBar" max="100" value="0"></progress>
     <div class="table-format-counts" aria-live="polite">
@@ -77,10 +72,12 @@ export const tableFormatTemplate = `
       <span>已完成 <strong id="tableFormatSuccessCount">0</strong></span>
       <span>失败 <strong id="tableFormatFailedCount">0</strong></span>
     </div>
-    <div id="tableFormatResultMessage" class="inline-feedback">尚未执行</div>
-    <ul id="tableFormatResultList" class="table-format-result-list" aria-live="polite"></ul>
-    <div class="task-actions">
-      <button id="runTableFormat" type="button">开始执行</button>
+    <div class="table-format-run-footer">
+      <div id="tableFormatResultMessage" class="inline-feedback">尚未执行</div>
+      <div class="task-actions">
+        <button id="runTableFormat" type="button">开始执行</button>
+      </div>
     </div>
+    <ul id="tableFormatResultList" class="table-format-result-list" aria-live="polite"></ul>
   </section>
 `;

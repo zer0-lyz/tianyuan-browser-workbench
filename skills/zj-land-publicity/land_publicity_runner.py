@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import html
 import json
 import os
@@ -16,8 +17,8 @@ import re
 import shutil
 import sys
 import tempfile
-import uuid
 import zipfile
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
@@ -47,7 +48,26 @@ TRADE_METHOD_CODES = {
     "挂牌租赁": ("GPZL",),
     "拍卖租赁": ("PMZL",),
 }
+TRADE_METHOD_QUERY_CODES = {
+    "挂牌出让": {"tradeMode": 1, "transactionType": "CR"},
+    "挂牌租赁": {"tradeMode": 1, "transactionType": "ZL"},
+    "拍卖出让": {"tradeMode": 2, "transactionType": "CR"},
+    "拍卖租赁": {"tradeMode": 2, "transactionType": "ZL"},
+}
+LAND_USE_QUERY_CODES = {
+    "住宅用地": 1,
+    "商服用地": 2,
+    "工矿仓储": 3,
+    "其他用地": 4,
+}
 QUOTE_PRESETS = ("all", "today", "future_3_days", "future_7_days", "future_30_days", "custom")
+DISPLAY_NUMBER_COLUMNS = frozenset({
+    "土地面积(亩)", "土地面积(平方米)",
+    "成交单价(元/平方米)", "成交总价(万元)",
+    "坐标中心经度", "坐标中心纬度", "X坐标起点", "Y坐标起点",
+    "边界点组数", "边界点总数",
+})
+EXCEL_NUMBER_FORMAT = "#,##0.##"
 DISTRICTS = ("杭州市", "宁波市", "温州市", "湖州市", "嘉兴市", "绍兴市", "金华市", "衢州市", "舟山市", "台州市", "丽水市")
 CITY_CODE_PREFIXES = {
     "杭州": "3301",
@@ -94,6 +114,23 @@ def _number(value: Any) -> Optional[float]:
         return None
 
 
+def _format_number_display(value: Any) -> str:
+    """为结果页显示数字添加千位分隔符，同时去掉无意义的尾随零。"""
+    if value is None or value == "":
+        return ""
+    try:
+        parsed = Decimal(str(value).replace(",", "").strip())
+    except (InvalidOperation, ValueError):
+        return str(value)
+    return format(parsed, ",f").rstrip("0").rstrip(".") or "0"
+
+
+def _display_cell_value(column: str, value: Any) -> str:
+    if column in DISPLAY_NUMBER_COLUMNS:
+        return _format_number_display(value)
+    return "" if value is None else str(value)
+
+
 def _date(value: Any) -> Optional[dt.date]:
     text = _text(value, 80)
     if not text:
@@ -137,38 +174,54 @@ def _district_code_prefix(value: Any) -> str:
 
 
 def _district_matches(request: Dict[str, Any], record: Dict[str, Any]) -> bool:
-    if request.get("provinceWide") or not request.get("district"):
+    if request.get("provinceWide"):
         return True
-    requested = _normalise_district_name(request["district"])
     district_name = _normalise_district_name(record.get("districtName"))
-    city_code = _city_code_for_district(request["district"])
-    if city_code:
-        actual_code = _district_code_prefix(record.get("districtCode"))
-        if actual_code:
-            return actual_code == city_code
-        # Older captures may omit districtCode. Keep the name fallback for
-        # those records, while a present code remains authoritative.
-        requested_city = requested[:-1] if requested.endswith("市") else requested
-        actual_city = district_name[:-1] if district_name.endswith("市") else district_name
-        return requested_city == actual_city
-    if request.get("districtExact"):
-        return requested == district_name
-    return requested in district_name
+    if request.get("district"):
+        requested = _normalise_district_name(request["district"])
+        city_code = _city_code_for_district(request["district"])
+        if city_code:
+            actual_code = _district_code_prefix(record.get("districtCode"))
+            if actual_code:
+                if actual_code != city_code:
+                    return False
+            else:
+                # Older captures may omit districtCode. Keep the name fallback
+                # for those records, while a present code remains authoritative.
+                requested_city = requested[:-1] if requested.endswith("市") else requested
+                actual_city = district_name[:-1] if district_name.endswith("市") else district_name
+                if requested_city != actual_city:
+                    return False
+        elif request.get("districtExact"):
+            if requested != district_name:
+                return False
+        elif requested not in district_name:
+            return False
+    if request.get("county"):
+        requested_county = _normalise_district_name(request["county"])
+        if request.get("districtExact"):
+            return requested_county == district_name
+        return requested_county in district_name
+    return True
 
 
 def _list_district_filter(request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """减少详情请求：列表接口先按已知行政区代码/名称预筛选。"""
     if request.get("provinceWide"):
         return None
+    county = _text(request.get("county"), 100)
+    location = _text(request.get("location"), 160)
+    # 区县/市级位置关键词本身就是明确的行政区条件。
+    if county:
+        return {"name": county, "exact": bool(request.get("districtExact"))}
+    if re.search(r"(市|区|县)$", location):
+        return {"name": location, "exact": bool(request.get("districtExact"))}
     district = _text(request.get("district"), 100)
     if district:
         city_code = _city_code_for_district(district)
         if city_code:
             return {"code": city_code, "exact": False}
         return {"name": district, "exact": bool(request.get("districtExact"))}
-    location = _text(request.get("location"), 160)
-    if re.search(r"(市|区|县)$", location):
-        return {"name": location, "exact": bool(request.get("districtExact"))}
     return None
 
 
@@ -200,10 +253,31 @@ def _list_record_matches_request(request: Dict[str, Any], record: Dict[str, Any]
         if values and not _contains_any(values, (request["tradeForm"],)):
             return False
 
-    location_keyword = _text(request.get("location"), 160).lower()
+    if request.get("county"):
+        record_district = _text(record.get("districtName"), 100)
+        requested_county = _normalise_district_name(request["county"])
+        actual_county = _normalise_district_name(record_district)
+        if request.get("districtExact"):
+            if requested_county != actual_county:
+                return False
+        elif requested_county not in actual_county:
+            return False
+
+    raw_location = _text(request.get("location"), 160)
+    location_value = "" if request.get("provinceWide") and re.fullmatch(r".+(?:市|区|县)", raw_location) else raw_location
+    location_keyword = location_value.lower()
     if location_keyword:
+        record_district = _text(record.get("districtName"), 100)
+        if re.fullmatch(r".+(?:市|区|县)", location_value) and record_district:
+            requested_region = _normalise_district_name(location_value)
+            actual_region = _normalise_district_name(record_district)
+            if request.get("districtExact"):
+                if requested_region != actual_region:
+                    return False
+            elif requested_region not in actual_region:
+                return False
         list_location = _text(content_fields.get("地块位置"), 300)
-        if list_location and location_keyword not in f"{_text(record.get('districtName'))} {list_location}".lower():
+        if list_location and location_keyword not in f"{record_district} {list_location}".lower():
             return False
     return True
 
@@ -227,15 +301,21 @@ def _date_epoch_ms(value: Any, end_of_day: bool = False) -> Optional[int]:
 def _list_server_filters(request: Dict[str, Any]) -> Dict[str, Any]:
     """生成 land-bidding 列表 API 已验证支持的查询参数。"""
     filters: Dict[str, Any] = {}
-    if not request.get("provinceWide"):
-        region_name = _text(request.get("district"), 100)
-        location = _text(request.get("location"), 160)
-        if re.fullmatch(r".+(?:市|区|县)", location):
-            filters["regionName"] = location
-            if region_name and region_name != location:
-                filters["fallbackRegionName"] = region_name
-        elif region_name:
-            filters["regionName"] = region_name
+    if request.get("provinceWide"):
+        return filters
+    region_name = _text(request.get("district"), 100)
+    county = _text(request.get("county"), 100)
+    location = _text(request.get("location"), 160)
+    if county:
+        filters["regionName"] = county
+        if region_name and region_name != county:
+            filters["fallbackRegionName"] = region_name
+    elif re.fullmatch(r".+(?:市|区|县)", location):
+        filters["regionName"] = location
+        if region_name and region_name != location:
+            filters["fallbackRegionName"] = region_name
+    elif not request.get("provinceWide") and region_name:
+        filters["regionName"] = region_name
     start_ms = _date_epoch_ms(request.get("startDate"))
     end_ms = _date_epoch_ms(request.get("endDate"), end_of_day=True)
     if start_ms is not None:
@@ -244,6 +324,24 @@ def _list_server_filters(request: Dict[str, Any]) -> Dict[str, Any]:
         filters["enrollStartTime"] = _date_epoch_ms(f"{request['startYear']}-01-01")
     if end_ms is not None:
         filters["nowTime"] = end_ms
+    return filters
+
+
+def _website_server_filters(request: Dict[str, Any]) -> Dict[str, Any]:
+    """生成与 land-bidding 页面一致的列表接口参数。"""
+    filters = _list_server_filters(request)
+    methods = request.get("tradeMethods") or []
+    if len(methods) == 1 and methods[0] in TRADE_METHOD_QUERY_CODES:
+        filters.update(TRADE_METHOD_QUERY_CODES[methods[0]])
+
+    # 官网 land-bidding 页面一次只提交一个 landUse 编码；多选时保留
+    # 本地复核，避免把多个选择错误压缩成一个服务端条件。
+    land_uses = request.get("landUses") or []
+    if len(land_uses) == 1 and land_uses[0] in LAND_USE_QUERY_CODES:
+        filters["landUse"] = LAND_USE_QUERY_CODES[land_uses[0]]
+
+    filters["sortField"] = "ZYKSSJ"
+    filters["sortWay"] = "desc"
     return filters
 
 
@@ -289,9 +387,6 @@ def validate_request(request: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("LAND_END_DATE_INVALID")
     if start_date and end_date and _date(start_date) > _date(end_date):
         raise ValueError("LAND_DATE_RANGE_INVALID")
-    if not start_date and not start_year:
-        raise ValueError("LAND_START_DATE_OR_YEAR_REQUIRED")
-
     trade_form = _text(request.get("tradeForm"), 40)
     if trade_form and trade_form not in TRADE_FORMS:
         raise ValueError("LAND_TRADE_FORM_INVALID")
@@ -332,7 +427,7 @@ def validate_request(request: Dict[str, Any]) -> Dict[str, Any]:
     if area_min is not None and area_max is not None and area_min > area_max:
         raise ValueError("LAND_AREA_RANGE_INVALID")
 
-    max_pages = request.get("maxPages", 50)
+    max_pages = request.get("maxPages", 200)
     try:
         max_pages = int(max_pages)
     except (TypeError, ValueError):
@@ -341,17 +436,28 @@ def validate_request(request: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("LAND_MAX_PAGES_INVALID")
 
     district = _text(request.get("district"), 100)
+    county = _text(request.get("county"), 100)
     location = _text(request.get("location"), 160)
     province_wide = bool(request.get("provinceWide", False))
-    if not province_wide and not district and not location:
+    if province_wide:
+        district = ""
+        if re.fullmatch(r".+(?:市|区|县)", location):
+            location = ""
+        district_exact = False
+    else:
+        district_exact = bool(request.get("districtExact", False))
+    if not province_wide and not district and not county and not location:
         raise ValueError("LAND_DISTRICT_OR_LOCATION_REQUIRED")
     if district and len(district) > 100:
         raise ValueError("LAND_DISTRICT_TOO_LONG")
+    if county and len(county) > 100:
+        raise ValueError("LAND_COUNTY_TOO_LONG")
     return {
         "tradeForm": trade_form,
         "tradeMethods": _list(request.get("tradeMethods"), TRADE_METHODS, "tradeMethods"),
         "tradeStages": _list(request.get("tradeStages"), TRADE_STAGES, "tradeStages"),
         "district": district,
+        "county": county,
         "location": location,
         "landUses": _list(request.get("landUses"), LAND_USES, "landUses"),
         "startDate": start_date,
@@ -365,12 +471,51 @@ def validate_request(request: Dict[str, Any]) -> Dict[str, Any]:
         "areaMin": area_min,
         "areaMax": area_max,
         "areaUnit": area_unit,
-        "districtExact": bool(request.get("districtExact", False)),
+        "districtExact": district_exact,
         "provinceWide": province_wide,
         "generateMap": bool(request.get("generateMap", False)),
         "maxPages": max_pages,
         "outputDirectory": output_directory,
     }
+
+
+def _query_signature(request: Dict[str, Any]) -> str:
+    """为同一组有效筛选条件生成稳定指纹，不把输出目录纳入范围。"""
+    query_fields = {
+        key: request.get(key)
+        for key in (
+            "tradeForm", "tradeMethods", "tradeStages", "district", "county", "provinceWide", "location",
+            "landUses", "startDate", "endDate", "startYear", "quotePreset", "quoteStartDate",
+            "quoteEndDate", "startPriceMin", "startPriceMax", "areaMin", "areaMax", "areaUnit",
+            "districtExact", "maxPages",
+        )
+    }
+    for key in ("tradeMethods", "tradeStages", "landUses"):
+        query_fields[key] = sorted(query_fields.get(key) or [])
+    canonical = json.dumps(query_fields, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:10]
+
+
+def _safe_filename_fragment(value: str, fallback: str) -> str:
+    fragment = re.sub(r"[^\w\u4e00-\u9fff.-]+", "-", value, flags=re.UNICODE).strip("-_.")
+    return fragment[:48] or fallback
+
+
+def _result_stem(request: Dict[str, Any]) -> str:
+    """生成可读且稳定的结果文件名；指纹保证相近条件不会互相覆盖。"""
+    scope = "全省" if request.get("provinceWide") else (request.get("county") or request.get("district") or request.get("location") or "指定范围")
+    uses = "、".join(sorted(request.get("landUses") or [])) or "全部用途"
+    if request.get("startDate") or request.get("endDate"):
+        date_scope = f"{request.get('startDate') or '不限'}至{request.get('endDate') or '不限'}"
+    elif request.get("startYear"):
+        date_scope = f"{request['startYear']}年以来"
+    else:
+        date_scope = "不限日期"
+    label = "_".join(
+        _safe_filename_fragment(value, fallback)
+        for value, fallback in ((scope, "范围"), (uses, "用途"), (date_scope, "日期"))
+    )
+    return f"浙江土地成交公示_{label}_{_query_signature(request)}"
 
 
 def _field_values(record: Dict[str, Any], detail: Dict[str, Any], names: Iterable[str]) -> List[str]:
@@ -393,7 +538,7 @@ def _contains_any(values: Iterable[str], choices: Iterable[str]) -> bool:
         "挂牌租赁": ("挂牌租赁",),
         "拍卖租赁": ("拍卖租赁",),
         "工矿仓储": ("工矿仓储", "工业用地", "仓储用地", "工业"),
-        "商服用地": ("商服用地", "商服", "商业", "商业服务"),
+        "商服用地": ("商服用地", "商服", "商业", "商业服务", "商务金融", "金融用地"),
         "住宅用地": ("住宅用地", "住宅", "居住"),
         "其他用地": ("其他用地", "其他"),
         "结果公示": ("结果公示", "成交公示", "成交"),
@@ -625,9 +770,9 @@ def _coord_fields(item: Dict[str, Any]) -> Dict[str, Any]:
 
 OUTPUT_COLUMNS = [
     "公示编号", "公示标题", "行政区", "地块编号（宗地编码）", "地块位置", "土地用途",
-    "土地面积(亩)", "土地面积(平方米)", "出让年限", "起始单价(元/平方米)", "起始总价(万元)",
+    "土地面积(亩)", "土地面积(平方米)", "出让年限",
     "成交单价(元/平方米)", "成交总价(万元)", "受让单位", "发布时间", "详情页网址",
-    "交易形式", "交易方式", "交易阶段", "报价开始时间", "坐标状态", "坐标类型",
+    "交易形式", "交易方式", "交易阶段", "坐标状态", "坐标类型",
     "坐标中心经度", "坐标中心纬度", "X坐标起点", "Y坐标起点", "边界点组数", "边界点总数",
     "坐标数据文件", "地图文件",
 ]
@@ -673,6 +818,10 @@ def _filter_condition_summary(request: Dict[str, Any]) -> str:
         district = _text(request.get("district"), 100)
         suffix = "（districtName精确匹配）" if request.get("districtExact") else ""
         conditions.append(f"行政区={district}{suffix}")
+    if request.get("county"):
+        county = _text(request.get("county"), 100)
+        suffix = "（districtName精确匹配）" if request.get("districtExact") else ""
+        conditions.append(f"区县={county}{suffix}")
     if request.get("location"):
         conditions.append(f"位置关键词={_text(request.get('location'), 160)}")
     if request.get("tradeForm"):
@@ -729,7 +878,9 @@ def write_excel(path: Path, rows: List[Dict[str, Any]], request: Dict[str, Any],
     for row_index, row in enumerate(rows, 2):
         for column_index, column in enumerate(OUTPUT_COLUMNS, 1):
             value = row.get(column, "")
-            sheet.cell(row_index, column_index, value)
+            cell = sheet.cell(row_index, column_index, value)
+            if column in DISPLAY_NUMBER_COLUMNS and isinstance(value, (int, float)) and not isinstance(value, bool):
+                cell.number_format = EXCEL_NUMBER_FORMAT
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = f"A1:{get_column_letter(len(OUTPUT_COLUMNS))}{max(1, len(rows) + 1)}"
     for column_index, column in enumerate(OUTPUT_COLUMNS, 1):
@@ -765,15 +916,24 @@ def _table_cell(value: Any) -> str:
 def write_result_html(path: Path, rows: List[Dict[str, Any]], request: Dict[str, Any], summary: Dict[str, Any], file_names: Dict[str, str]) -> None:
     columns = [
         "公示编号", "公示标题", "行政区", "地块编号（宗地编码）", "地块位置", "土地用途",
-        "土地面积(亩)", "土地面积(平方米)", "出让年限", "起始单价(元/平方米)", "起始总价(万元)",
+        "土地面积(亩)", "土地面积(平方米)", "出让年限",
         "成交单价(元/平方米)", "成交总价(万元)", "受让单位", "发布时间", "详情页网址",
-        "交易方式", "交易阶段", "报价开始时间", "坐标状态",
+        "交易方式", "交易阶段", "坐标状态",
     ]
-    header = "".join(f"<th>{_table_cell(column)}</th>" for column in columns)
+    header = "".join(
+        f'<th><div class="table-header-cell"><span>{_table_cell(column)}</span><button class="column-filter-trigger" type="button" data-column="{index + 1}" aria-label="筛选{_table_cell(column)}" title="筛选{_table_cell(column)}"><span class="filter-funnel" aria-hidden="true"></span></button></div></th>'
+        for index, column in enumerate(columns)
+    )
     body_parts: List[str] = []
     for row in rows:
         no_coord = row.get("坐标状态", "").startswith("无坐标")
         css = " class=\"no-coordinate\"" if no_coord else ""
+        map_key = _table_cell(row.get("公示标题") or row.get("公示编号") or "")
+        select_control = (
+            f'<input class="detail-select" type="checkbox" data-map-key="{map_key}" aria-label="选择 {map_key}">'
+            if not no_coord and map_key
+            else '<input class="detail-select" type="checkbox" disabled title="该记录没有坐标，无法在地图上定位">'
+        )
         cells_parts = []
         for column in columns:
             value = row.get(column, "")
@@ -781,10 +941,11 @@ def write_result_html(path: Path, rows: List[Dict[str, Any]], request: Dict[str,
                 safe_url = _table_cell(value)
                 cells_parts.append(f'<td><a href="{safe_url}" target="_blank" rel="noopener">打开详情</a></td>')
             else:
-                cells_parts.append(f"<td>{_table_cell(value)}</td>")
+                cell_class = ' class="numeric-cell"' if column in DISPLAY_NUMBER_COLUMNS or column == "出让年限" else ""
+                cells_parts.append(f"<td{cell_class}>{_table_cell(_display_cell_value(column, value))}</td>")
         cells = "".join(cells_parts)
-        body_parts.append(f"<tr{css}>{cells}</tr>")
-    body = "".join(body_parts) or f'<tr><td colspan="{len(columns)}" class="empty">没有符合条件的记录</td></tr>'
+        body_parts.append(f'<tr{css} data-map-key="{map_key}"><td class="select-cell">{select_control}</td>{cells}</tr>')
+    body = "".join(body_parts) or f'<tr><td colspan="{len(columns) + 1}" class="empty">没有符合条件的记录</td></tr>'
     empty_notice = ""
     if not rows:
         conditions = _table_cell(_filter_condition_summary(request))
@@ -792,9 +953,9 @@ def write_result_html(path: Path, rows: List[Dict[str, Any]], request: Dict[str,
         if request.get("maxPages") == 1 and (request.get("district") or request.get("location")):
             advice = "当前只抓第1页；列表按发布时间倒序，目标行政区可能不在最新50条中，请改为50页（行政区推荐）后重试。"
         empty_notice = (
-            '<section class="card empty-result-notice"><h2>结果为 0 条</h2>'
+            '<div class="inline-notice empty-result-notice"><strong>结果为 0 条</strong>'
             f'<p>当前筛选条件：{conditions}</p>'
-            f'<p>{advice}</p></section>'
+            f'<p>{advice}</p></div>'
         )
     coordinate_count = sum(1 for row in rows if row.get("坐标状态") == "有坐标")
     missing_coordinate_count = sum(1 for row in rows if row.get("坐标状态", "").startswith("无坐标"))
@@ -805,31 +966,184 @@ def write_result_html(path: Path, rows: List[Dict[str, Any]], request: Dict[str,
         if warnings else ""
     )
     map_name = file_names.get("map", "")
-    map_block = (
-        f'<div class="map-actions"><a class="button" href="{_table_cell(map_name)}" target="_blank" rel="noopener">查看地图</a></div>'
-        f'<iframe title="地图预览" src="{_table_cell(map_name)}"></iframe>'
-        if map_name else '<div class="map-actions"><button class="button secondary" type="button" disabled>查看地图（本次未生成）</button></div><div class="map-empty">未勾选生成地图；结果中仍标注每条记录的坐标状态。</div>'
+    map_action = (
+        f'<a class="button" href="{_table_cell(map_name)}" target="_blank" rel="noopener">查看地图</a>'
+        if map_name else '<button class="button secondary" type="button" disabled>查看地图（本次未生成）</button>'
+    )
+    map_preview = (
+        f'<div class="map-frame-shell" aria-label="可调整大小的地图区域"><iframe id="land-map-frame" title="地图预览" src="{_table_cell(map_name)}"></iframe><div id="map-resize-handle" class="map-resize-handle" role="separator" aria-orientation="vertical" aria-label="拖动调整地图高度" title="拖动调整地图高度"></div></div>'
+        if map_name else '<div class="map-empty">未勾选生成地图；结果中仍标注每条记录的坐标状态。</div>'
     )
     excel_name = file_names["excel"]
+    excel_actions = f'<div class="actions"><a class="button" href="{_table_cell(excel_name)}" download>下载 Excel</a><a class="button secondary" href="{_table_cell(excel_name)}" target="_blank" rel="noopener">打开 Excel</a></div>'
+    detail_script = """<script>
+(() => {
+  const frame = document.getElementById('land-map-frame');
+  const mapFrameShell = document.querySelector('.map-frame-shell');
+  const mapResizeHandle = document.getElementById('map-resize-handle');
+  const filter = document.getElementById('detail-filter');
+  const columnFilterTriggers = Array.from(document.querySelectorAll('.column-filter-trigger'));
+  const columnFilterPopover = document.getElementById('column-filter-popover');
+  const columnFilterLabel = document.getElementById('column-filter-label');
+  const columnFilterInput = document.getElementById('column-filter-input');
+  const clearColumnFilterButton = document.getElementById('clear-column-filter');
+  const closeColumnFilterButton = document.getElementById('close-column-filter');
+  const count = document.getElementById('detail-count');
+  const clearButton = document.getElementById('clear-selection');
+  const distanceButton = document.getElementById('show-selected-distances');
+  const clearFiltersButton = document.getElementById('clear-table-filters');
+  const rows = Array.from(document.querySelectorAll('#detail-table tbody tr[data-map-key]'));
+  const selected = new Set();
+  const columnFilterValues = new Map();
+  let activeColumnIndex = null;
+  let resizeState = null;
+  function send(message) { if (frame?.contentWindow) frame.contentWindow.postMessage(message, '*'); }
+  function minimumMapHeight() { return window.matchMedia('(max-width: 820px)').matches ? 360 : 440; }
+  function stopMapResize(event) {
+    if (!resizeState) return;
+    if (event && mapResizeHandle?.releasePointerCapture && mapResizeHandle.hasPointerCapture(event.pointerId)) mapResizeHandle.releasePointerCapture(event.pointerId);
+    resizeState = null;
+    document.body.classList.remove('resizing-map');
+  }
+  mapResizeHandle?.addEventListener('pointerdown', (event) => {
+    if (!mapFrameShell) return;
+    event.preventDefault();
+    resizeState = { startY: event.clientY, startHeight: mapFrameShell.getBoundingClientRect().height };
+    mapResizeHandle.setPointerCapture?.(event.pointerId);
+    document.body.classList.add('resizing-map');
+  });
+  mapResizeHandle?.addEventListener('pointermove', (event) => {
+    if (!resizeState || !mapFrameShell) return;
+    const nextHeight = Math.max(minimumMapHeight(), Math.round(resizeState.startHeight + event.clientY - resizeState.startY));
+    mapFrameShell.style.height = `${nextHeight}px`;
+  });
+  mapResizeHandle?.addEventListener('pointerup', stopMapResize);
+  mapResizeHandle?.addEventListener('pointercancel', stopMapResize);
+  function syncColumnFilterState() {
+    columnFilterTriggers.forEach((trigger) => {
+      const index = Number(trigger.dataset.column);
+      trigger.classList.toggle('active', Boolean(columnFilterValues.get(index)));
+    });
+  }
+  function closeColumnFilter() {
+    if (!columnFilterPopover) return;
+    columnFilterPopover.hidden = true;
+    columnFilterTriggers.forEach((trigger) => trigger.closest('th')?.classList.remove('filter-open'));
+    activeColumnIndex = null;
+  }
+  function openColumnFilter(trigger) {
+    if (!columnFilterPopover || !columnFilterInput) return;
+    activeColumnIndex = Number(trigger.dataset.column);
+    columnFilterLabel.textContent = `筛选${trigger.getAttribute('aria-label')?.replace(/^筛选/, '') || '本列'}`;
+    columnFilterInput.value = columnFilterValues.get(activeColumnIndex) || '';
+    columnFilterTriggers.forEach((item) => item.closest('th')?.classList.toggle('filter-open', item === trigger));
+    columnFilterPopover.hidden = false;
+    const rect = trigger.getBoundingClientRect();
+    const width = 230;
+    const left = Math.min(Math.max(8, rect.left - 150), Math.max(8, window.innerWidth - width - 8));
+    const top = Math.min(rect.bottom + 6, Math.max(8, window.innerHeight - 86));
+    columnFilterPopover.style.left = `${left}px`;
+    columnFilterPopover.style.top = `${top}px`;
+    columnFilterInput.focus();
+    columnFilterInput.select();
+  }
+  function updateSelection() {
+    document.querySelectorAll('.detail-select').forEach((input) => input.closest('tr')?.classList.toggle('selected-row', input.checked));
+    if (count) count.textContent = `显示 ${rows.filter((row) => !row.hidden).length} 条，已选 ${selected.size} 条`;
+    if (clearButton) clearButton.disabled = selected.size === 0;
+    if (distanceButton) distanceButton.disabled = selected.size === 0 || !frame?.contentWindow;
+    send({ type: 'ZJ_LAND_MAP_SET_SELECTED', sourceCodes: [...selected] });
+  }
+  function applyFilter() {
+    const query = String(filter?.value || '').trim().toLowerCase();
+    const activeColumnFilters = [...columnFilterValues.entries()]
+      .map(([index, value]) => ({ index, value: String(value || '').trim().toLowerCase() }))
+      .filter(({ value }) => value);
+    rows.forEach((row) => {
+      const matchesGlobal = !query || row.textContent.toLowerCase().includes(query);
+      const matchesColumns = activeColumnFilters.every(({ index, value }) => String(row.cells[index]?.textContent || '').toLowerCase().includes(value));
+      row.hidden = !(matchesGlobal && matchesColumns);
+    });
+    updateSelection();
+  }
+  rows.forEach((row) => {
+    const checkbox = row.querySelector('.detail-select');
+    checkbox?.addEventListener('change', (event) => {
+      const key = event.currentTarget.dataset.mapKey;
+      if (!key) return;
+      if (event.currentTarget.checked) selected.add(key); else selected.delete(key);
+      updateSelection();
+    });
+    row.addEventListener('click', (event) => {
+      if (event.target.closest('input, a, button')) return;
+      const key = row.dataset.mapKey;
+      if (key) send({ type: 'ZJ_LAND_MAP_FOCUS', sourceCodes: [key] });
+    });
+  });
+  filter?.addEventListener('input', applyFilter);
+  columnFilterTriggers.forEach((trigger) => trigger.addEventListener('click', (event) => {
+    event.stopPropagation();
+    if (!columnFilterPopover.hidden && activeColumnIndex === Number(trigger.dataset.column)) closeColumnFilter();
+    else openColumnFilter(trigger);
+  }));
+  columnFilterInput?.addEventListener('input', () => {
+    if (activeColumnIndex === null) return;
+    const value = columnFilterInput.value.trim();
+    if (value) columnFilterValues.set(activeColumnIndex, value);
+    else columnFilterValues.delete(activeColumnIndex);
+    syncColumnFilterState();
+    applyFilter();
+  });
+  clearColumnFilterButton?.addEventListener('click', () => {
+    if (activeColumnIndex !== null) columnFilterValues.delete(activeColumnIndex);
+    if (columnFilterInput) columnFilterInput.value = '';
+    syncColumnFilterState();
+    applyFilter();
+  });
+  closeColumnFilterButton?.addEventListener('click', closeColumnFilter);
+  clearFiltersButton?.addEventListener('click', () => {
+    if (filter) filter.value = '';
+    columnFilterValues.clear();
+    if (columnFilterInput) columnFilterInput.value = '';
+    syncColumnFilterState();
+    closeColumnFilter();
+    applyFilter();
+  });
+  clearButton?.addEventListener('click', () => {
+    selected.clear();
+    document.querySelectorAll('.detail-select').forEach((input) => { input.checked = false; });
+    updateSelection();
+  });
+  distanceButton?.addEventListener('click', () => {
+    if (!selected.size) return;
+    send({ type: 'ZJ_LAND_MAP_DISTANCE_REQUEST', sourceCodes: [...selected] });
+  });
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('.column-filter-popover, .column-filter-trigger')) closeColumnFilter();
+  });
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeColumnFilter(); });
+  frame?.addEventListener('load', () => { send({ type: 'ZJ_LAND_MAP_SET_SELECTED', sourceCodes: [...selected] }); if (distanceButton) distanceButton.disabled = selected.size === 0; });
+  window.addEventListener('message', (event) => { if (event.data?.type === 'ZJ_LAND_MAP_READY') updateSelection(); });
+  applyFilter();
+})();
+</script>"""
     html_content = f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>浙江土地成交公示结果</title>
 <style>
 body{{margin:0;background:#f5f7fb;color:#1c2430;font:14px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
-main{{max-width:1440px;margin:0 auto;padding:28px}}h1{{margin:0 0 8px;font-size:25px}}h2{{margin:0 0 12px;font-size:18px}}.muted{{color:#667085}}
-.card{{background:#fff;border:1px solid #e5e9f0;border-radius:14px;padding:18px;margin:16px 0;box-shadow:0 4px 18px #1d29390d}}
-.actions{{display:flex;gap:10px;flex-wrap:wrap}}.button{{display:inline-block;padding:8px 13px;border-radius:8px;background:#2457c5;color:#fff;text-decoration:none}}.button.secondary{{background:#eef3ff;color:#2457c5}}
-.stats{{display:flex;gap:28px;flex-wrap:wrap}}.stat strong{{display:block;font-size:22px}}.stat span{{color:#667085}}.result-summary{{margin:12px 0 0}}.filter-notes{{margin-top:14px;color:#8b5e00}}.filter-notes summary{{cursor:pointer;color:#667085}}.filter-notes ul{{margin:8px 0 0;padding-left:20px}}
-.table-wrap{{overflow:auto}}table{{border-collapse:collapse;width:100%;min-width:980px}}th,td{{border-bottom:1px solid #edf0f5;padding:9px 10px;text-align:left;white-space:nowrap}}th{{background:#f8fafc;position:sticky;top:0}}tr.no-coordinate{{background:#fff8e6}}.empty{{text-align:center;color:#667085;padding:30px}}
-iframe{{width:100%;height:520px;border:1px solid #e5e9f0;border-radius:10px}}.map-empty{{padding:20px;color:#667085;background:#f8fafc;border-radius:10px}}li{{margin:6px 0;color:#8b5e00}}
+main{{max-width:1440px;margin:0 auto;padding:16px 20px}}h1{{margin:0 0 8px;font-size:21px}}h2{{margin:0 0 10px;font-size:17px}}.muted{{color:#667085}}
+.card{{background:#fff;border:1px solid #e5e9f0;border-radius:10px;box-shadow:0 3px 12px #1d29390a;padding:11px;margin:8px 0}}
+.actions{{display:flex;gap:7px;flex-wrap:wrap}}.button{{display:inline-block;padding:6px 10px;border-radius:7px;background:#2457c5;color:#fff;text-decoration:none;font-size:13px;white-space:nowrap}}.button.secondary{{background:#eef3ff;color:#2457c5}}.section-heading{{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}}.section-heading h2{{margin:0}}
+.filter-notes{{margin:0 0 8px;color:#8b5e00;font-size:12px}}.filter-notes summary{{cursor:pointer;color:#667085}}.filter-notes ul{{margin:6px 0 0;padding-left:18px}}.inline-notice{{margin:0 0 8px;padding:8px 10px;border-radius:7px;background:#fff8e6;color:#8b5e00;font-size:12px;line-height:1.4}}.inline-notice p{{margin:3px 0 0}}
+.detail-toolbar{{display:flex;align-items:center;gap:8px;margin:-2px 0 8px}}.detail-filter{{width:280px;max-width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid #d0d7e2;border-radius:7px;font:inherit;font-size:12px}}.detail-filter:focus{{outline:2px solid #c7d7ff;border-color:#2457c5}}.detail-count{{color:#667085;font-size:12px}}.clear-selection,.clear-table-filters,.show-selected-distances{{border:0;background:#eef3ff;color:#2457c5;border-radius:7px;padding:6px 9px;font-size:12px;cursor:pointer}}.clear-selection{{margin-left:auto}}.clear-selection:disabled,.show-selected-distances:disabled{{opacity:.45;cursor:default}}.table-wrap{{overflow:auto}}table{{border-collapse:collapse;width:100%;min-width:1020px}}th,td{{border-bottom:1px solid #edf0f5;padding:7px 8px;text-align:left;white-space:nowrap}}th{{background:#f8fafc;position:sticky;top:0;z-index:3}}thead tr.filter-row th{{top:34px;z-index:2;background:#fff;padding:4px 5px}}.column-filter{{width:100%;box-sizing:border-box;padding:4px 6px;border:1px solid #d0d7e2;border-radius:6px;font:inherit;font-size:11px;color:#344054;background:#fff}}.column-filter:focus{{outline:2px solid #c7d7ff;border-color:#2457c5}}.select-filter-cell{{width:34px}}th:first-child,td.select-cell{{width:34px;text-align:center;padding-left:6px;padding-right:6px}}td.numeric-cell{{text-align:right;font-variant-numeric:tabular-nums}}tr[data-map-key]{{cursor:pointer}}tr[data-map-key]:hover{{background:#f5f8ff}}tr.selected-row{{background:#fff4df!important}}tr.no-coordinate{{background:#fff8e6}}.detail-select{{width:14px;height:14px;accent-color:#f97316}}.empty{{text-align:center;color:#667085;padding:24px}}
+.table-header-cell{{display:flex;align-items:center;justify-content:space-between;gap:6px;min-width:0}}.table-header-cell>span{{overflow:hidden;text-overflow:ellipsis}}.column-filter-trigger{{display:inline-flex;align-items:center;justify-content:center;flex:0 0 20px;width:20px;height:20px;padding:0;border:0;border-radius:5px;background:transparent;color:#98a2b3;cursor:pointer}}.column-filter-trigger:hover,.column-filter-trigger.active{{background:#eaf1ff;color:#2457c5}}.filter-funnel{{position:relative;display:block;width:11px;height:12px}}.filter-funnel::before{{content:"";position:absolute;left:1px;top:1px;width:9px;height:5px;background:currentColor;clip-path:polygon(0 0,100% 0,62% 100%,38% 100%)}}.filter-funnel::after{{content:"";position:absolute;left:5px;top:6px;width:2px;height:5px;background:currentColor;border-radius:1px}}.column-filter-popover{{position:fixed;z-index:10000;width:230px;box-sizing:border-box;padding:9px;background:#fff;border:1px solid #dbe3ef;border-radius:8px;box-shadow:0 10px 26px rgba(15,23,42,.18)}}.column-filter-popover[hidden]{{display:none}}.column-filter-popover-head{{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;color:#344054;font-size:12px;font-weight:700}}.column-filter-popover-close{{border:0;background:transparent;color:#98a2b3;font-size:17px;line-height:1;cursor:pointer}}.column-filter-popover input{{width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font:inherit;font-size:12px}}.column-filter-popover input:focus{{outline:2px solid #c7d7ff;border-color:#2457c5}}.column-filter-popover-actions{{display:flex;justify-content:flex-end;gap:6px;margin-top:7px}}.column-filter-popover-actions button{{border:0;border-radius:6px;padding:5px 8px;background:#eef3ff;color:#2457c5;font-size:11px;cursor:pointer}}
+.map-frame-shell{{position:relative;width:100%;height:440px;min-height:440px;max-width:100%;overflow:hidden;border:1px solid #e5e9f0;border-radius:8px;background:#f8fafc}}.map-frame-shell iframe{{display:block;width:100%;height:100%;border:0;border-radius:inherit}}.map-resize-handle{{position:absolute;z-index:4;left:0;right:0;bottom:0;height:14px;cursor:ns-resize;touch-action:none;background:linear-gradient(to bottom,transparent 0,transparent 45%,rgba(36,87,197,.16) 46%,rgba(36,87,197,.16) 54%,transparent 55%);}}.map-resize-handle::after{{content:"";position:absolute;left:50%;bottom:4px;width:34px;height:3px;transform:translateX(-50%);border-radius:4px;background:#98a2b3;opacity:.85}}body.resizing-map{{user-select:none;cursor:ns-resize}}body.resizing-map iframe{{pointer-events:none}}.map-empty{{padding:16px;color:#667085;background:#f8fafc;border-radius:8px}}li{{margin:5px 0;color:#8b5e00}}@media (max-width:820px){{main{{padding:12px}}.section-heading{{align-items:flex-start}}.section-heading .actions{{flex-shrink:0}}.map-frame-shell{{height:360px;min-height:360px}}}}
 </style></head><body><main>
-<h1>浙江土地成交公示结果</h1><p class="muted">本页为独立结果页；行政区和成交日期已用于列表查询，其余接口未支持的条件再读取候选详情复核。</p>
-<section class="card"><div class="stats"><div class="stat"><strong>{summary.get("fetched", 0)}</strong><span>条件候选</span></div><div class="stat"><strong>{len(rows)}</strong><span>详情复核通过</span></div><div class="stat"><strong>{coordinate_count}</strong><span>可定位</span></div><div class="stat"><strong>{missing_coordinate_count}</strong><span>无坐标</span></div></div>
-<p class="muted result-summary">共抓取 {summary.get("fetched", 0)} 条，按当前条件保留 {len(rows)} 条；原始抓取中有坐标 {summary.get("fetchedCoordinateCount", coordinate_count)} 条，地图展示筛选结果中的 {coordinate_count} 条。</p>
-<div class="actions" style="margin-top:16px"><a class="button" href="{_table_cell(excel_name)}" download>下载 Excel</a><a class="button secondary" href="{_table_cell(excel_name)}" target="_blank" rel="noopener">打开 Excel</a></div></section>
-{empty_notice}{warning_block}<section class="card"><h2>地图（{coordinate_count} 条可定位结果）</h2>{map_block}<p class="muted">地图仅展示符合筛选条件且返回 resourceCoordinate.center 的记录；无坐标记录保留在下方明细中。</p></section>
-<section class="card"><h2>成交公示明细</h2><div class="table-wrap"><table><thead><tr>{header}</tr></thead><tbody>{body}</tbody></table></div></section>
-</main></body></html>"""
+<h1>浙江土地成交公示</h1>
+<section class="card"><div class="section-heading"><h2>地图（{coordinate_count} 条可定位结果）</h2><div class="map-actions">{map_action}</div></div>{map_preview}</section>
+<section class="card"><div class="section-heading"><h2>成交公示明细</h2>{excel_actions}</div>{empty_notice}{warning_block}<div class="detail-toolbar"><input id="detail-filter" class="detail-filter" type="search" placeholder="筛选编号、位置、用途、行政区……"><span id="detail-count" class="detail-count"></span><button id="clear-table-filters" class="clear-table-filters" type="button">清除筛选</button><button id="show-selected-distances" class="show-selected-distances" type="button" disabled>显示到标记距离</button><button id="clear-selection" class="clear-selection" type="button" disabled>清除勾选</button></div><div id="column-filter-popover" class="column-filter-popover" hidden><div class="column-filter-popover-head"><span id="column-filter-label">列筛选</span><button id="close-column-filter" class="column-filter-popover-close" type="button" aria-label="关闭">×</button></div><input id="column-filter-input" type="search" placeholder="输入关键词"><div class="column-filter-popover-actions"><button id="clear-column-filter" type="button">清除当前列</button></div></div><div class="table-wrap"><table id="detail-table"><thead><tr><th>选择</th>{header}</tr></thead><tbody>{body}</tbody></table></div></section>
+{detail_script}</main></body></html>"""
     path.write_text(html_content, encoding="utf-8")
 
 
@@ -847,8 +1161,8 @@ def execute_request(
 ) -> Dict[str, Any]:
     config = validate_request(request)
     output_dir = Path(config["outputDirectory"])
-    job_id = f"{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
-    stem = f"浙江土地成交公示_{job_id}"
+    query_signature = _query_signature(config)
+    stem = _result_stem(config)
     final_paths = {
         "excel": output_dir / f"{stem}.xlsx",
         "html": output_dir / f"{stem}.html",
@@ -856,6 +1170,7 @@ def execute_request(
         "points": output_dir / f"{stem}_points.js",
         "map": output_dir / f"{stem}_map.html",
     }
+    output_will_update = final_paths["excel"].exists() or final_paths["html"].exists()
     stage = Path(tempfile.mkdtemp(prefix=".tianyuan-land-", dir=output_dir))
     try:
         progress("fetching", 5, "正在按条件读取浙江土地成交公示候选列表", fetched=0, filtered=0, written=0)
@@ -865,7 +1180,7 @@ def execute_request(
             max_pages=config["maxPages"],
             record_filter=lambda record: _list_record_matches_request(config, record),
             stop_before=_list_stop_before(config),
-            server_filters=_list_server_filters(config),
+            server_filters=_website_server_filters(config),
         )
         fetched_count = len(records)
         progress("fetching", 38, f"条件候选读取完成，共 {fetched_count} 条，正在复核详情", fetched=fetched_count, filtered=0, written=0)
@@ -913,6 +1228,14 @@ def execute_request(
                     "_location": item["location"],
                     "_area_mu": item["area_mu"] if item["area_mu"] is not None else "",
                     "_use": item["land_use"],
+                    "_trade_method": _text(
+                        record.get("tradeType")
+                        or record.get("tradeMethod")
+                        or record.get("transactionMode")
+                        or item.get("detail_data", {}).get("tradeType")
+                        or item.get("detail_data", {}).get("tradeMethod")
+                        or ""
+                    ),
                     "_start_unit_price": item["start_price"] if item["start_price"] is not None else "",
                     "_start_total_price_wan": item["start_total_price"],
                     "_deal_unit_price": item["deal_price"] if item["deal_price"] is not None else "",
@@ -937,13 +1260,6 @@ def execute_request(
             map_text = map_stage.read_text(encoding="utf-8")
             map_text = map_text.replace(points_stage.name, final_paths["points"].name)
             map_stage.write_text(map_text, encoding="utf-8")
-            _move_asset(coord_stage, final_paths["coords"])
-            _move_asset(points_stage, final_paths["points"])
-            _move_asset(map_stage, final_paths["map"])
-        else:
-            for path in (final_paths["coords"], final_paths["points"], final_paths["map"]):
-                if path.exists():
-                    path.unlink()
 
         map_name = final_paths["map"].name if config["generateMap"] else ""
         write_result_html(
@@ -953,11 +1269,28 @@ def execute_request(
             summary,
             {"excel": final_paths["excel"].name, "map": map_name},
         )
-        _move_asset(stage_xlsx, final_paths["excel"])
-        _move_asset(stage / "result.html", final_paths["html"])
+
+        # 所有新文件先在暂存目录中生成并校验，之后才一次性替换目标文件；
+        # 抓取或渲染失败时，上一轮已经完成的 Excel/HTML 仍然可用。
+        staged_assets = [(stage_xlsx, final_paths["excel"]), (stage / "result.html", final_paths["html"])]
+        if config["generateMap"]:
+            staged_assets.extend([
+                (coord_stage, final_paths["coords"]),
+                (points_stage, final_paths["points"]),
+                (map_stage, final_paths["map"]),
+            ])
+        for source, _target in staged_assets:
+            if not source.exists() or source.stat().st_size <= 0:
+                raise ValueError(f"LAND_OUTPUT_EMPTY:{source.name}")
+        for source, target in staged_assets:
+            _move_asset(source, target)
         for path in (final_paths["excel"], final_paths["html"]):
             if not path.exists() or path.stat().st_size <= 0:
                 raise ValueError(f"LAND_OUTPUT_READBACK_FAILED:{path.name}")
+        if not config["generateMap"]:
+            for path in (final_paths["coords"], final_paths["points"], final_paths["map"]):
+                if path.exists():
+                    path.unlink()
         progress("complete", 100, f"已写出 {len(filtered)} 条，Excel/结果页回读通过", fetched=fetched_count, filtered=len(filtered), written=len(filtered))
         return {
             "ok": True,
@@ -967,6 +1300,8 @@ def execute_request(
             "fetchedCount": fetched_count,
             "filteredCount": len(filtered),
             "writtenCount": len(filtered),
+            "querySignature": query_signature,
+            "outputAction": "updated_existing" if output_will_update else "created",
             "excelPath": str(final_paths["excel"]),
             "htmlPath": str(final_paths["html"]),
             "coordsPath": str(final_paths["coords"]) if config["generateMap"] else "",
