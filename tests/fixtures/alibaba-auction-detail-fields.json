@@ -1,0 +1,148 @@
+[
+  {
+    "sourceId": "43215550758",
+    "propertyType": "residential",
+    "structure": "拍品介绍中的房屋建筑面积与第N层",
+    "text": "计房屋建筑面积为182.83平方米。钢混结构，拍卖对象位于第七层。",
+    "buildingArea": 182.83,
+    "floor": "7",
+    "totalFloors": ""
+  },
+  {
+    "sourceId": "522962936179",
+    "propertyType": "residential",
+    "structure": "建筑面积与总层数、跃层楼层",
+    "text": "建筑面积为85.61平方米。该房产所在建筑总层数35层（含地下2层），其位于第18-19层(跃层结构)。",
+    "buildingArea": 85.61,
+    "floor": "18-19",
+    "totalFloors": "35"
+  },
+  {
+    "sourceId": "43264584916",
+    "propertyType": "residential",
+    "structure": "拍品介绍中的建筑面积标签",
+    "text": "建筑面积：89.12平方米。土地使用权面积：3.90平方米。",
+    "buildingArea": 89.12,
+    "floor": "",
+    "totalFloors": ""
+  },
+  {
+    "sourceId": "43182943485",
+    "propertyType": "residential",
+    "structure": "位于N层与单元总楼层",
+    "text": "建筑面积为118.27平方米。估价对象位于混合结构的楼内，位于3层，所处单元总楼层为16层。",
+    "buildingArea": 118.27,
+    "floor": "3",
+    "totalFloors": "16"
+  },
+  {
+    "sourceId": "43053540799",
+    "propertyType": "residential",
+    "structure": "单独面积字段与总层数",
+    "text": "该房产位于小区10幢第20层，总层数为26层。3、面积：144.59平方米。",
+    "buildingArea": 144.59,
+    "floor": "20",
+    "totalFloors": "26"
+  },
+  {
+    "sourceId": "44123341151",
+    "propertyType": "residential",
+    "structure": "中文数字与地上第N层",
+    "text": "房屋建筑面积为153.88平方米。总层数为十七层，估价对象位于地上第十六层。",
+    "buildingArea": 153.88,
+    "floor": "地上16",
+    "totalFloors": "17"
+  },
+  {
+    "sourceId": "43826414814",
+    "propertyType": "residential",
+    "structure": "房屋总层数与位于N层",
+    "text": "建筑面积123.25平方米。房屋总层数为六层，本次拍卖房屋位于五层。",
+    "buildingArea": 123.25,
+    "floor": "5",
+    "totalFloors": "6"
+  },
+  {
+    "sourceId": "43547372184",
+    "propertyType": "residential",
+    "structure": "总层数、所在层数、建筑面积同段",
+    "text": "总层数：23层（含地下1层），所在层数：10层，建筑面积：212.4平方米。",
+    "buildingArea": 212.4,
+    "floor": "10",
+    "totalFloors": "23"
+  },
+  {
+    "sourceId": "45471862350",
+    "propertyType": "residential",
+    "structure": "总层数共N层且无明确所在层",
+    "text": "计房屋建筑面积为439.29平方米。钢混结构，总层数共三层。",
+    "buildingArea": 439.29,
+    "floor": "",
+    "totalFloors": "3"
+  },
+  {
+    "sourceId": "43373830201",
+    "propertyType": "residential",
+    "structure": "建筑物总层数与所在层数",
+    "text": "建筑物总层数7层，所在层数第6层，室内普通装修。",
+    "buildingArea": null,
+    "floor": "6",
+    "totalFloors": "7"
+  },
+  {
+    "sourceId": "43576477161",
+    "propertyType": "residential",
+    "structure": "地上楼层区间与证载建筑面积",
+    "text": "房屋证载建筑面积为313.03平方米。总层数共6层，所在层数为地上第4-6层。",
+    "buildingArea": 313.03,
+    "floor": "地上4-6",
+    "totalFloors": "6"
+  },
+  {
+    "sourceId": "1079269518867",
+    "propertyType": "commercial",
+    "structure": "表格标签和值分列",
+    "text": "标的物介绍 建筑面积 346.21㎡ 楼层 所在层为1至2层，总层数共2层",
+    "buildingArea": 346.21,
+    "floor": "1至2",
+    "totalFloors": "2"
+  },
+  {
+    "sourceId": "1069497686336",
+    "propertyType": "commercial",
+    "structure": "变卖标的中的建筑面积",
+    "text": "建筑面积1257.26平方米的房屋。标的物房屋权证号；建筑面积：1257.26㎡；用途：办公。",
+    "buildingArea": 1257.26,
+    "floor": "",
+    "totalFloors": ""
+  },
+  {
+    "sourceId": "1079826721222",
+    "propertyType": "commercial",
+    "structure": "证载面积、总层数与位于第N层",
+    "text": "证载房屋建筑面积124.82㎡。所在建筑物总层数21层，位于第3层。",
+    "buildingArea": 124.82,
+    "floor": "3",
+    "totalFloors": "21"
+  },
+  {
+    "sourceId": "1071940448999",
+    "propertyType": "residential",
+    "sourceType": "evaluation-report-attachment",
+    "structure": "评估报告附件中的房屋建筑面积、地上总层数与所在层数",
+    "text": "房屋建筑面积 55.38 ㎡。估价对象建筑地上总层数 34层，所在层数为 9 层。",
+    "buildingArea": 55.38,
+    "floor": "9",
+    "totalFloors": "34"
+  },
+  {
+    "sourceId": "1074323399518",
+    "propertyType": "residential",
+    "sourceType": "evaluation-report-attachment",
+    "structure": "评估报告附件中的建筑面积和楼层实物状况",
+    "text": "房屋建筑面积 49.04 ㎡。总层数为7层，所在层为 5 层。",
+    "buildingArea": 49.04,
+    "floor": "5",
+    "totalFloors": "7"
+  }
+]

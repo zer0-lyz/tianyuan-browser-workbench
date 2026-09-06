@@ -27,6 +27,7 @@ test("land publicity module and skill package are wired", () => {
   assert.match(moduleSource, /id: "land-publicity"/);
   assert.match(moduleSource, /route: "land-publicity"/);
   assert.match(moduleSource, /stage: "stable"/);
+  assert.match(moduleSource, /displayName: "浙江土地市场网"/);
   assert.match(moduleSource, /streamNativeMessage/);
   assert.match(moduleSource, /list_land_publicity_regions/);
   assert.match(moduleSource, /if \(!result\?\.ok\) throw/);
@@ -38,6 +39,7 @@ test("land publicity module and skill package are wired", () => {
   ]) assert.match(`${html}\n${template}`, new RegExp(`id=\\"${id}\\"`), `missing ${id}`);
   assert.match(template, /国有土地/);
   assert.match(template, /挂牌出让、拍卖出让/);
+  assert.match(template, /<h2>浙江土地市场网<\/h2>/);
   assert.doesNotMatch(template, /挂牌租赁、拍卖租赁/);
   assert.match(template, /结果公示/);
   assert.match(template, /<select id="landPublicityDistrict">/);
