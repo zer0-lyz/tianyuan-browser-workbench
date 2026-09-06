@@ -96,6 +96,8 @@ for (const resource of manifest.web_accessible_resources || []) {
 
 assert.equal(installer.includes("sourceBuildDigest"), true);
 assert.equal(manifestGenerator.includes('"skills/depreciation-capex-forecast"'), true);
+assert.equal(installer.includes('"skills/depreciation-capex-forecast"'), true);
+assert.equal(installer.includes('    "skills",\n'), false);
 assert.equal(installer.includes(".staging-"), true);
 assert.equal(installer.includes("runtimeBuildId"), true);
 assert.equal(installer.includes("unblockWindowsFile"), true);

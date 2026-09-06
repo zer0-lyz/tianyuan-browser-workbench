@@ -322,7 +322,6 @@ function sourceBuildDigest() {
   const roots = [
     "extension",
     "native-helper",
-    "skills",
     "plugins/tianyuan-browser-connector",
     "scripts/install-local-runtime.mjs",
     "skills/depreciation-capex-forecast",
