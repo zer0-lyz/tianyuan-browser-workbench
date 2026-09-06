@@ -2,6 +2,7 @@
 .project-architect/
 .DS_Store
 .snapshots/
+.playwright-cli/
 *.log
 node_modules/
 .venv/
