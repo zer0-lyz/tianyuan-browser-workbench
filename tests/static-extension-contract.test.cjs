@@ -247,6 +247,7 @@ assert.equal(installer.includes('copyFileAtomic(path.join(repoRoot, "native-help
 assert.equal(installer.includes('copyFileAtomic(path.join(repoRoot, "native-helper", "file-archive.js")'), true);
 assert.equal(installer.includes('copyFileAtomic(path.join(repoRoot, "native-helper", "file-archive-conversations.js")'), true);
 assert.equal(installer.includes('copyFileAtomic(path.join(repoRoot, "native-helper", "process_launcher.js")'), true);
+assert.equal(installer.includes('copyFileAtomic(path.join(repoRoot, "native-helper", "alibaba-auction.js")'), true);
 assert.equal(installer.includes('"src/core/module-registry.js"'), true);
 assert.equal(installer.includes('"src/modules/updates/template.js"'), true);
 assert.equal(installer.includes('"feedback.json"'), true);
@@ -258,6 +259,7 @@ assert.equal(nativeInstaller.includes("connector_bridge.js"), true);
 assert.equal(nativeInstaller.includes("process_launcher.js"), true);
 assert.equal(nativeInstaller.includes("file-archive.js"), true);
 assert.equal(nativeInstaller.includes("file-archive-conversations.js"), true);
+assert.equal(nativeInstaller.includes("alibaba-auction.js"), true);
 assert.equal(nativeHost.includes('"list_file_archive_conversations"'), true);
 assert.equal(nativeHost.includes('"select_file_archive_conversation_directory"'), true);
 assert.equal(conversationService.includes("encrypted_or_proprietary"), true);

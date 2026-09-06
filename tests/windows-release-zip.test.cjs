@@ -57,6 +57,7 @@ const buildScript = fs.readFileSync(
 );
 assert.equal(buildScript.includes("scripts/create-release-zip.py"), true);
 assert.equal(buildScript.includes("/usr/bin/zip -X"), false);
+assert.equal(buildScript.includes('cp "$ROOT_DIR/native-helper/alibaba-auction.js"'), true);
 
 fs.rmSync(tempRoot, { recursive: true, force: true });
 console.log("Windows release ZIP tests passed.");
