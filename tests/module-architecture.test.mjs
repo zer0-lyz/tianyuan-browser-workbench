@@ -11,11 +11,12 @@ import { updatesModule } from "../extension/src/modules/updates/module.js";
 import { feedbackModule } from "../extension/src/modules/feedback/module.js";
 import { fileArchiveModule } from "../extension/src/modules/file-archive/module.js";
 import { landPublicityModule } from "../extension/src/modules/land-publicity/module.js";
+import { alibabaAuctionModule } from "../extension/src/modules/alibaba-auction/module.js";
 import { depreciationCapexModule } from "../extension/src/modules/depreciation-capex-forecast/module.js";
 
-const definitions = [...legacyFeatureModules, updatesModule, feedbackModule, landPublicityModule, depreciationCapexModule];
-assert.equal(definitions.length, 13);
-assert.equal(definitions.filter((item) => item.manifest.type === "feature").length, 11);
+const definitions = [...legacyFeatureModules, updatesModule, feedbackModule, landPublicityModule, alibabaAuctionModule, depreciationCapexModule];
+assert.equal(definitions.length, 14);
+assert.equal(definitions.filter((item) => item.manifest.type === "feature").length, 12);
 assert.equal(definitions.filter((item) => item.manifest.type === "utility").length, 2);
 assert.equal(new Set(definitions.map((item) => item.manifest.id)).size, definitions.length);
 assert.equal(new Set(definitions.map((item) => item.manifest.route)).size, definitions.length);

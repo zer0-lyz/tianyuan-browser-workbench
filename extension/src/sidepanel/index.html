@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>天源工作台</title>
-    <link rel="stylesheet" href="./styles.css?v=20260811-unified-agent-binding-v1">
+    <link rel="stylesheet" href="./styles.css?v=20260905-collapsible-status-v1">
   </head>
   <body>
     <main class="app">
@@ -16,36 +16,43 @@
         <button id="refresh" type="button" class="icon-text-button">刷新</button>
       </header>
 
-      <nav class="connection-bar" aria-label="连接状态">
-        <button id="openConnectionsTopConnector" type="button" class="connection-pill">
-          <span>Connector</span>
-          <strong id="connectorStatus" class="conn conn-idle">未检查</strong>
-        </button>
-        <button id="openConnectionsTop" type="button" class="connection-pill">
-          <span>Helper</span>
-          <strong id="helperStatus" class="conn conn-idle">未检查</strong>
-        </button>
-        <button id="openConnectionsTopMcp" type="button" class="connection-pill">
-          <span>MCP</span>
-          <strong id="mcpStatus" class="conn conn-idle">未检查</strong>
-        </button>
-        <button id="openConnectionsTopCli" type="button" class="connection-pill">
-          <span>CLI</span>
-          <strong id="cliStatus" class="conn conn-idle">未检查</strong>
-        </button>
-        <button id="openUpdatesTop" type="button" class="connection-pill">
-          <span>版本</span>
-          <strong id="updateTopStatus" class="conn conn-idle">v0.9.0</strong>
-        </button>
-        <button id="openFeedbackTop" type="button" class="connection-pill utility-pill" title="反馈">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M5.25 4.5h13.5A2.25 2.25 0 0 1 21 6.75v8.5a2.25 2.25 0 0 1-2.25 2.25H11l-4.5 3v-3H5.25A2.25 2.25 0 0 1 3 15.25v-8.5A2.25 2.25 0 0 1 5.25 4.5m2.25 3.75a.75.75 0 0 0 0 1.5h9a.75.75 0 0 0 0-1.5zm0 3a.75.75 0 0 0 0 1.5h6a.75.75 0 0 0 0-1.5z"></path>
-          </svg>
-          <span>反馈</span>
-        </button>
-      </nav>
-
-      <section id="status" class="status status-idle">等待读取当前页面</section>
+      <details id="connectionStatusPanel" class="connection-status-panel" open>
+        <summary class="connection-status-summary">
+          <span class="connection-status-summary-label">运行状态</span>
+          <span id="connectionStatusSummaryText" class="connection-status-summary-text">正在读取连接状态…</span>
+        </summary>
+        <div class="connection-status-details">
+          <nav class="connection-bar" aria-label="连接状态">
+            <button id="openConnectionsTopConnector" type="button" class="connection-pill">
+              <span>Connector</span>
+              <strong id="connectorStatus" class="conn conn-idle">未检查</strong>
+            </button>
+            <button id="openConnectionsTop" type="button" class="connection-pill">
+              <span>Helper</span>
+              <strong id="helperStatus" class="conn conn-idle">未检查</strong>
+            </button>
+            <button id="openConnectionsTopMcp" type="button" class="connection-pill">
+              <span>MCP</span>
+              <strong id="mcpStatus" class="conn conn-idle">未检查</strong>
+            </button>
+            <button id="openConnectionsTopCli" type="button" class="connection-pill">
+              <span>CLI</span>
+              <strong id="cliStatus" class="conn conn-idle">未检查</strong>
+            </button>
+            <button id="openUpdatesTop" type="button" class="connection-pill">
+              <span>版本</span>
+              <strong id="updateTopStatus" class="conn conn-idle">v0.9.0</strong>
+            </button>
+            <button id="openFeedbackTop" type="button" class="connection-pill utility-pill" title="反馈">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5.25 4.5h13.5A2.25 2.25 0 0 1 21 6.75v8.5a2.25 2.25 0 0 1-2.25 2.25H11l-4.5 3v-3H5.25A2.25 2.25 0 0 1 3 15.25v-8.5A2.25 2.25 0 0 1 5.25 4.5m2.25 3.75a.75.75 0 0 0 0 1.5h9a.75.75 0 0 0 0-1.5zm0 3a.75.75 0 0 0 0 1.5h6a.75.75 0 0 0 0-1.5z"></path>
+              </svg>
+              <span>反馈</span>
+            </button>
+          </nav>
+          <section id="status" class="status status-idle">等待读取当前页面</section>
+        </div>
+      </details>
 
       <section id="page-home" class="route-page" data-route="home">
         <div class="page-heading">
@@ -155,8 +162,18 @@
                 <path d="M12 3.75a.75.75 0 0 1 .65.38l8.25 14.25a.75.75 0 0 1-.65 1.12H3.75a.75.75 0 0 1-.65-1.12l8.25-14.25a.75.75 0 0 1 .65-.38m0 2.25L5.05 18h13.9zM12 9a.75.75 0 0 1 .75.75v3.75a.75.75 0 0 1-1.5 0V9.75A.75.75 0 0 1 12 9m0 6a.94.94 0 1 1 0 1.88A.94.94 0 0 1 12 15"></path>
               </svg>
             </span>
-            <strong>浙江土地成交公示</strong>
+            <strong>浙江土地市场网</strong>
             <small>按行政区、用途和价格面积筛选并生成地图结果</small>
+          </button>
+          <button id="openAlibabaAuction" type="button" class="module-card">
+            <span class="module-icon module-icon-land-publicity" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path class="ph-duotone" d="M4.5 18.75h15L12 4.5z"></path>
+                <path d="M12 3.75a.75.75 0 0 1 .65.38l8.25 14.25a.75.75 0 0 1-.65 1.12H3.75a.75.75 0 0 1-.65-1.12l8.25-14.25a.75.75 0 0 1 .65-.38m0 2.25L5.05 18h13.9zM12 9a.75.75 0 0 1 .75.75v3.75a.75.75 0 0 1-1.5 0V9.75A.75.75 0 0 1 12 9m0 6a.94.94 0 1 1 0 1.88A.94.94 0 0 1 12 15"></path>
+              </svg>
+            </span>
+            <strong>阿里司法拍卖</strong>
+            <small>登录后自动读取列表并核验成交详情</small>
           </button>
           <button id="openDepreciationCapex" type="button" class="module-card">
             <span class="module-icon module-icon-detail" aria-hidden="true">
@@ -188,6 +205,7 @@
       <section id="page-updates" class="route-page hidden" data-route="updates"></section>
       <section id="page-feedback" class="route-page hidden" data-route="feedback"></section>
       <section id="page-land-publicity" class="route-page hidden" data-route="land-publicity"></section>
+      <section id="page-alibaba-auction" class="route-page hidden" data-route="alibaba-auction"></section>
       <section id="page-table-format" class="route-page hidden" data-route="table-format"></section>
 
       <section id="page-connections" class="route-page hidden" data-route="connections">
