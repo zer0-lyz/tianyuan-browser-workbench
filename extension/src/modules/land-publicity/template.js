@@ -1,7 +1,7 @@
 export const landPublicityTemplate = `
   <div class="page-heading">
     <div>
-      <h2>浙江土地成交公示</h2>
+      <h2>浙江土地市场网</h2>
       <p>抓取浙江省自然资源网上交易系统成交公示，输出 Excel 和独立 HTML 结果页</p>
     </div>
     <button id="backFromLandPublicity" type="button" class="secondary">返回首页</button>

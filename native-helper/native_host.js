@@ -9,6 +9,7 @@ const path = require("node:path");
 const { createRequire } = require("node:module");
 const readline = require("node:readline");
 const { randomUUID } = require("node:crypto");
+const { pathToFileURL } = require("node:url");
 const processLauncher = (() => {
   try {
     return require("./process_launcher.js");
@@ -70,6 +71,17 @@ const depreciationCapexForecastFactory = (() => {
   } catch (cause) {
     try {
       return createRequire(path.join(path.dirname(process.execPath), "native_host.js"))("./depreciation-capex-forecast.js");
+    } catch {
+      throw cause;
+    }
+  }
+})();
+const alibabaAuction = (() => {
+  try {
+    return require("./alibaba-auction.js");
+  } catch (cause) {
+    try {
+      return createRequire(path.join(path.dirname(process.execPath), "native_host.js"))("./alibaba-auction.js");
     } catch {
       throw cause;
     }
@@ -153,6 +165,53 @@ function firstExistingPath(values, fallback) {
 const CLI_BIN = process.env.TYCPV_BIN
   || runtimeConfig.tycpvBin
   || firstExistingPath(platformAdapter.cliCandidates, platformAdapter.cliFallback);
+
+function directCliExportEnginePaths() {
+  const candidates = [
+    process.env.TYCPV_APP_ROOT,
+    runtimeConfig.tycpvAppRoot,
+    process.platform === "darwin" ? "/Library/Application Support/tycpv/app" : "",
+    CLI_BIN ? path.join(path.dirname(CLI_BIN), "app") : "",
+    CLI_BIN ? path.join(path.dirname(CLI_BIN), "..", "app") : "",
+  ].filter(Boolean);
+
+  if (CLI_BIN && fs.existsSync(CLI_BIN)) {
+    try {
+      const launcher = fs.readFileSync(CLI_BIN, "utf8").slice(0, 16 * 1024);
+      const installRoot = launcher.match(/INSTALL_ROOT\s*=\s*["']([^"']+)["']/i)?.[1];
+      if (installRoot) candidates.unshift(path.join(installRoot, "app"));
+    } catch {
+      // The standalone executable may not be readable; use the known install paths.
+    }
+  }
+
+  for (const root of [...new Set(candidates.map((value) => path.resolve(value)))]) {
+    const exporterPath = path.join(root, "src", "detail-table-export-engine", "detail-table-exporter.js");
+    const detailTemplatePath = path.join(root, "assets", "templates", "detail.xlsx");
+    const declareTemplatePath = path.join(root, "assets", "templates", "declare.xlsx");
+    if (fs.existsSync(exporterPath) && fs.existsSync(detailTemplatePath) && fs.existsSync(declareTemplatePath)) {
+      return { root, exporterPath, detailTemplatePath, declareTemplatePath };
+    }
+  }
+  return null;
+}
+
+let directCliExportEnginePromise = null;
+
+async function loadDirectCliExportEngine() {
+  const paths = directCliExportEnginePaths();
+  if (!paths) {
+    const error = new Error("TYCPV_EXPORT_ENGINE_NOT_FOUND");
+    error.code = "TYCPV_EXPORT_ENGINE_NOT_FOUND";
+    throw error;
+  }
+  if (!directCliExportEnginePromise) {
+    directCliExportEnginePromise = import(pathToFileURL(paths.exporterPath).href)
+      .then((module) => ({ ...paths, Exporter: module.default }));
+  }
+  return await directCliExportEnginePromise;
+}
+
 const PYTHON_BIN = process.env.TIANYUAN_PYTHON_BIN
   || runtimeConfig.pythonBin
   || platformAdapter.defaultPythonBin;
@@ -1847,6 +1906,48 @@ async function chooseLandPublicityOutputDirectory() {
   }
 }
 
+async function chooseAlibabaAuctionOutputDirectory() {
+  const result = await chooseDirectory("选择阿里司法拍卖输出目录");
+  const rawParentPath = result.paths?.[0] || "";
+  if (!result.ok || !rawParentPath) {
+    return {
+      ...result,
+      action: "alibaba_auction_output_directory_selected",
+      path: "",
+      paths: [],
+      security: { credentialsReturned: false },
+    };
+  }
+  try {
+    const parentPath = validateExportDirectory(rawParentPath);
+    const outputPath = path.join(parentPath, "阿里司法拍卖");
+    const directoryName = path.basename(outputPath);
+    const alreadyExists = fs.existsSync(outputPath);
+    fs.mkdirSync(outputPath, { recursive: true, mode: 0o700 });
+    const selectedPath = fs.realpathSync(outputPath);
+    return {
+      ...result,
+      ok: true,
+      action: "alibaba_auction_output_directory_selected",
+      path: selectedPath,
+      paths: [selectedPath],
+      parentPath,
+      directoryName,
+      createdDirectory: !alreadyExists,
+      security: { credentialsReturned: false },
+    };
+  } catch {
+    return {
+      ok: false,
+      action: "alibaba_auction_output_directory_selected",
+      path: "",
+      paths: [],
+      reason: "ALIBABA_OUTPUT_DIRECTORY_CREATE_FAILED",
+      security: { credentialsReturned: false },
+    };
+  }
+}
+
 function isWorkbookPath(value) {
   const extension = path.extname(String(value || "")).toLowerCase();
   return extension === ".xlsx" || extension === ".xlsm";
@@ -2816,6 +2917,42 @@ function runLandPublicity(message, emit) {
   });
 }
 
+function runAlibabaAuction(message, emit) {
+  return alibabaAuction.scrape(message?.request || {}, (payload) => {
+    emit({
+      ok: true,
+      event: "progress",
+      action: "run_alibaba_auction",
+      ...payload,
+      security: { credentialsReturned: false },
+    });
+  }).then((result) => {
+    const payload = {
+      ...result,
+      event: "complete",
+      action: "run_alibaba_auction",
+      phase: result.ok ? "completed" : "failed",
+      percent: result.ok ? 100 : Number(result.percent || 0),
+      security: { credentialsReturned: false },
+    };
+    emit(payload);
+    return payload;
+  }).catch((error) => {
+    const payload = {
+      ok: false,
+      event: "complete",
+      action: "run_alibaba_auction",
+      phase: "failed",
+      errorCode: error?.message || "ALIBABA_AUCTION_FAILED",
+      reason: error?.message || String(error),
+      results: [],
+      security: { credentialsReturned: false },
+    };
+    emit(payload);
+    return payload;
+  });
+}
+
 function validateExportDirectory(value) {
   const raw = String(value || "").trim();
   if (!raw || raw.includes("\0") || !path.isAbsolute(raw)) {
@@ -2866,13 +3003,13 @@ function exportProgressFromLine(line, state) {
 
 function cliExportFailure(logLines) {
   const text = logLines.map((item) => String(item?.text || "")).join("\n");
-  if (/本地登录凭证已过期|请先运行\s*tycpv login|(?:登录|授权).*(?:过期|失效)|缺少\s*MCP token/i.test(text)) {
+  if (/本地登录凭证已过期|请先运行\s*tycpv login|(?:登录|授权).*(?:过期|失效)/i.test(text)) {
     return {
       reason: "TYCPV_AUTH_REQUIRED",
       userMessage: "CLI 授权已过期或缺失。请进入“连接配置”，点击“授权 CLI”，完成登录后点击“启动/检查”，再重新导出。",
     };
   }
-  if (/unauthorized|invalid token|MCP token|VALUATION_MCP_TOKEN/i.test(text)) {
+  if (/unauthorized|invalid token|MCP token|VALUATION_MCP_TOKEN|MCP_HTTP_401|HTTP\s+401/i.test(text)) {
     return {
       reason: "MCP_TOKEN_REQUIRED",
       userMessage: "MCP token 未配置或已失效。请在“连接配置”中由使用者本人重新配置 MCP token，再重新导出。",
@@ -2890,7 +3027,130 @@ function cliExportFailure(logLines) {
   };
 }
 
+class NativeDetailTableExportApi {
+  constructor(onRequest) {
+    this.onRequest = onRequest;
+  }
+
+  async request(method, requestPath, options = {}) {
+    this.onRequest?.(method, requestPath);
+    const result = await callTool("request_detail_table_export_api", {
+      method,
+      path: requestPath,
+      ...(options.params ? { params: options.params } : {}),
+      ...(options.body ? { body: options.body } : {}),
+    });
+    if (result?.success !== true) {
+      throw new Error(`MCP_EXPORT_API_FAILED:${result?.error || "unknown error"}`);
+    }
+    return result.data;
+  }
+
+  async get(requestPath, params) {
+    return await this.request("GET", requestPath, { params });
+  }
+
+  async post(requestPath, body) {
+    return await this.request("POST", requestPath, { body });
+  }
+}
+
+async function runDirectCliExport(message, emit) {
+  const exportConfig = CLI_EXPORT_COMMANDS[String(message?.exportType || "")];
+  if (!exportConfig) throw new Error("EXPORT_TYPE_NOT_ALLOWED");
+  const projectId = String(parseNumericId(message.projectId, "projectId"));
+  const companyIds = parseCompanyIds(message.companyIds);
+  if (!companyIds.length) throw new Error("companyIds_REQUIRED");
+  const outDir = validateExportDirectory(message.outDir);
+  const engine = await loadDirectCliExportEngine();
+  const type = message.exportType === "asset_declare_table" ? "declare" : "detail";
+  let requestCount = 0;
+
+  emit({
+    ok: true,
+    event: "progress",
+    phase: "starting",
+    percent: 5,
+    message: `准备导出${exportConfig.label}`,
+    outDir,
+  });
+  await ensureInitialized();
+  emit({
+    ok: true,
+    event: "progress",
+    phase: "running",
+    percent: 10,
+    message: "已连接 MCP，正在读取导出数据",
+    outDir,
+  });
+
+  const api = new NativeDetailTableExportApi((method, requestPath) => {
+    requestCount += 1;
+    const percent = Math.min(94, 10 + requestCount * 3);
+    emit({
+      ok: true,
+      event: "progress",
+      phase: "running",
+      percent,
+      message: `正在读取导出数据：${method} ${requestPath}`,
+      outDir,
+    });
+  });
+  const exporter = new engine.Exporter(api, {
+    projectId: Number(projectId),
+    companyIds: companyIds.map(Number),
+    types: [type],
+    outDir,
+    limit: 5000,
+    templatePaths: {
+      detail: engine.detailTemplatePath,
+      declare: engine.declareTemplatePath,
+    },
+    workspaceRoot: engine.root,
+  });
+  const outputFiles = await exporter.run();
+  emit({
+    ok: true,
+    event: "progress",
+    phase: "completed",
+    percent: 100,
+    message: `导出完成，共生成 ${outputFiles.length} 个文件`,
+    outDir,
+  });
+  return {
+    ok: true,
+    event: "complete",
+    phase: "completed",
+    percent: 100,
+    exportType: message.exportType,
+    label: exportConfig.label,
+    projectId,
+    companyIds,
+    outDir,
+    outputFiles,
+    security: { credentialsReturned: false, tokenUsed: true },
+  };
+}
+
 function runCliExport(message, emit) {
+  if (getToken() && directCliExportEnginePaths()) {
+    return runDirectCliExport(message, emit).catch((error) => ({
+      ...(() => {
+        const failure = cliExportFailure([{ text: error?.message || String(error) }]);
+        return { reason: failure.reason, userMessage: failure.userMessage };
+      })(),
+      ok: false,
+      event: "complete",
+      phase: "failed",
+      percent: 0,
+      exportType: message?.exportType || null,
+      security: { credentialsReturned: false, tokenUsed: true },
+    })).then((payload) => {
+      emit(payload);
+      return payload;
+    });
+  }
+
   return new Promise((resolve) => {
   let exportConfig;
   try {
@@ -3443,6 +3703,81 @@ async function handle(message) {
   if (message?.action === "select_land_publicity_output_directory") {
     return await chooseLandPublicityOutputDirectory();
   }
+  if (message?.action === "select_alibaba_auction_output_directory") {
+    return await chooseAlibabaAuctionOutputDirectory();
+  }
+  if (message?.action === "open_alibaba_auction") {
+    return await alibabaAuction.openPage(message?.request || {});
+  }
+  if (message?.action === "enrich_alibaba_auction_detail") {
+    const detail = message?.detail && typeof message.detail === "object" ? message.detail : {};
+    const attachments = Array.isArray(message?.attachments) ? message.attachments : [];
+    const enriched = await alibabaAuction.enrichDetailFromAttachmentBuffers(detail, attachments);
+    return {
+      ok: true,
+      action: "enrich_alibaba_auction_detail",
+      detail: enriched,
+      attachmentCount: Number(enriched?.attachmentCount || 0),
+      security: { credentialsReturned: false },
+    };
+  }
+  if (message?.action === "write_alibaba_auction_result") {
+    const request = alibabaAuction.normalizeRequest(message?.request || {});
+    const results = Array.isArray(message?.results) ? message.results : [];
+    const candidates = Number.isFinite(Number(message?.candidates)) ? Number(message.candidates) : results.length;
+    const skipped = Number.isFinite(Number(message?.skipped)) ? Number(message.skipped) : 0;
+    const artifacts = results.length
+      ? await alibabaAuction.writeResultArtifacts(results, request, { candidates, skipped })
+      : {
+        htmlPath: "",
+        mapPath: "",
+        coordsPath: "",
+        pointsJsPath: "",
+        locatedCount: 0,
+        unlocatedCount: 0,
+        geocodeRequested: 0,
+        geocodeCacheHits: 0,
+        geocodeResolved: 0,
+        geocodeFailed: 0,
+        geocodeTimedOut: 0,
+        geocodeDurationMs: 0,
+      };
+    return {
+      ok: results.length > 0,
+      action: "write_alibaba_auction_result",
+      ...artifacts,
+      candidates,
+      skipped,
+      security: { credentialsReturned: false },
+    };
+  }
+  if (message?.action === "write_alibaba_auction_excel") {
+    const request = alibabaAuction.normalizeRequest(message?.request || {});
+    const results = Array.isArray(message?.results) ? message.results : [];
+    const candidates = Number.isFinite(Number(message?.candidates)) ? Number(message.candidates) : results.length;
+    const skipped = Number.isFinite(Number(message?.skipped)) ? Number(message.skipped) : 0;
+    try {
+      return await alibabaAuction.writeResultExcel(results, request, { candidates, skipped });
+    } catch (error) {
+      return {
+        ok: false,
+        action: "write_alibaba_auction_excel",
+        errorCode: error?.code || "ALIBABA_EXCEL_EXPORT_FAILED",
+        reason: alibabaAuction.safeError(error),
+        security: { credentialsReturned: false },
+      };
+    }
+  }
+  if (message?.action === "open_alibaba_auction_path") {
+    const resolved = alibabaAuction.validateResultPath(message.path, message.outputDirectory || alibabaAuction.RESULT_ROOT);
+    const opened = await platformAdapter.openPath(resolved);
+    return {
+      ...opened,
+      action: "open_alibaba_auction_path",
+      path: resolved,
+      security: { credentialsReturned: false },
+    };
+  }
   if (message?.action === "open_land_publicity_path") {
     const resolved = landOpenPathReadback(message.path);
     const opened = await platformAdapter.openPath(resolved);
@@ -3611,6 +3946,9 @@ if (process.argv.includes("--connector-bridge")) {
     }
     if (message?.action === "run_land_publicity") {
       return runLandPublicity(message, writeMessage);
+    }
+    if (message?.action === "run_alibaba_auction") {
+      return runAlibabaAuction(message, writeMessage);
     }
     return handle(message)
       .then((payload) => {

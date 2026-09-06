@@ -78,6 +78,7 @@ assert.equal(quotedConstant(sidepanel, "EXPECTED_CONNECTOR_PROTOCOL_VERSION"), q
 assert.equal(quotedConstant(nativeHost, "CONNECTOR_PROTOCOL_VERSION"), quotedConstant(bridge, "PROTOCOL_VERSION"));
 assert.equal(manifest.version, versionConfig.chromeVersion);
 assert.equal(manifest.version_name, versionConfig.versionName);
+assert.equal(html.includes("connection-status-summary-toggle"), false);
 assert.match(versionConfig.productVersion, /^\d+\.\d+\.\d+$/);
 assert.equal(versionConfig.repository, "zer0-lyz/tianyuan-browser-workbench-releases");
 
@@ -108,6 +109,10 @@ assert.equal(sidepanel.includes("CLI_AUTH_URL"), false);
 assert.equal(sidepanel.includes("authorizationUrl"), true);
 assert.equal(sidepanel.includes("focusOrOpenCliAuthorizationPage"), true);
 assert.equal(sidepanel.includes("copyCliAuthorizationLink"), true);
+assert.equal(sidepanel.includes('if (cliAuthBusy) {'), true);
+assert.equal(sidepanel.includes('CLI 已经授权，无需再次弹窗；正在验证连接...'), true);
+assert.equal(sidepanel.includes('elements.authorizeCli.disabled = false;'), true);
+assert.equal(sidepanel.includes('mcpToken: runtimeMcpToken || undefined'), true);
 assert.equal(html.includes('id="cliAuthorizationFallback"'), true);
 assert.equal(html.includes('id="cliAuthorizationLink"'), true);
 assert.equal(html.includes('id="copyCliAuthorizationLink"'), true);
@@ -116,6 +121,8 @@ assert.equal(sidepanel.includes("async function openConnectionPage(url, label)")
 assert.equal(sidepanel.includes("chrome.tabs.create({ url, active: true })"), true);
 assert.equal(sidepanel.includes('on(elements.openMcpConnectPage, "click"'), true);
 assert.equal(html.includes('id="openMcpConnectPage"'), true);
+assert.match(sidepanel, /async function refreshContext\(\{ allowBusy = false \} = \{\}\)/);
+assert.equal(sidepanel.includes("refreshContext({ allowBusy: true })"), true);
 assert.equal(sidepanel.includes("groupBatchUploadMappingsByRow"), true);
 assert.equal(sidepanel.includes("preflightBatchUploadRows"), true);
 assert.equal(sidepanel.includes("runBatchCleanup"), true);
@@ -135,6 +142,10 @@ assert.equal(updatesTemplate.includes('id="installUpdate"'), true);
 assert.match(html, /<span id="moduleCountBadge" class="badge">\d+ 个模块<\/span>/);
 assert.equal(html.includes('id="openFeedbackTop"'), true);
 assert.equal(html.includes('id="openUpdatesTop"'), true);
+assert.equal(html.includes('id="connectionStatusPanel"'), true);
+assert.equal(html.includes('id="connectionStatusSummaryText"'), true);
+assert.equal(sidepanel.includes("connectionStatusPanel.open = safeRoute === \"home\" || safeRoute === \"connections\""), true);
+assert.equal(sidepanel.includes("function renderConnectionStatusSummary()"), true);
 assert.equal(html.includes('id="openFeedback"'), false);
 assert.equal(html.includes('id="openUpdates"'), false);
 assert.equal(html.includes('<script type="module" src="./sidepanel.js"></script>'), true);
@@ -205,6 +216,9 @@ assert.equal(nativeHost.includes('message?.action === "install_workbench_update"
 assert.equal(nativeHost.includes('message?.action === "get_workbench_update_status"'), true);
 assert.equal(nativeHost.includes('message?.action === "cli_login"'), true);
 assert.equal(nativeHost.includes('message?.action === "cli_login_status"'), true);
+assert.equal(nativeHost.includes("class NativeDetailTableExportApi"), true);
+assert.equal(nativeHost.includes("runDirectCliExport"), true);
+assert.equal(nativeHost.includes("tokenUsed: true"), true);
 assert.equal(nativeHost.includes('stdio: ["ignore", "pipe", "pipe"]'), true);
 assert.equal(nativeHost.includes("CLI_AUTHORIZATION_URL_TIMEOUT"), true);
 assert.equal(updateChecker.includes("api.github.com"), true);
