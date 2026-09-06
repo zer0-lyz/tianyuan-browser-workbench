@@ -6,6 +6,7 @@ import { createModuleStorageFactory } from "../core/module-storage.js";
 import { updatesModule } from "../modules/updates/module.js";
 import { feedbackModule } from "../modules/feedback/module.js";
 import { landPublicityModule } from "../modules/land-publicity/module.js";
+import { alibabaAuctionModule } from "../modules/alibaba-auction/module.js";
 import { depreciationCapexModule } from "../modules/depreciation-capex-forecast/module.js";
 import { tableFormatModule } from "../modules/table-format/module.js";
 
@@ -180,6 +181,8 @@ const elements = {
   cancelMcpToken: document.getElementById("cancelMcpToken"),
   confirmMcpToken: document.getElementById("confirmMcpToken"),
   status: document.getElementById("status"),
+  connectionStatusPanel: document.getElementById("connectionStatusPanel"),
+  connectionStatusSummaryText: document.getElementById("connectionStatusSummaryText"),
   json: document.getElementById("json"),
   connectorStatus: document.getElementById("connectorStatus"),
   connectorBindingStatus: document.getElementById("connectorBindingStatus"),
@@ -239,6 +242,7 @@ const elements = {
   helperStatus: document.getElementById("helperStatus"),
   mcpStatus: document.getElementById("mcpStatus"),
   cliStatus: document.getElementById("cliStatus"),
+  updateTopStatus: document.getElementById("updateTopStatus"),
   extensionId: document.getElementById("extensionId"),
   connectionMessage: document.getElementById("connectionMessage"),
   subjectList: document.getElementById("subjectList"),
@@ -432,6 +436,7 @@ for (const module of legacyFeatureModules) moduleRegistry.register(module);
 moduleRegistry.register(updatesModule);
 moduleRegistry.register(feedbackModule);
 moduleRegistry.register(landPublicityModule);
+moduleRegistry.register(alibabaAuctionModule);
 moduleRegistry.register(depreciationCapexModule);
 moduleRegistry.register(tableFormatModule);
 elements.extensionId.textContent = chrome.runtime.id;
@@ -479,6 +484,20 @@ function escapeHtml(value) {
 function setStatus(text, kind = "idle") {
   elements.status.className = `status status-${kind}`;
   elements.status.textContent = text;
+}
+
+function renderConnectionStatusSummary() {
+  if (!elements.connectionStatusSummaryText) return;
+  const entries = [
+    ["Connector", elements.connectorStatus],
+    ["Helper", elements.helperStatus],
+    ["MCP", elements.mcpStatus],
+    ["CLI", elements.cliStatus],
+    ["版本", elements.updateTopStatus],
+  ]
+    .map(([label, element]) => `${label} ${String(element?.textContent || "未检查").trim()}`)
+    .filter(Boolean);
+  elements.connectionStatusSummaryText.textContent = entries.join(" · ");
 }
 
 async function getActiveTab() {
@@ -573,7 +592,6 @@ function setBusy(nextBusy) {
     elements.saveConnectorBinding,
     elements.clearConnectorBinding,
     elements.configureMcp,
-    elements.authorizeCli,
     elements.openMcpConnectPage,
     elements.loadSubjects,
     elements.selectAllSubjects,
@@ -794,6 +812,9 @@ function restoreModuleState(route) {
 function renderRoute(route) {
   const safeRoute = routeExists(route) ? route : "home";
   currentRoute = safeRoute;
+  if (elements.connectionStatusPanel) {
+    elements.connectionStatusPanel.open = safeRoute === "home" || safeRoute === "connections";
+  }
   const pages = document.querySelectorAll(".route-page");
   for (const page of pages) {
     page?.classList.toggle("hidden", page.dataset.route !== safeRoute);
@@ -3244,7 +3265,10 @@ async function pollCliAuthorization(sessionId) {
 }
 
 async function authorizeCli() {
-  if (busy || cliAuthBusy) return;
+  if (cliAuthBusy) {
+    updateCliStatusMessage("CLI 授权正在处理中，请稍候。", "warn");
+    return;
+  }
   cliAuthBusy = true;
   elements.authorizeCli.disabled = true;
   setCliAuthorizationFallback("");
@@ -3273,7 +3297,7 @@ async function authorizeCli() {
     }
     if (result.state === "authenticated" || result.authenticated) {
       setConnection(elements.cliStatus, "已授权", "ok");
-      updateCliStatusMessage("CLI 已授权，点击“启动/检查”确认连接", "ok");
+      updateCliStatusMessage("CLI 已经授权，无需再次弹窗；正在验证连接...", "ok");
       await checkConnections({ probe: true });
       return;
     }
@@ -3316,7 +3340,7 @@ async function authorizeCli() {
     updateCliStatusMessage(`CLI 授权失败：${reason}。可手动执行：tycpv login`, "error");
   } finally {
     cliAuthBusy = false;
-    elements.authorizeCli.disabled = busy;
+    elements.authorizeCli.disabled = false;
   }
 }
 
@@ -3410,7 +3434,8 @@ async function runCliExport(exportType) {
   try {
     const health = await checkConnections({ probe: true });
     if (!health?.cli?.ok) throw new Error("CLI 未连接，请先在连接配置页完成授权。");
-    const projectId = String(latestContext?.route?.projectId || "").trim();
+    const context = await refreshContext({ allowBusy: true }) || latestContext;
+    const projectId = String(context?.route?.projectId || "").trim();
     if (!/^\d+$/.test(projectId)) throw new Error("当前页面未读取到项目 ID。");
     const companyIds = getExportCompanyIds();
     const outDir = ui.outputPath.value.trim();
@@ -3426,6 +3451,7 @@ async function runCliExport(exportType) {
       projectId,
       companyIds,
       outDir,
+      mcpToken: runtimeMcpToken || undefined,
     }, (progress) => {
       setExportProgress(exportType, progress.percent, progress.message);
       if (progress.message) appendTaskLog(progress.message);
@@ -3668,8 +3694,11 @@ async function runPrintFormat(formatType) {
 }
 
 function setConnection(element, text, kind = "idle") {
+  if (!element) return;
   element.className = `conn conn-${kind}`;
+  element.dataset.kind = kind;
   element.textContent = text;
+  renderConnectionStatusSummary();
 }
 
 function connectionSummary(element) {
@@ -5235,8 +5264,8 @@ function render(payload, options = {}) {
   maybeAutoLoadExportCompanies();
 }
 
-async function refreshContext() {
-  if (busy) return null;
+async function refreshContext({ allowBusy = false } = {}) {
+  if (busy && !allowBusy) return null;
   setStatus("正在读取当前页面...", "idle");
   const tab = await getActiveTab();
 
@@ -5516,7 +5545,7 @@ async function loadCompanyList() {
   try {
     const health = await checkConnections({ probe: true });
     if (!health?.mcp?.connected) throw new Error("MCP 未连接，不能加载公司清单。");
-    const context = await refreshContext() || latestContext;
+    const context = await refreshContext({ allowBusy: true }) || latestContext;
     const projectId = context?.route?.projectId;
     if (!projectId) throw new Error("当前页面未读取到项目 ID，不能加载公司清单。");
 
@@ -5608,7 +5637,7 @@ async function loadSubjectList() {
   try {
     const health = await checkConnections({ probe: true });
     if (!health?.mcp?.connected) throw new Error("MCP 未连接，不能加载科目清单。");
-    const context = await refreshContext() || latestContext;
+    const context = await refreshContext({ allowBusy: true }) || latestContext;
     const projectId = context?.route?.projectId;
     const companyId = context?.route?.companyId;
     if (!projectId || !companyId) throw new Error("当前页面未读取到项目 ID 或主体 ID，不能加载科目清单。");

@@ -108,7 +108,7 @@ export const landPublicityModule = {
     type: "feature",
     stage: "stable",
     route: "land-publicity",
-    displayName: "浙江土地成交公示",
+    displayName: "浙江土地市场网",
     messageNamespace: "land-publicity",
     entryElementId: "openLandPublicity",
     pageElementId: "page-land-publicity",
@@ -311,7 +311,7 @@ export const landPublicityModule = {
       elements.runLandPublicity.disabled = true;
       renderProgress({ percent: 1, message: "正在准备受控土地公示抓取", fetched: 0, filtered: 0, written: 0 });
       setMessage(elements.landPublicityResultMessage, "列表 API 参数已校验；正在流式读取阶段进度…", "");
-      context.setStatus("正在抓取浙江土地成交公示…", "idle");
+      context.setStatus("正在抓取浙江土地市场网…", "idle");
       try {
         const result = await context.streamNativeMessage({ action: "run_land_publicity", request }, (progress) => {
           renderProgress(progress);
@@ -328,7 +328,7 @@ export const landPublicityModule = {
           : "";
         setMessage(elements.landPublicityResultMessage, `已完成：Excel ${writtenCount} 条；实际条件：${filterSummary}。无坐标 ${result.noCoordinateCount || 0} 条。${warningCount ? `有 ${warningCount} 项筛选限制已在结果页说明。` : ""}${emptySuggestion}`, warningCount || emptySuggestion ? "warn" : "ok");
         await openResultPath(result.htmlPath, "结果页");
-        context.setStatus("浙江土地成交公示抓取完成，Excel/HTML 已回读", "ok");
+        context.setStatus("浙江土地市场网抓取完成，Excel/HTML 已回读", "ok");
       } catch (error) {
         renderProgress({ percent: 0, message: `抓取失败：${error?.message || String(error)}` });
         setMessage(elements.landPublicityResultMessage, error?.message || String(error), "error");
