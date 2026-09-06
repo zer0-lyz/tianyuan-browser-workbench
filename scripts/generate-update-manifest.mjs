@@ -24,6 +24,7 @@ function runtimeBuildId() {
     "native-helper",
     "plugins/tianyuan-browser-connector",
     "scripts/install-local-runtime.mjs",
+    "skills/depreciation-capex-forecast",
   ];
   const files = [];
   for (const relativeRoot of roots) {

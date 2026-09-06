@@ -28,6 +28,7 @@ const nativeHost = fs.readFileSync(path.join(repoRoot, "native-helper", "native_
 const conversationService = fs.readFileSync(path.join(repoRoot, "native-helper", "file-archive-conversations.js"), "utf8");
 const nativeHostBootstrap = fs.readFileSync(path.join(repoRoot, "native-helper", "native_host_bootstrap.js"), "utf8");
 const processLauncher = fs.readFileSync(path.join(repoRoot, "native-helper", "process_launcher.js"), "utf8");
+const manifestGenerator = fs.readFileSync(path.join(repoRoot, "scripts", "generate-update-manifest.mjs"), "utf8");
 const updateChecker = fs.readFileSync(path.join(repoRoot, "native-helper", "update_checker.js"), "utf8");
 const updateInstaller = fs.readFileSync(path.join(repoRoot, "native-helper", "update_installer.js"), "utf8");
 const platformIndex = fs.readFileSync(path.join(repoRoot, "native-helper", "platform", "index.js"), "utf8");
@@ -94,6 +95,7 @@ for (const resource of manifest.web_accessible_resources || []) {
 }
 
 assert.equal(installer.includes("sourceBuildDigest"), true);
+assert.equal(manifestGenerator.includes('"skills/depreciation-capex-forecast"'), true);
 assert.equal(installer.includes(".staging-"), true);
 assert.equal(installer.includes("runtimeBuildId"), true);
 assert.equal(installer.includes("unblockWindowsFile"), true);
