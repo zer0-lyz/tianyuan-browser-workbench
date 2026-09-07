@@ -2163,13 +2163,21 @@ function runPythonTableFormatScript(documentPath, onLine) {
         return;
       }
       const diagnostic = [...logLines].reverse().find((item) => item.stream === "stderr")?.text || "";
-      const error = new Error(diagnostic ? `TABLE_FORMAT_SCRIPT_FAILED:${diagnostic}` : "TABLE_FORMAT_SCRIPT_FAILED");
+      const error = new Error(`TABLE_FORMAT_SCRIPT_FAILED:${classifyTableFormatFailure(diagnostic)}`);
       error.exitCode = code;
       error.signal = signal || null;
       error.logLines = logLines;
       reject(error);
     });
   });
+}
+
+function classifyTableFormatFailure(text) {
+  const diagnostic = String(text || "").trim();
+  if (/No module named ['\"](?:docx|lxml|openpyxl|et_xmlfile)['\"]/.test(diagnostic)) {
+    return "TABLE_FORMAT_PYTHON_DEPENDENCY_MISSING";
+  }
+  return diagnostic || "TABLE_FORMAT_SCRIPT_FAILED";
 }
 
 function readTableFormatSummary(logLines = []) {

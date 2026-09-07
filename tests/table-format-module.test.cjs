@@ -173,7 +173,7 @@ grid_columns = table.xpath("./w:tblGrid/w:gridCol", namespaces=NS)
 grid_widths = [int(column.get("{" + NS["w"] + "}w")) for column in grid_columns]
 assert len(grid_widths) == 4, grid_widths
 assert len(set(grid_widths)) >= 2, grid_widths
-assert table.xpath("./w:tblPr/w:tblLayout[@w:type='fixed']", namespaces=NS)
+assert table.xpath("./w:tblPr/w:tblLayout[@w:type='autofit']", namespaces=NS)
 assert len(table.xpath("./w:tr[1]/w:trPr/w:tblHeader", namespaces=NS)) == 1
 assert len(table.xpath("./w:tr[2]/w:trPr/w:tblHeader", namespaces=NS)) == 1
 assert table.xpath(".//w:gridSpan[@w:val='2']", namespaces=NS)
@@ -196,6 +196,7 @@ serial_table = root.xpath("//w:tbl", namespaces=NS)[2]
 serial_cell = serial_table.xpath("./w:tr[2]/w:tc[1]", namespaces=NS)[0]
 assert serial_cell.xpath(".//w:jc[@w:val='center']", namespaces=NS)
 assert serial_cell.xpath("./w:tcPr/w:vAlign[@w:val='center']", namespaces=NS)
+assert serial_cell.xpath(".//w:pPr/w:spacing[@w:line='240']", namespaces=NS)
 assert serial_cell.xpath("./w:tcPr/w:noWrap", namespaces=NS)
 assert not serial_table.xpath("./w:tr[2]/w:tc[3]//w:t", namespaces=NS)
 assert serial_table.xpath("./w:tr[3]/w:tc[3]//w:t[text()='政府补助']", namespaces=NS)

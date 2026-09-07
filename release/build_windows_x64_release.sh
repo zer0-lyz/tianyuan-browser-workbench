@@ -56,6 +56,7 @@ const roots = [
   "plugins/tianyuan-browser-connector",
   "scripts/install-local-runtime.mjs",
   "skills/depreciation-capex-forecast",
+  "skills/table-format",
 ];
 const files = [];
 for (const relativeRoot of roots) {
@@ -120,10 +121,26 @@ fi
 PYTHON_SHA256="$(/usr/bin/shasum -a 256 "$PYTHON_ARCHIVE" | awk '{ print $1 }')"
 
 python3 -m pip download \
+  --quiet \
   --disable-pip-version-check \
+  --no-deps \
   --dest "$WHEEL_CACHE" \
   "openpyxl==3.1.5" \
-  "et_xmlfile==2.0.0"
+  "et_xmlfile==2.0.0" \
+  "python-docx==1.2.0" \
+  "typing_extensions==4.16.0"
+
+python3 -m pip download \
+  --quiet \
+  --disable-pip-version-check \
+  --only-binary=:all: \
+  --platform win_amd64 \
+  --python-version 3.14 \
+  --implementation cp \
+  --abi cp314 \
+  --no-deps \
+  --dest "$WHEEL_CACHE" \
+  "lxml==6.1.0"
 
 if [[ ! -x "$POSTJECT_BIN" ]]; then
   npm install \
@@ -187,7 +204,7 @@ cat > "$STAGE/native-helper/runtime-compat.json" <<EOF
 EOF
 
 /usr/bin/unzip -q "$PYTHON_ARCHIVE" -d "$STAGE/runtime/python-portable"
-for wheel in "$WHEEL_CACHE"/openpyxl-3.1.5-*.whl "$WHEEL_CACHE"/et_xmlfile-2.0.0-*.whl; do
+for wheel in "$WHEEL_CACHE"/openpyxl-3.1.5-*.whl "$WHEEL_CACHE"/et_xmlfile-2.0.0-*.whl "$WHEEL_CACHE"/python_docx-1.2.0-*.whl "$WHEEL_CACHE"/typing_extensions-4.16.0-*.whl "$WHEEL_CACHE"/lxml-6.1.0-*-win_amd64.whl; do
   /usr/bin/unzip -q "$wheel" -d "$STAGE/runtime/python-portable/Lib/site-packages"
   cp "$wheel" "$STAGE/runtime/python-wheels/"
 done

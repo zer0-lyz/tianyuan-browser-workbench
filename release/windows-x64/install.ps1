@@ -558,7 +558,7 @@ function Find-CompatiblePython {
       continue
     }
 
-    $OpenpyxlVersion = (& $Candidate -c "import openpyxl, et_xmlfile; v=tuple(int(x) for x in openpyxl.__version__.split('.')[:3]); print(openpyxl.__version__); raise SystemExit(0 if v >= (3, 1, 5) else 1)" 2>$null |
+    $OpenpyxlVersion = (& $Candidate -c "import docx, et_xmlfile, lxml, openpyxl; v=tuple(int(x) for x in openpyxl.__version__.split('.')[:3]); print(openpyxl.__version__); raise SystemExit(0 if v >= (3, 1, 5) else 1)" 2>$null |
       Select-Object -First 1)
     $HasPrintDependencies = $LASTEXITCODE -eq 0
 
@@ -587,11 +587,14 @@ function Install-PrintDependencies([string]$Candidate) {
     --find-links $WheelDir `
     --user `
     "openpyxl==3.1.5" `
-    "et_xmlfile==2.0.0" | Out-Host
+    "et_xmlfile==2.0.0" `
+    "python-docx==1.2.0" `
+    "lxml==6.1.0" `
+    "typing_extensions==4.16.0" | Out-Host
   if ($LASTEXITCODE -ne 0) {
     return $false
   }
-  & $Candidate -c "import openpyxl, et_xmlfile; raise SystemExit(0 if tuple(int(x) for x in openpyxl.__version__.split('.')[:3]) >= (3, 1, 5) else 1)" *> $null
+  & $Candidate -c "import docx, et_xmlfile, lxml, openpyxl; raise SystemExit(0 if tuple(int(x) for x in openpyxl.__version__.split('.')[:3]) >= (3, 1, 5) else 1)" *> $null
   return $LASTEXITCODE -eq 0
 }
 
@@ -761,9 +764,9 @@ try {
     Write-Host "已启用工作台便携 Python。"
   }
 
-  & $PythonExe -c "import sys, openpyxl, et_xmlfile; print('Python', sys.version.split()[0], '| openpyxl', openpyxl.__version__)"
+  & $PythonExe -c "import sys, docx, lxml, openpyxl, et_xmlfile; print('Python', sys.version.split()[0], '| openpyxl', openpyxl.__version__)"
   if ($LASTEXITCODE -ne 0) {
-    throw "最终 Python 环境或 openpyxl 无法运行。"
+    throw "最终 Python 环境或表格设置依赖无法运行。"
   }
 
   Write-UpdateStatus "stopping_services" 76 "正在停止工作台服务"

@@ -97,7 +97,10 @@ fi
   --no-index \
   --find-links "$WHEEL_DIR" \
   "openpyxl==3.1.5" \
-  "et_xmlfile==2.0.0" || fail "离线安装打印格式依赖失败。"
+  "et_xmlfile==2.0.0" \
+  "python-docx==1.2.0" \
+  "lxml==6.1.0" \
+  "typing_extensions==4.16.0" || fail "离线安装打印格式依赖失败。"
 
 echo "5/6 同步扩展、Helper、Bridge 和 Connector..."
 write_status "installing" 88 "正在同步全部工作台组件"
@@ -114,8 +117,8 @@ process.stdout.write(JSON.parse(input).extensionPath || "");
 [[ -d "$EXTENSION_PATH" ]] || fail "安装完成后未找到浏览器扩展目录。"
 
 echo "6/6 完成环境检查..."
-"$VENV_DIR/bin/python3" -c "import openpyxl; print('openpyxl', openpyxl.__version__)" \
-  || fail "openpyxl 检查失败。"
+"$VENV_DIR/bin/python3" -c "import docx, lxml, openpyxl; print('openpyxl', openpyxl.__version__)" \
+  || fail "表格设置依赖检查失败。"
 [[ -f "$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.tianyuan.workbench.helper.json" ]] \
   || fail "Native Host 注册文件未生成。"
 write_status "complete" 100 "全部组件更新完成，浏览器扩展可重新加载"
