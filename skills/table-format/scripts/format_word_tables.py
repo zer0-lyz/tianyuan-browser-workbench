@@ -37,7 +37,11 @@ FORMAT_RULES = {
     "topBottomBorderPt": 1.5,
     "insideBorderPt": 0.5,
     "leftRightBorder": "none",
+    "verticalAlignment": "center",
+    "lineSpacing": 1.0,
 }
+
+DOCX_REQUIRED_MEMBERS = ("[Content_Types].xml", "_rels/.rels", "word/document.xml")
 
 NUMERIC_CELL_RE = re.compile(
     r"^[\s\d,.，。;；:：'‘’\"“”%％+-−()（）/\\$￥€£¥*]+$"
@@ -76,6 +80,23 @@ def emit(event: str, **payload: object) -> None:
     print(json.dumps(message, ensure_ascii=False), flush=True)
 
 
+def validate_docx_package(document_path: Path) -> None:
+    """Fail before python-docx mutates a file that is not an OOXML package."""
+    try:
+        with zipfile.ZipFile(document_path, "r") as document_zip:
+            names = set(document_zip.namelist())
+            missing = [member for member in DOCX_REQUIRED_MEMBERS if member not in names]
+            if missing:
+                raise ValueError(
+                    "TABLE_FORMAT_INVALID_DOCX_MISSING_MEMBER:" + ",".join(missing)
+                )
+            bad_member = document_zip.testzip()
+            if bad_member:
+                raise ValueError("TABLE_FORMAT_INVALID_DOCX_CORRUPT_MEMBER:" + bad_member)
+    except zipfile.BadZipFile as error:
+        raise ValueError("TABLE_FORMAT_INVALID_DOCX_NOT_ZIP") from error
+
+
 def repair_null_relationships(document_path: Path) -> int:
     """Remove only package relationships that point to the literal missing NULL part."""
     removed_count = 0
@@ -103,7 +124,10 @@ def repair_null_relationships(document_path: Path) -> int:
                     resolved_target = posixpath.normpath(
                         posixpath.join(base_directory, target)
                     ).lstrip("/")
-                    if resolved_target.upper() == "NULL":
+                    if (
+                        posixpath.basename(resolved_target).upper() == "NULL"
+                        and resolved_target not in names
+                    ):
                         root.remove(relationship)
                         removed_count += 1
                         changed = True
@@ -500,12 +524,28 @@ def set_paragraph_alignment(paragraph, alignment) -> None:
     paragraph_properties.append(justification)
 
 
+def set_single_line_spacing(paragraph) -> None:
+    paragraph.paragraph_format.line_spacing = FORMAT_RULES["lineSpacing"]
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(0)
+    paragraph_properties = paragraph._p.get_or_add_pPr()
+    spacing = paragraph_properties.find(qn("w:spacing"))
+    if spacing is None:
+        spacing = OxmlElement("w:spacing")
+        paragraph_properties.append(spacing)
+    spacing.set(qn("w:before"), "0")
+    spacing.set(qn("w:after"), "0")
+    spacing.set(qn("w:line"), "240")
+    spacing.set(qn("w:lineRule"), "auto")
+
+
 def set_cell_text_format(
     cell,
     *,
     header: bool,
     serial: bool = False,
     compact: bool = False,
+    preserve_no_wrap: bool = True,
 ) -> None:
     text = "\n".join(paragraph.text for paragraph in cell.paragraphs).strip()
     numeric = is_numeric_cell(text)
@@ -514,7 +554,7 @@ def set_cell_text_format(
     )
     cell_properties = cell._tc.get_or_add_tcPr()
     remove_children(cell_properties, "w:noWrap")
-    if numeric or serial or compact:
+    if preserve_no_wrap and (numeric or serial or compact):
         cell_properties.append(OxmlElement("w:noWrap"))
     # Never shrink numeric glyphs to force them into a narrow column. The
     # preset keeps the original 10 pt scale and lets the width calculation
@@ -522,14 +562,12 @@ def set_cell_text_format(
     clear_cell_fit_text(cell)
     for paragraph in cell.paragraphs:
         set_paragraph_alignment(paragraph, alignment)
-        paragraph.paragraph_format.space_before = Pt(0)
-        paragraph.paragraph_format.space_after = Pt(0)
+        set_single_line_spacing(paragraph)
         for run in paragraph.runs:
             set_run_fonts(run)
             if header:
                 run.bold = True
-    if header or serial:
-        set_cell_vertical_alignment(cell, WD_CELL_VERTICAL_ALIGNMENT.CENTER)
+    set_cell_vertical_alignment(cell, WD_CELL_VERTICAL_ALIGNMENT.CENTER)
 
 
 def set_row_header(row, enabled: bool) -> None:
@@ -683,8 +721,26 @@ def document_table_width_twips(document) -> int:
         return 9000
 
 
+def table_available_width_twips(table, document_width_twips: int) -> int:
+    """Use the parent cell width for nested tables instead of page width."""
+    parent = table._tbl.getparent()
+    if parent is None or parent.tag != qn("w:tc"):
+        return document_width_twips
+    cell_properties = parent.find(qn("w:tcPr"))
+    cell_width = cell_properties.find(qn("w:tcW")) if cell_properties is not None else None
+    if cell_width is None:
+        return document_width_twips
+    try:
+        value = int(cell_width.get(qn("w:w")))
+    except (TypeError, ValueError):
+        return document_width_twips
+    if cell_width.get(qn("w:type")) == "pct":
+        value = round(document_width_twips * value / 5000)
+    return max(720, min(document_width_twips, value))
+
+
 def set_table_width(table, width_twips: int) -> list:
-    table.autofit = False
+    table.autofit = True
     table_properties = table._tbl.tblPr
     table_width = table_properties.find(qn("w:tblW"))
     if table_width is None:
@@ -696,7 +752,13 @@ def set_table_width(table, width_twips: int) -> list:
     if layout is None:
         layout = OxmlElement("w:tblLayout")
         table_properties.append(layout)
-    layout.set(qn("w:type"), "fixed")
+    layout.set(qn("w:type"), "autofit")
+    table_indent = table_properties.find(qn("w:tblInd"))
+    if table_indent is None:
+        table_indent = OxmlElement("w:tblInd")
+        table_properties.append(table_indent)
+    table_indent.set(qn("w:w"), "0")
+    table_indent.set(qn("w:type"), "dxa")
     table_grid = table._tbl.tblGrid
     if table_grid is None:
         table_grid = OxmlElement("w:tblGrid")
@@ -710,11 +772,11 @@ def set_table_width(table, width_twips: int) -> list:
     return grid_columns
 
 
-def calculate_column_widths(table, width_twips: int, header_rows: set[int]) -> list[int]:
+def calculate_column_widths(table, width_twips: int, header_rows: set[int]) -> tuple[list[int], bool]:
     grid_columns = list(table._tbl.tblGrid.iterchildren(qn("w:gridCol"))) if table._tbl.tblGrid is not None else []
     column_count = max(len(grid_columns), len(table.columns))
     if column_count <= 0:
-        return []
+        return [], False
     serial_columns = detect_serial_columns(table, header_rows)
     identifier_columns = detect_identifier_columns(table, header_rows)
     original_widths = []
@@ -818,7 +880,26 @@ def calculate_column_widths(table, width_twips: int, header_rows: set[int]) -> l
                     changed = True
             if not changed:
                 break
-    return widths
+    return fit_column_widths_to_window(widths, width_twips)
+
+
+def fit_column_widths_to_window(widths: list[int], width_twips: int) -> tuple[list[int], bool]:
+    total = sum(widths)
+    if not widths or total <= width_twips:
+        return widths, False
+    minimum = min(240, max(120, width_twips // len(widths)))
+    scaled = [max(minimum, round(width * width_twips / total)) for width in widths]
+    while sum(scaled) > width_twips:
+        candidates = [index for index, value in enumerate(scaled) if value > minimum]
+        if not candidates:
+            break
+        index = max(candidates, key=scaled.__getitem__)
+        scaled[index] -= 1
+    index = 0
+    while sum(scaled) < width_twips:
+        scaled[index % len(scaled)] += 1
+        index += 1
+    return scaled, True
 
 
 def set_column_widths(table, grid_columns: list, widths: list[int]) -> None:
@@ -842,7 +923,7 @@ def set_column_widths(table, grid_columns: list, widths: list[int]) -> None:
             cell_width.set(qn("w:type"), "dxa")
 
 
-def set_table_rows(table, header_rows: set[int]) -> None:
+def set_table_rows(table, header_rows: set[int], *, preserve_no_wrap: bool = True) -> None:
     serial_columns = detect_serial_columns(table, header_rows)
     identifier_columns = detect_identifier_columns(table, header_rows)
     for row_index, row in enumerate(table.rows):
@@ -865,6 +946,7 @@ def set_table_rows(table, header_rows: set[int]) -> None:
                 header=is_header,
                 serial=serial,
                 compact=compact,
+                preserve_no_wrap=preserve_no_wrap,
             )
 
 
@@ -878,16 +960,17 @@ def iter_tables(tables):
 
 def format_document(document: Document) -> tuple[int, int]:
     table_list = list(iter_tables(document.tables))
-    width_twips = document_table_width_twips(document)
+    document_width_twips = document_table_width_twips(document)
     cleaned_remark_values = 0
     for table in table_list:
+        width_twips = table_available_width_twips(table, document_width_twips)
         header_rows = detect_header_rows(table)
         cleaned_remark_values += clear_redundant_remark_values(table, header_rows)
         grid_columns = set_table_width(table, width_twips)
-        widths = calculate_column_widths(table, width_twips, header_rows)
+        widths, compressed = calculate_column_widths(table, width_twips, header_rows)
         set_column_widths(table, grid_columns, widths)
         set_table_borders(table)
-        set_table_rows(table, header_rows)
+        set_table_rows(table, header_rows, preserve_no_wrap=not compressed)
         set_table_cell_borders(table, len(grid_columns))
     return len(table_list), cleaned_remark_values
 
@@ -895,6 +978,7 @@ def format_document(document: Document) -> tuple[int, int]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("document", type=Path)
+    parser.add_argument("--no-backup", action="store_true", help=argparse.SUPPRESS)
     return parser.parse_args()
 
 
@@ -905,6 +989,7 @@ def main() -> int:
         raise ValueError("TABLE_FORMAT_DOCX_ONLY")
     if not document_path.is_file():
         raise FileNotFoundError("TABLE_FORMAT_INPUT_NOT_FOUND")
+    validate_docx_package(document_path)
     emit("start", fileName=document_path.name)
     repaired_relationships = repair_null_relationships(document_path)
     if repaired_relationships:

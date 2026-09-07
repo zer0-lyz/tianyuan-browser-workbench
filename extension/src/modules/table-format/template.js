@@ -16,7 +16,8 @@ export const tableFormatTemplate = `
     <div class="table-format-preset" aria-label="表格格式预设">
       <div><strong>字体</strong><span>宋体文本 · Times New Roman 数字 · 10 号</span></div>
       <div><strong>布局</strong><span>按窗口调整 · 最小行高 0.6 厘米 · 重复标题</span></div>
-      <div><strong>对齐</strong><span>标题加粗居中 · 数字右对齐</span></div>
+      <div><strong>对齐</strong><span>单元格垂直居中 · 标题加粗居中 · 数字右对齐</span></div>
+      <div><strong>行距</strong><span>表格段落统一单倍行距</span></div>
       <div><strong>边框</strong><span>上下线 1.5 磅 · 内部线 0.5 磅 · 左右无线</span></div>
     </div>
   </section>

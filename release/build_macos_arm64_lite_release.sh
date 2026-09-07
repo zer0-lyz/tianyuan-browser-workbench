@@ -28,7 +28,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { createHash } = require("node:crypto");
 const root = process.argv[2];
-const roots = ["extension", "native-helper", "plugins/tianyuan-browser-connector", "scripts/install-local-runtime.mjs", "skills/depreciation-capex-forecast"];
+const roots = ["extension", "native-helper", "plugins/tianyuan-browser-connector", "scripts/install-local-runtime.mjs", "skills/depreciation-capex-forecast", "skills/table-format"];
 const files = [];
 for (const relativeRoot of roots) {
   const absoluteRoot = path.join(root, relativeRoot);
@@ -57,7 +57,7 @@ NODE
 [[ "$(uname -m)" == "arm64" ]] || { echo "arm64 required" >&2; exit 1; }
 mkdir -p "$STAGE/runtime/python-wheels" "$STAGE/scripts" "$DIST_DIR" "$WHEEL_CACHE"
 
-python3 -m pip download   --disable-pip-version-check   --dest "$WHEEL_CACHE"   "openpyxl==3.1.5"   "et_xmlfile==2.0.0"
+python3 -m pip download   --quiet   --disable-pip-version-check   --dest "$WHEEL_CACHE"   "openpyxl==3.1.5"   "et_xmlfile==2.0.0"   "python-docx==1.2.0"   "lxml==6.1.0"
 
 /usr/bin/ditto "$ROOT_DIR/extension" "$STAGE/extension"
 /usr/bin/ditto "$ROOT_DIR/native-helper" "$STAGE/native-helper"
@@ -75,7 +75,7 @@ cp "$STAGE/native-helper/runtime-compat.json" "$STAGE/extension/runtime-compat.j
 /usr/bin/ditto "$ROOT_DIR/skills" "$STAGE/skills"
 /usr/bin/ditto "$ROOT_DIR/plugins" "$STAGE/plugins"
 cp "$ROOT_DIR/scripts/install-local-runtime.mjs" "$STAGE/scripts/install-local-runtime.mjs"
-cp "$WHEEL_CACHE"/*.whl "$STAGE/runtime/python-wheels/"
+cp "$WHEEL_CACHE"/openpyxl-3.1.5-*.whl "$WHEEL_CACHE"/et_xmlfile-2.0.0-*.whl "$WHEEL_CACHE"/python_docx-1.2.0-*.whl "$WHEEL_CACHE"/typing_extensions-*.whl "$WHEEL_CACHE"/lxml-6.1.0-*-macosx_*.whl "$STAGE/runtime/python-wheels/"
 cp "$ROOT_DIR/release/macos-arm64/安装.command" "$STAGE/安装.command"
 cp "$ROOT_DIR/release/macos-arm64/卸载.command" "$STAGE/卸载.command"
 cp "$ROOT_DIR/release/macos-arm64/安装使用说明.md" "$STAGE/安装使用说明.md"

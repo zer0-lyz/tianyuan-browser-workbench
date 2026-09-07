@@ -53,6 +53,23 @@ function fileName(filePath) {
   return String(filePath || "").split(/[\\/]/).pop() || String(filePath || "");
 }
 
+function tableFormatFailureMessage(reason) {
+  const value = String(reason || "");
+  if (value.includes("TABLE_FORMAT_INVALID_DOCX_NOT_ZIP")) {
+    return "不是有效的 .docx 文件：文件不是 Office Open XML 压缩包，可能是旧式 .doc 或文件未完整下载。";
+  }
+  if (value.includes("TABLE_FORMAT_INVALID_DOCX_MISSING_MEMBER")) {
+    return "不是完整的 .docx 文件：缺少 word/document.xml，请重新导出或下载后再试。";
+  }
+  if (value.includes("TABLE_FORMAT_INVALID_DOCX_CORRUPT_MEMBER")) {
+    return ".docx 文件已损坏：内部文件无法读取，请使用 Word/WPS 另存为新的 .docx 后再试。";
+  }
+  if (value.includes("TABLE_FORMAT_PYTHON_DEPENDENCY_MISSING")) {
+    return "本机表格设置运行组件不完整，请重新安装工作台本机运行组件。";
+  }
+  return value || "未知原因";
+}
+
 export const tableFormatModule = {
   manifest: {
     id: "table-format",
@@ -121,7 +138,7 @@ export const tableFormatModule = {
         item.dataset.kind = result.ok ? "ok" : "error";
         item.textContent = result.ok
           ? `已完成：${fileName(result.outputPath || result.sourcePath)}${result.tableCount !== undefined ? `（${result.tableCount} 个表格）` : ""}${result.repairedRelationships ? `，修复 ${result.repairedRelationships} 个无效关系` : ""}${result.cleanedRemarkValues ? `，清理 ${result.cleanedRemarkValues} 个备注占位值` : ""}`
-          : `失败：${fileName(result.sourcePath)}，${result.reason || "未知原因"}`;
+          : `失败：${fileName(result.sourcePath)}，${tableFormatFailureMessage(result.reason)}`;
         elements.tableFormatResultList.appendChild(item);
       }
     }
