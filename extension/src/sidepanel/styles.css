@@ -489,6 +489,42 @@ details.status-card,
   background: #ffebe9;
 }
 
+.module-sections {
+  display: grid;
+  gap: 18px;
+}
+
+.module-section {
+  display: grid;
+  gap: 10px;
+}
+
+.module-section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 2px 7px;
+  border-bottom: 1px solid var(--line);
+}
+
+.module-section-heading h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.module-section-heading small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.module-section-building .module-section-heading h3 {
+  color: var(--warn);
+}
+
 .module-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(86px, 1fr));

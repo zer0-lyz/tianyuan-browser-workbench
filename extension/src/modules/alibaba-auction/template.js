@@ -33,12 +33,12 @@ export const alibabaAuctionTemplate = `
     </div>
     <label class="alibaba-auction-source-row"><span>检索网址</span><input id="alibabaAuctionSourceUrl" type="text" readonly></label>
     <div class="button-row alibaba-auction-parameter-actions">
-      <button id="openAlibabaAuctionSource" type="button" class="secondary">当前页打开并登录</button>
-      <button id="runAlibabaAuction" type="button">在当前页开始抓取</button>
       <button id="saveAlibabaAuctionParams" type="button">确认并应用参数</button>
+      <button id="openAlibabaAuctionSource" type="button" class="secondary">打开并登录</button>
+      <button id="runAlibabaAuction" type="button">开始抓取</button>
       <button id="resetAlibabaAuctionParams" type="button" class="secondary">恢复默认</button>
     </div>
-    <div id="alibabaAuctionParameterMessage" class="inline-feedback">请调整参数后点击“确认并应用参数”，再打开页面或开始抓取。</div>
+    <div id="alibabaAuctionParameterMessage" class="inline-feedback">请调整参数后先点击“确认并应用参数”；应用后再打开页面并开始抓取。</div>
   </section>
 
   <section class="section alibaba-auction-output">

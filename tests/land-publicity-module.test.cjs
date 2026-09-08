@@ -168,7 +168,7 @@ print(json.dumps(result, ensure_ascii=False))
     assert.equal(coords.length, 1);
     assert.match(html, /无坐标（详情接口未返回）/);
     const map = fs.readFileSync(payload.mapPath, "utf8");
-    for (const marker of ["legend-panel", "work-panel", "case-tab", "unlocated-tab", "case-search", "case-sort", "unlocated-list", "syncLabels", "markercluster", "marker-highlight", "focusSourceCodes", "setSelectedSourceCodes", "add-reference-marker", "reference-marker-list", "ZJ_LAND_MAP_DISTANCE_REQUEST", "renderDistanceResults", "haversineKm"]) {
+    for (const marker of ["legend-panel", "work-panel", "case-tab", "unlocated-tab", "case-search", "case-sort", "unlocated-list", "syncLabels", "markercluster", "marker-highlight", "focusSourceCodes", "setSelectedSourceCodes", "add-reference-marker", "reference-marker-list", "reference-marker-edit", "setReferenceMarkerEditing", "ZJ_LAND_MAP_DISTANCE_REQUEST", "renderDistanceResults", "haversineKm"]) {
       assert.match(map, new RegExp(marker), `map should include ${marker}`);
     }
     assert.match(map, /插入位置标记/);
@@ -177,10 +177,12 @@ print(json.dumps(result, ensure_ascii=False))
     assert.match(map, /marker-dialog-note/);
     assert.match(map, /添加位置标记/);
     assert.doesNotMatch(map, /window\.prompt/);
-    assert.match(map, /拖动标记调整位置/);
+    assert.match(map, /编辑状态：可拖动/);
     assert.match(map, /L\.polyline/);
     assert.match(map, /distance-label/);
     assert.match(map, /referenceMarkerLabel/);
+    assert.match(map, /marker\.dragging\?\.disable\(\)/);
+    assert.match(map, /位置已锁定/);
     assert.doesNotMatch(map, /current\.lat\.toFixed\(6\)/);
     assert.doesNotMatch(map, /summary-grid|summary-card|right-panel|点位按 resourceCoordinate\.center/);
     assert.match(map, /\.legend-panel \{[^}]*right: 12px/);
