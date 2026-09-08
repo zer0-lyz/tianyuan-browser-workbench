@@ -110,7 +110,10 @@ function selectGithubAsset(assets, key, requestedName = "") {
     const exact = normalized.find((asset) => asset.name === requestedName);
     if (exact) return exact;
   }
-  return normalized.find((asset) => assetPlatformMatches(asset.name, key)) || null;
+  const candidates = normalized.filter((asset) => assetPlatformMatches(asset.name, key));
+  return candidates.find((asset) => !/(?:^|[-_])lite(?:[-_.]|$)/i.test(asset.name))
+    || candidates[0]
+    || null;
 }
 
 function selectChecksumAsset(assets, packageName) {

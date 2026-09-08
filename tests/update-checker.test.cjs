@@ -7,6 +7,7 @@ const {
   platformKey,
   configuredManifestUrls,
   isAuthoritativeLatestManifestUrl,
+  selectGithubAsset,
   checkGithubUpdate,
 } = require("../native-helper/update_checker.js");
 
@@ -33,6 +34,13 @@ async function run() {
   assert.equal(compareSemver("1.2.0", "1.2.0-beta.10"), 1);
   assert.equal(platformKey("win32", "x64"), "windows-x64");
   assert.equal(platformKey("darwin", "arm64"), "macos-arm64");
+  assert.equal(
+    selectGithubAsset([
+      { name: "tianyuan-workbench-v0.14.24-windows-x64-lite.zip", size: 1 },
+      { name: "tianyuan-workbench-v0.14.24-windows-x64.zip", size: 2 },
+    ], "windows-x64").name,
+    "tianyuan-workbench-v0.14.24-windows-x64.zip",
+  );
   assert.equal(
     isAuthoritativeLatestManifestUrl(
       "https://github.com/zer0-lyz/tianyuan-browser-workbench-releases/releases/latest/download/update-manifest.json",
