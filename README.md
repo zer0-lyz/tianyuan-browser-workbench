@@ -68,6 +68,8 @@ node scripts/install-local-runtime.mjs
 4. 选择安装脚本输出的 `extensionPath`。
 5. 打开天源系统页面，在侧栏中进入连接配置并绑定当前页面。
 
+侧栏还提供“浙江土地市场网”“阿里司法拍卖”和“安居客数据”模块。安居客模块的使用流程是：在当前浏览器标签页的安居客网页中选好范围，点击“导入当前网址”，再点击“开始抓取”；抓取不新开浏览器窗口，支持出售/租赁/自动识别、数量上限、验证等待、当前页证据快照、CSV/JSON 和按 A-W 规则生成的 Excel；输出目录会在本机创建“安居客物业案例”子目录，网页未提供的字段保留为空。
+
 安装本机运行组件后，批量上传等页面写入模块不需要配置 Codex、WorkBuddy 或其他 Agent MCP。扩展会自动注册“天源工作台本机脚本”来源；首次执行写入时只需确认当前页面控制权。仅加载扩展文件而未注册 Native Messaging Host 时，文件夹选择和本机 Bridge 不会工作。
 
 版本更新模块通过公开发行仓库 `zer0-lyz/tianyuan-browser-workbench-releases` 的 GitHub Releases 检查新版本，不使用 MCP token。`0.13.0` 起可在侧栏点击“更新全部组件”，自动下载对应平台完整包、校验 SHA-256，并同步扩展、Native Helper、Bridge、Connector、`~/plugins/` 与 Codex 插件缓存；完成后自动重新加载扩展。

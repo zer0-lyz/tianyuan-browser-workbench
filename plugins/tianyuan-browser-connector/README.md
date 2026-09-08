@@ -50,6 +50,8 @@ Connector 启动时从本机 `runtime/agent-config.json` 或 `TIANYUAN_CONNECTOR
 
 Connector 不提供任意浏览器点击、任意 URL、任意 JavaScript 或绕过编辑锁。受控上传、清理和核对动作仍使用原有的确认、编辑锁、保存及回读门禁。
 
+安居客数据抓取是侧栏本机模块，不作为任意浏览器控制工具暴露；它只通过固定的安居客域名、受控 Playwright 脚本和本机输出目录生成案例证据与 Excel，不读取或输出浏览器凭据。
+
 资产基础法底稿批量保存和批量退出编辑已作为 MCP 工具暴露给 Codex：
 
 - `tianyuan.preview_batch_save` / `tianyuan.execute_batch_save`
