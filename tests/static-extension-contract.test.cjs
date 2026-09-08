@@ -144,6 +144,21 @@ assert.equal(updatesTemplate.includes('id="checkForUpdates"'), true);
 assert.equal(updatesTemplate.includes('id="testUpdate"'), true);
 assert.equal(updatesTemplate.includes('id="installUpdate"'), true);
 assert.match(html, /<span id="moduleCountBadge" class="badge">\d+ 个模块<\/span>/);
+assert.equal(html.includes('id="moduleSectionStable"'), true);
+assert.equal(html.includes('id="moduleSectionBuilding"'), true);
+assert.equal(html.includes('id="moduleSectionStableTitle">正式可用</h3>'), true);
+assert.equal(html.includes('id="moduleSectionBuildingTitle">制作中</h3>'), true);
+assert.ok(html.indexOf('id="moduleSectionStable"') < html.indexOf('id="moduleSectionBuilding"'));
+const stableSection = html.slice(
+  html.indexOf('id="moduleSectionStable"'),
+  html.indexOf('id="moduleSectionBuilding"'),
+);
+const buildingSection = html.slice(html.indexOf('id="moduleSectionBuilding"'));
+assert.equal(stableSection.includes('id="openTableFormat"'), true);
+assert.equal(stableSection.includes('id="openAnjukeProperty"'), false);
+assert.equal(stableSection.includes('id="openDepreciationCapex"'), false);
+assert.equal(buildingSection.includes('id="openAnjukeProperty"'), true);
+assert.equal(buildingSection.includes('id="openDepreciationCapex"'), true);
 assert.equal(html.includes('id="openFeedbackTop"'), true);
 assert.equal(html.includes('id="openUpdatesTop"'), true);
 assert.equal(html.includes('id="connectionStatusPanel"'), true);

@@ -7,6 +7,7 @@ import { updatesModule } from "../modules/updates/module.js";
 import { feedbackModule } from "../modules/feedback/module.js";
 import { landPublicityModule } from "../modules/land-publicity/module.js";
 import { alibabaAuctionModule } from "../modules/alibaba-auction/module.js";
+import { anjukePropertyModule } from "../modules/anjuke-property/module.js";
 import { depreciationCapexModule } from "../modules/depreciation-capex-forecast/module.js";
 import { tableFormatModule } from "../modules/table-format/module.js";
 
@@ -437,6 +438,7 @@ moduleRegistry.register(updatesModule);
 moduleRegistry.register(feedbackModule);
 moduleRegistry.register(landPublicityModule);
 moduleRegistry.register(alibabaAuctionModule);
+moduleRegistry.register(anjukePropertyModule);
 moduleRegistry.register(depreciationCapexModule);
 moduleRegistry.register(tableFormatModule);
 elements.extensionId.textContent = chrome.runtime.id;
