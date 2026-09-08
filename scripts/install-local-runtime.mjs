@@ -60,6 +60,7 @@ const NATIVE_RUNTIME_BACKUP_FILES = [
   "file-archive-conversations.js",
   "depreciation-capex-forecast.js",
   "alibaba-auction.js",
+  "anjuke-property.js",
   "update-sources.json",
   "runtime-config.json",
   "com.tianyuan.workbench.helper.json",
@@ -643,12 +644,15 @@ function main() {
       "src/modules/alibaba-auction/module.js",
       "src/modules/alibaba-auction/template.js",
       "src/modules/alibaba-auction/styles.css",
+      "src/modules/anjuke-property/module.js",
+      "src/modules/anjuke-property/template.js",
+      "src/modules/anjuke-property/styles.css",
     ],
   );
   copyDir(
     path.join(repoRoot, "native-helper"),
     path.join(runtimeProjectRoot, "native-helper"),
-    ["native_host.js", "native_host_bootstrap.js", "connector_bridge.js", "codex_catalog.js", "process_launcher.js", "update_checker.js", "update_installer.js", "file-archive.js", "file-archive-conversations.js", "depreciation-capex-forecast.js", "alibaba-auction.js", "update-sources.json"],
+    ["native_host.js", "native_host_bootstrap.js", "connector_bridge.js", "codex_catalog.js", "process_launcher.js", "update_checker.js", "update_installer.js", "file-archive.js", "file-archive-conversations.js", "depreciation-capex-forecast.js", "alibaba-auction.js", "anjuke-property.js", "update-sources.json"],
   );
   copyDir(path.join(repoRoot, "skills"), path.join(runtimeProjectRoot, "skills"), [
     "depreciation-capex-forecast/SKILL.md",
@@ -664,6 +668,9 @@ function main() {
     "depreciation-capex-forecast/scripts/depreciation_forecast/workbook.py",
     "table-format/SKILL.md",
     "table-format/scripts/format_word_tables.py",
+    "anjuke-property-case-fetcher/SKILL.md",
+    "anjuke-property-case-fetcher/agents/openai.yaml",
+    "anjuke-property-case-fetcher/scripts/fetch_anjuke_property_cases.py",
   ]);
   copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), path.join(runtimeProjectRoot, "plugins", "tianyuan-browser-connector"));
   copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), userPluginRoot);
@@ -674,6 +681,7 @@ function main() {
     "asset-link-restore",
     "zj-land-publicity",
     "table-format",
+    "anjuke-property-case-fetcher",
   ]) {
     copyDir(path.join(repoRoot, "skills", skillName), path.join(printSkillsRoot, skillName));
   }
@@ -690,6 +698,7 @@ function main() {
   copyFileAtomic(path.join(repoRoot, "native-helper", "file-archive-conversations.js"), path.join(nativeRuntimeRoot, "file-archive-conversations.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "depreciation-capex-forecast.js"), path.join(nativeRuntimeRoot, "depreciation-capex-forecast.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "alibaba-auction.js"), path.join(nativeRuntimeRoot, "alibaba-auction.js"));
+  copyFileAtomic(path.join(repoRoot, "native-helper", "anjuke-property.js"), path.join(nativeRuntimeRoot, "anjuke-property.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "update-sources.json"), path.join(nativeRuntimeRoot, "update-sources.json"));
   const packagedNativeHostExe = path.join(repoRoot, "native-helper", "native_host.exe");
   if (isWindows && fs.existsSync(packagedNativeHostExe)) {

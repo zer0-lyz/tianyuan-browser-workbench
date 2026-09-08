@@ -26,6 +26,8 @@
     "https://mcp.zhrdc.net/*",
     "https://sf.taobao.com/*",
     "https://sf-item.taobao.com/*",
+    "https://*.anjuke.com/*",
+    "https://anjuke.com/*",
     "http://127.0.0.1:8765/*",
     "http://127.0.0.1:40415/*"
   ],

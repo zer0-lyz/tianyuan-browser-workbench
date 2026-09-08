@@ -87,6 +87,17 @@ const alibabaAuction = (() => {
     }
   }
 })();
+const anjukeProperty = (() => {
+  try {
+    return require("./anjuke-property.js");
+  } catch (cause) {
+    try {
+      return createRequire(path.join(path.dirname(process.execPath), "native_host.js"))("./anjuke-property.js");
+    } catch {
+      throw cause;
+    }
+  }
+})();
 const platformAdapter = (() => {
   try {
     return require("./platform/index.js");
@@ -304,6 +315,12 @@ const LAND_PUBLICITY_SCRIPT = path.join(
   PRINT_SKILLS_DIR,
   "zj-land-publicity",
   "land_publicity_runner.py",
+);
+const ANJUKE_PROPERTY_SCRIPT = path.join(
+  PRINT_SKILLS_DIR,
+  "anjuke-property-case-fetcher",
+  "scripts",
+  "fetch_anjuke_property_cases.py",
 );
 const PRINT_OUTPUT_MODES = new Set(["overwrite", "copy_in_source", "new_directory"]);
 const TABLE_FORMAT_SCRIPT = path.join(
@@ -1948,6 +1965,48 @@ async function chooseAlibabaAuctionOutputDirectory() {
   }
 }
 
+async function chooseAnjukePropertyOutputDirectory() {
+  const result = await chooseDirectory("选择安居客物业案例输出目录");
+  const rawParentPath = result.paths?.[0] || "";
+  if (!result.ok || !rawParentPath) {
+    return {
+      ...result,
+      action: "anjuke_property_output_directory_selected",
+      path: "",
+      paths: [],
+      security: { credentialsReturned: false },
+    };
+  }
+  try {
+    const parentPath = validateExportDirectory(rawParentPath);
+    const outputPath = path.join(parentPath, "安居客物业案例");
+    const directoryName = path.basename(outputPath);
+    const alreadyExists = fs.existsSync(outputPath);
+    fs.mkdirSync(outputPath, { recursive: true, mode: 0o700 });
+    const selectedPath = fs.realpathSync(outputPath);
+    return {
+      ...result,
+      ok: true,
+      action: "anjuke_property_output_directory_selected",
+      path: selectedPath,
+      paths: [selectedPath],
+      parentPath,
+      directoryName,
+      createdDirectory: !alreadyExists,
+      security: { credentialsReturned: false },
+    };
+  } catch {
+    return {
+      ok: false,
+      action: "anjuke_property_output_directory_selected",
+      path: "",
+      paths: [],
+      reason: "ANJUKE_OUTPUT_DIRECTORY_CREATE_FAILED",
+      security: { credentialsReturned: false },
+    };
+  }
+}
+
 function isWorkbookPath(value) {
   const extension = path.extname(String(value || "")).toLowerCase();
   return extension === ".xlsx" || extension === ".xlsm";
@@ -2961,6 +3020,138 @@ function runAlibabaAuction(message, emit) {
   });
 }
 
+function runAnjukeProperty(message, emit) {
+  return new Promise((resolve) => {
+    let request;
+    try {
+      if (!fs.existsSync(ANJUKE_PROPERTY_SCRIPT)) throw new Error("ANJUKE_SCRIPT_NOT_FOUND");
+      request = anjukeProperty.normalizeRequest(message?.request);
+    } catch (error) {
+      const payload = {
+        ok: false,
+        event: "complete",
+        action: "run_anjuke_property",
+        phase: "failed",
+        percent: 0,
+        reason: anjukeProperty.safeError(error),
+        security: anjukeProperty.security(),
+      };
+      emit(payload);
+      resolve(payload);
+      return;
+    }
+    let finalPayload = null;
+    let settled = false;
+    const complete = (payload, exitCode = null, signal = null) => {
+      if (settled) return;
+      try {
+        const processFailed = exitCode !== null && exitCode !== 0;
+        const outputPaths = payload.ok && !processFailed
+          ? [payload.csvPath, payload.jsonPath, payload.excelPath, payload.resultHtmlPath, payload.mapPath]
+            .filter(Boolean)
+            .map((value) => anjukeProperty.validateOutputPath(value, request.outputDirectory))
+          : [];
+        const result = {
+          ...payload,
+          ok: Boolean(payload.ok) && !processFailed,
+          event: "complete",
+          action: "run_anjuke_property",
+          phase: payload.ok && !processFailed ? "completed" : "failed",
+          percent: payload.ok && !processFailed ? 100 : Number(payload.percent || 0),
+          reason: processFailed && payload.ok ? "ANJUKE_RUNNER_FAILED" : payload.reason,
+          exitCode,
+          signal,
+          outputPaths,
+          security: anjukeProperty.security(),
+        };
+        settled = true;
+        emit(result);
+        resolve(result);
+      } catch (error) {
+        settled = true;
+        const result = {
+          ok: false,
+          event: "complete",
+          action: "run_anjuke_property",
+          phase: "failed",
+          percent: 0,
+          reason: anjukeProperty.safeError(error),
+          security: anjukeProperty.security(),
+        };
+        emit(result);
+        resolve(result);
+      }
+    };
+    const args = [ANJUKE_PROPERTY_SCRIPT, "--request-json", JSON.stringify(request)];
+    const launch = processLauncher.commandLaunchSpec(PYTHON_BIN, args);
+    const child = spawn(launch.command, launch.args, {
+      cwd: path.dirname(ANJUKE_PROPERTY_SCRIPT),
+      env: { ...process.env, ...launch.env, PYTHONUNBUFFERED: "1" },
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    const consume = (line) => {
+      const text = String(line || "").trim();
+      if (text.startsWith("TY_ANJUKE_PROGRESS:")) {
+        try {
+          emit({ ok: true, event: "progress", action: "run_anjuke_property", ...JSON.parse(text.slice("TY_ANJUKE_PROGRESS:".length)), security: anjukeProperty.security() });
+        } catch {
+          // Ignore malformed progress; the final result remains authoritative.
+        }
+      } else if (text.startsWith("TY_ANJUKE_RESULT:")) {
+        try {
+          finalPayload = JSON.parse(text.slice("TY_ANJUKE_RESULT:".length));
+        } catch {
+          finalPayload = { ok: false, reason: "ANJUKE_RESULT_INVALID" };
+        }
+      }
+    };
+    readline.createInterface({ input: child.stdout }).on("line", consume);
+    readline.createInterface({ input: child.stderr }).on("line", () => {});
+    child.on("error", (error) => complete({ ok: false, reason: error?.code === "ENOENT" ? "PYTHON_NOT_FOUND" : anjukeProperty.safeError(error) }));
+    child.on("close", (code, signal) => {
+      if (settled) return;
+      if (!finalPayload) {
+        complete({ ok: false, reason: code === 0 ? "ANJUKE_RESULT_MISSING" : "ANJUKE_RUNNER_FAILED", exitCode: code, signal: signal || null });
+        return;
+      }
+      complete(finalPayload, code, signal || null);
+    });
+  });
+}
+
+function openAnjukePropertySource(message) {
+  let request;
+  try {
+    request = anjukeProperty.normalizeRequest({
+      listUrls: [message?.url],
+      outputDirectory: processLauncher.runtimeDirectory(),
+    });
+  } catch (error) {
+    return Promise.reject(error);
+  }
+  const launch = processLauncher.commandLaunchSpec(PYTHON_BIN, [
+    ANJUKE_PROPERTY_SCRIPT,
+    "--open-only",
+    "--url",
+    request.listUrls[0],
+    "--user-data-dir",
+    request.userDataDir,
+  ]);
+  return new Promise((resolve) => {
+    const child = spawn(launch.command, launch.args, {
+      cwd: path.dirname(ANJUKE_PROPERTY_SCRIPT),
+      env: { ...process.env, ...launch.env, PYTHONUNBUFFERED: "1" },
+      stdio: "ignore",
+      windowsHide: true,
+      detached: true,
+    });
+    child.once("error", (error) => resolve({ ok: false, action: "open_anjuke_property_source", reason: anjukeProperty.safeError(error), security: anjukeProperty.security() }));
+    child.unref();
+    resolve({ ok: true, action: "open_anjuke_property_source", url: request.listUrls[0], message: "已在安居客受控浏览器中打开页面；关闭该窗口后再开始抓取。", security: anjukeProperty.security() });
+  });
+}
+
 function validateExportDirectory(value) {
   const raw = String(value || "").trim();
   if (!raw || raw.includes("\0") || !path.isAbsolute(raw)) {
@@ -3714,8 +3905,26 @@ async function handle(message) {
   if (message?.action === "select_alibaba_auction_output_directory") {
     return await chooseAlibabaAuctionOutputDirectory();
   }
+  if (message?.action === "select_anjuke_property_output_directory") {
+    return await chooseAnjukePropertyOutputDirectory();
+  }
+  if (message?.action === "open_anjuke_property_path") {
+    const raw = String(message.path || "").trim();
+    if (!raw || !path.isAbsolute(raw) || raw.includes("\0")) throw new Error("ANJUKE_OPEN_PATH_INVALID");
+    const resolved = fs.realpathSync(raw);
+    const root = path.resolve(String(message.outputDirectory || ""));
+    const relative = path.relative(root, resolved);
+    if (!root || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("ANJUKE_OPEN_PATH_OUTSIDE_DIRECTORY");
+    const stat = fs.statSync(resolved);
+    if (!stat.isFile() && !stat.isDirectory()) throw new Error("ANJUKE_OPEN_PATH_NOT_READABLE");
+    const opened = await platformAdapter.openPath(resolved);
+    return { ...opened, action: "open_anjuke_property_path", path: resolved, security: anjukeProperty.security() };
+  }
   if (message?.action === "open_alibaba_auction") {
     return await alibabaAuction.openPage(message?.request || {});
+  }
+  if (message?.action === "open_anjuke_property_source") {
+    return await openAnjukePropertySource(message);
   }
   if (message?.action === "enrich_alibaba_auction_detail") {
     const detail = message?.detail && typeof message.detail === "object" ? message.detail : {};
@@ -3884,6 +4093,7 @@ async function runSelfTest() {
       && fs.existsSync(LINK_RESTORE_SCRIPT)
       && fs.existsSync(TABLE_FORMAT_SCRIPT)
       && fs.existsSync(LAND_PUBLICITY_SCRIPT)
+      && fs.existsSync(ANJUKE_PROPERTY_SCRIPT)
       && platform.supported
       && depreciation.ok,
     service: "tianyuan-native-host",
@@ -3897,6 +4107,7 @@ async function runSelfTest() {
       linkRestore: fs.existsSync(LINK_RESTORE_SCRIPT),
       tableFormat: fs.existsSync(TABLE_FORMAT_SCRIPT),
       landPublicity: fs.existsSync(LAND_PUBLICITY_SCRIPT),
+      anjukeProperty: fs.existsSync(ANJUKE_PROPERTY_SCRIPT),
     },
     depreciationCapexForecast: depreciation,
     cli,
@@ -3957,6 +4168,9 @@ if (process.argv.includes("--connector-bridge")) {
     }
     if (message?.action === "run_alibaba_auction") {
       return runAlibabaAuction(message, writeMessage);
+    }
+    if (message?.action === "run_anjuke_property") {
+      return runAnjukeProperty(message, writeMessage);
     }
     return handle(message)
       .then((payload) => {

@@ -490,6 +490,8 @@ def build_map_assets(rows, output_path):
     .reference-marker-note { margin-top: 1px; color: #64748b; font-size: 9px; }
     .reference-marker-delete { border: 0; padding: 0 3px; background: transparent; color: #94a3b8; cursor: pointer; font-size: 13px; line-height: 1; }
     .reference-marker-delete:hover { color: #dc2626; }
+    .reference-marker-edit { border: 1px solid #cbd5e0; border-radius: 5px; padding: 2px 5px; background: #fff; color: #2563eb; cursor: pointer; font-size: 9px; line-height: 1.2; white-space: nowrap; }
+    .reference-marker-edit:hover { border-color: #2563eb; background: #eff6ff; }
     .reference-marker-icon { width: 20px; height: 20px; position: relative; }
     .reference-marker-icon::before { content: ""; position: absolute; left: 2px; top: 1px; width: 15px; height: 15px; border: 2px solid #fff; border-radius: 50% 50% 50% 0; background: #e11d48; box-shadow: 0 0 0 2px rgba(225,29,72,.26), 0 2px 6px rgba(15,23,42,.3); transform: rotate(-45deg); }
     .reference-marker-icon::after { content: ""; position: absolute; left: 8px; top: 7px; width: 5px; height: 5px; border-radius: 50%; background: #fff; }
@@ -589,17 +591,28 @@ def build_map_assets(rows, output_path):
     let pendingMarkerPosition = null;
     const distanceLayer = L.layerGroup().addTo(map);
     function markerStorageKey() { return `zj-land-reference-markers:${location.pathname}`; }
-    function saveReferenceMarkers() { try { localStorage.setItem(markerStorageKey(), JSON.stringify(referenceMarkerData)); } catch (_) {} }
+    function saveReferenceMarkers() { try { localStorage.setItem(markerStorageKey(), JSON.stringify(referenceMarkerData.map(({ editing, ...item }) => item))); } catch (_) {} }
     function referenceMarkerById(id) { return referenceMarkerData.find((item) => item.id === id); }
     function referenceMarkerLabel(item) { return `<div class="reference-label-name">${escapeHtml(item.name)}</div>${item.note ? `<div class="reference-label-note">${escapeHtml(item.note)}</div>` : ''}`; }
-    function referenceMarkerPopup(item) { return `<div style="min-width:150px;">${referenceMarkerLabel(item)}</div>`; }
+    function referenceMarkerPopup(item) { return `<div style="min-width:150px;">${referenceMarkerLabel(item)}<div style="margin-top:4px;color:#64748b;font-size:10px;">${item.editing ? '编辑状态：可拖动' : '位置已锁定，点击“编辑”后可移动'}</div></div>`; }
     function renderReferenceMarkerList() {
       const list = document.getElementById('reference-marker-list'), clear = document.getElementById('clear-reference-markers');
       if (!list) return;
-      list.innerHTML = referenceMarkerData.map((item) => `<div class="reference-marker-row"><span class="reference-marker-name" data-marker-id="${escapeHtml(item.id)}" title="${escapeHtml(item.note ? `${item.name}：${item.note}` : item.name)}"><span>${escapeHtml(item.name)}</span>${item.note ? `<small class="reference-marker-note">${escapeHtml(item.note)}</small>` : ''}</span><button class="reference-marker-delete" type="button" data-delete-marker-id="${escapeHtml(item.id)}" aria-label="删除 ${escapeHtml(item.name)}" title="删除">×</button></div>`).join('');
+      list.innerHTML = referenceMarkerData.map((item) => `<div class="reference-marker-row"><span class="reference-marker-name" data-marker-id="${escapeHtml(item.id)}" title="${escapeHtml(item.note ? `${item.name}：${item.note}` : item.name)}"><span>${escapeHtml(item.name)}</span>${item.note ? `<small class="reference-marker-note">${escapeHtml(item.note)}</small>` : ''}</span><button class="reference-marker-edit" type="button" data-edit-marker-id="${escapeHtml(item.id)}" aria-label="${item.editing ? '完成编辑' : '编辑位置'}">${item.editing ? '完成' : '编辑'}</button><button class="reference-marker-delete" type="button" data-delete-marker-id="${escapeHtml(item.id)}" aria-label="删除 ${escapeHtml(item.name)}" title="删除">×</button></div>`).join('');
       list.querySelectorAll('.reference-marker-name').forEach((element) => element.addEventListener('click', () => { const marker = referenceMarkerLayers.get(element.dataset.markerId); if (!marker) return; map.flyTo(marker.getLatLng(), Math.max(map.getZoom(), 14), { duration: .5 }); marker.openPopup(); }));
+      list.querySelectorAll('[data-edit-marker-id]').forEach((element) => element.addEventListener('click', () => { const item = referenceMarkerById(element.dataset.editMarkerId); if (item) setReferenceMarkerEditing(item.id, !item.editing); }));
       list.querySelectorAll('[data-delete-marker-id]').forEach((element) => element.addEventListener('click', () => removeReferenceMarker(element.dataset.deleteMarkerId)));
       if (clear) clear.disabled = referenceMarkerData.length === 0;
+    }
+    function setReferenceMarkerEditing(id, editing) {
+      const item = referenceMarkerById(id), marker = referenceMarkerLayers.get(id);
+      if (!item || !marker) return;
+      item.editing = Boolean(editing);
+      if (item.editing) marker.dragging?.enable();
+      else marker.dragging?.disable();
+      marker.setPopupContent(referenceMarkerPopup(item));
+      renderReferenceMarkerList();
+      updateReferenceMarkerStatus(item.editing ? `“${item.name}”已进入编辑状态，可拖动位置；调整完成后点击“完成”。` : `“${item.name}”已锁定，位置已保存。`);
     }
     function updateReferenceMarkerStatus(text) { const element = document.getElementById('map-tool-status'); if (element) element.textContent = text; }
     function setPlacementMode(enabled) {
@@ -608,13 +621,14 @@ def build_map_assets(rows, output_path):
       button?.classList.toggle('active', placementMode);
       if (button) button.textContent = placementMode ? '取消放置标记' : '插入位置标记';
       map.getContainer().style.cursor = placementMode ? 'crosshair' : '';
-      updateReferenceMarkerStatus(placementMode ? '请点击地图选择位置，然后输入标记名称。' : '点击“插入位置标记”后，再点击地图放置标记。');
+      updateReferenceMarkerStatus(placementMode ? '请点击地图选择位置，然后输入标记名称。' : '标记默认锁定；点击清单中的“编辑”后才可以移动。');
     }
     function addReferenceMarker(data, persist = true) {
-      const item = { id: String(data.id || `marker-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`), name: String(data.name || '位置标记'), note: String(data.note || '').trim(), lat: Number(data.lat), lon: Number(data.lon) };
+      const item = { id: String(data.id || `marker-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`), name: String(data.name || '位置标记'), note: String(data.note || '').trim(), lat: Number(data.lat), lon: Number(data.lon), editing: false };
       if (!Number.isFinite(item.lat) || !Number.isFinite(item.lon)) return;
       referenceMarkerData.push(item);
       const marker = L.marker([item.lat, item.lon], { icon: referenceMarkerIcon(), draggable: true }).addTo(map);
+      marker.dragging?.disable();
       marker.bindPopup(referenceMarkerPopup(item));
       marker.bindTooltip(referenceMarkerLabel(item), { permanent: true, direction: 'top', offset: [0, -12], opacity: .98, className: 'reference-label', sticky: false });
       marker.on('dragend', () => { const position = marker.getLatLng(), current = referenceMarkerById(item.id); if (!current) return; current.lat = position.lat; current.lon = position.lng; marker.setPopupContent(referenceMarkerPopup(current)); marker.setTooltipContent(referenceMarkerLabel(current)); saveReferenceMarkers(); if (distanceLinesVisible) renderDistanceResults([...selectedSourceCodes]); });
@@ -638,12 +652,12 @@ def build_map_assets(rows, output_path):
       distanceLinesVisible = true;
       let lineCount = 0;
       rows.forEach((row) => referenceMarkerData.forEach((marker) => { const distance = haversineKm(row.lat, row.lon, marker.lat, marker.lon); const line = L.polyline([[marker.lat, marker.lon], [row.lat, row.lon]], { color: '#f97316', weight: 2, opacity: .9, dashArray: '7 5' }).addTo(distanceLayer); line.bindTooltip(`${distance.toFixed(2)} km`, { permanent: true, direction: 'center', opacity: .98, className: 'distance-label', sticky: false }); lineCount += 1; }));
-      note.textContent = `已绘制 ${lineCount} 条距离线；每条线中间显示直线距离，标记点可拖动后自动更新。`;
+      note.textContent = `已绘制 ${lineCount} 条距离线；标记点默认锁定，进入编辑状态后拖动会自动更新。`;
       results.innerHTML = '';
     }
     function closeMarkerDialog() { const dialog = document.getElementById('marker-dialog'); if (dialog) dialog.hidden = true; pendingMarkerPosition = null; setPlacementMode(false); }
     function openMarkerDialog(latlng) { const dialog = document.getElementById('marker-dialog'), name = document.getElementById('marker-dialog-name'), note = document.getElementById('marker-dialog-note'); if (!dialog || !name || !note) return; pendingMarkerPosition = { lat: Number(latlng.lat), lon: Number(latlng.lng) }; name.value = `位置标记 ${referenceMarkerData.length + 1}`; note.value = ''; dialog.hidden = false; requestAnimationFrame(() => { name.focus(); name.select(); }); }
-    function confirmMarkerDialog(event) { event.preventDefault(); const name = document.getElementById('marker-dialog-name'), note = document.getElementById('marker-dialog-note'); const trimmed = String(name?.value || '').trim(); if (!trimmed) { name?.focus(); return; } if (!pendingMarkerPosition) { closeMarkerDialog(); return; } addReferenceMarker({ name: trimmed, note: String(note?.value || '').trim(), lat: pendingMarkerPosition.lat, lon: pendingMarkerPosition.lon }); closeMarkerDialog(); updateReferenceMarkerStatus(`已添加“${trimmed}”，可拖动标记调整位置。`); }
+    function confirmMarkerDialog(event) { event.preventDefault(); const name = document.getElementById('marker-dialog-name'), note = document.getElementById('marker-dialog-note'); const trimmed = String(name?.value || '').trim(); if (!trimmed) { name?.focus(); return; } if (!pendingMarkerPosition) { closeMarkerDialog(); return; } addReferenceMarker({ name: trimmed, note: String(note?.value || '').trim(), lat: pendingMarkerPosition.lat, lon: pendingMarkerPosition.lon }); closeMarkerDialog(); updateReferenceMarkerStatus(`已添加“${trimmed}”，位置已锁定；如需调整请点击“编辑”。`); }
     function initReferenceMarkers() {
       document.getElementById('add-reference-marker')?.addEventListener('click', () => setPlacementMode(!placementMode));
       document.getElementById('clear-reference-markers')?.addEventListener('click', () => { referenceMarkerData.slice().forEach((item) => removeReferenceMarker(item.id)); updateReferenceMarkerStatus('标记已清除。点击“插入位置标记”后可重新放置。'); });
