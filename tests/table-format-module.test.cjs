@@ -90,6 +90,7 @@ checks = [
     r'w:right[^>]+w:val="nil"',
     r'w:eastAsia="宋体"',
     r'w:ascii="Times New Roman"',
+    r'w:color[^>]+w:val="000000"',
 ]
 for pattern in checks:
     assert re.search(pattern, xml), pattern
@@ -97,6 +98,55 @@ for pattern in checks:
   const inspectResult = childProcess.spawnSync(python, ["-c", inspectScript, inputPath], { encoding: "utf8" });
   assert.equal(inspectResult.status, 0, inspectResult.stderr || inspectResult.stdout);
 
+  fs.rmSync(temporaryRoot, { recursive: true, force: true });
+});
+
+test("format_word_tables.py clears explicit and inherited table shading", () => {
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tianyuan-table-format-shading-"));
+  const inputPath = path.join(temporaryRoot, "带底纹表格.docx");
+  const python = process.env.TIANYUAN_PYTHON_BIN || "python3";
+  const createScript = String.raw`
+from docx import Document
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+
+document = Document()
+table = document.add_table(rows=2, cols=3)
+table.style = "Light Shading Accent 1"
+for row in range(2):
+    for column in range(3):
+        table.cell(row, column).text = f"{row}-{column}"
+for cell in table.rows[1].cells:
+    shading = OxmlElement("w:shd")
+    shading.set(qn("w:val"), "clear")
+    shading.set(qn("w:fill"), "F4CCCC")
+    cell._tc.get_or_add_tcPr().append(shading)
+document.save(r"${inputPath.replace(/\\/g, "\\\\")}")
+`;
+  const createResult = childProcess.spawnSync(python, ["-c", createScript], { encoding: "utf8" });
+  assert.equal(createResult.status, 0, createResult.stderr);
+  const result = childProcess.spawnSync(python, [scriptPath, inputPath], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /"clearedShadingCells": 6/);
+
+  const inspectScript = String.raw`
+import sys, zipfile
+from lxml import etree
+
+NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+with zipfile.ZipFile(sys.argv[1], "r") as archive:
+    root = etree.fromstring(archive.read("word/document.xml"))
+table = root.xpath("//w:tbl", namespaces=NS)[0]
+shading = table.xpath("./w:tr/w:tc/w:tcPr/w:shd", namespaces=NS)
+assert len(shading) == 6, len(shading)
+assert all(item.get("{" + NS["w"] + "}fill") == "FFFFFF" for item in shading)
+colors = table.xpath(".//w:rPr/w:color", namespaces=NS)
+assert colors and all(item.get("{" + NS["w"] + "}val") == "000000" for item in colors)
+assert not table.xpath("./w:tr/w:trPr/w:shd", namespaces=NS)
+assert table.xpath("./w:tblPr/w:tblStyle[@w:val='LightShading-Accent1']", namespaces=NS)
+`;
+  const inspectResult = childProcess.spawnSync(python, ["-c", inspectScript, inputPath], { encoding: "utf8" });
+  assert.equal(inspectResult.status, 0, inspectResult.stderr || inspectResult.stdout);
   fs.rmSync(temporaryRoot, { recursive: true, force: true });
 });
 
