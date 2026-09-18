@@ -137,7 +137,7 @@ export const tableFormatModule = {
         const item = context.document.createElement("li");
         item.dataset.kind = result.ok ? "ok" : "error";
         item.textContent = result.ok
-          ? `已完成：${fileName(result.outputPath || result.sourcePath)}${result.tableCount !== undefined ? `（${result.tableCount} 个表格）` : ""}${result.repairedRelationships ? `，修复 ${result.repairedRelationships} 个无效关系` : ""}${result.cleanedRemarkValues ? `，清理 ${result.cleanedRemarkValues} 个备注占位值` : ""}`
+          ? `已完成：${fileName(result.outputPath || result.sourcePath)}${result.tableCount !== undefined ? `（${result.tableCount} 个表格）` : ""}${result.clearedShadingCells ? `，清除 ${result.clearedShadingCells} 个底纹单元格` : ""}${result.repairedRelationships ? `，修复 ${result.repairedRelationships} 个无效关系` : ""}${result.cleanedRemarkValues ? `，清理 ${result.cleanedRemarkValues} 个备注占位值` : ""}`
           : `失败：${fileName(result.sourcePath)}，${tableFormatFailureMessage(result.reason)}`;
         elements.tableFormatResultList.appendChild(item);
       }
