@@ -50,6 +50,8 @@ assert.equal(hasName("/extension/manifest.json"), true);
 assert.equal(hasName("/native-helper/update_checker.js"), true);
 assert.equal(hasName("/native-helper/native_host_bootstrap.js"), true);
 assert.equal(hasName("/native-helper/alibaba-auction.js"), true);
+assert.equal(hasName("/native-helper/codex_catalog.js"), true);
+assert.equal(hasName("/native-helper/anjuke-property.js"), true);
 assert.equal(hasName("/scripts/install-local-runtime.mjs"), true);
 assert.equal(hasName("/runtime/node/node.exe"), false);
 assert.equal(entries.some((entry) => entry.name.includes("/runtime/python-portable/")), false);
