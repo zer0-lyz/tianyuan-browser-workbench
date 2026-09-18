@@ -74,6 +74,8 @@ node scripts/install-local-runtime.mjs
 
 版本更新模块通过公开发行仓库 `zer0-lyz/tianyuan-browser-workbench-releases` 的 GitHub Releases 检查新版本，不使用 MCP token。`0.13.0` 起可在侧栏点击“更新全部组件”，自动下载对应平台完整包、校验 SHA-256，并同步扩展、Native Helper、Bridge、Connector、`~/plugins/` 与 Codex 插件缓存；完成后自动重新加载扩展。
 
+`0.14.25` 的 2026-09-18 Windows 修复构建补齐了完整包和轻量包缺失的 `native-helper/codex_catalog.js` 与 `native-helper/anjuke-property.js`。Windows 打包现改为同步完整的受版本控制 `native-helper` 目录，并在下载测试阶段校验这些必需文件，避免安装中途出现 `MODULE_NOT_FOUND`。
+
 `0.14.9` 起支持轻量更新包和国内静态镜像清单。首次安装仍使用完整安装包；后续更新可只下载扩展、Native Helper、Connector、skills 和安装脚本，复用本机已安装 Node、Python/openpyxl 和天源 CLI。镜像源可使用 Gitee 仓库 raw 文件，失败时自动回退 GitHub，下载仍受域名白名单、文件大小和 SHA-256 校验保护。
 
 `0.14.1` 起可先点击“测试更新模块”：它会下载当前平台完整包，验证 GitHub 下载、SHA-256、解压和安装包文件完整性，但不会安装、改变版本或重启，测试文件完成后自动删除。完整包约 100–130 MB。

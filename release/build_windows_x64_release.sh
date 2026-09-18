@@ -159,6 +159,8 @@ WINDOWS_NODE="$NODE_UNPACK/node-v${NODE_VERSION}-win-x64/node.exe"
   exit 1
 }
 
+/usr/bin/ditto "$ROOT_DIR/native-helper" "$STAGE/native-helper"
+
 SEA_CONFIG="$BUILD_ROOT/sea-config.json"
 SEA_BLOB="$BUILD_ROOT/native-host.blob"
 cat > "$SEA_CONFIG" <<EOF
@@ -180,18 +182,6 @@ cp "$WINDOWS_NODE" "$STAGE/runtime/node/node.exe"
   NODE_SEA_BLOB \
   "$SEA_BLOB" \
   --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
-cp "$ROOT_DIR/native-helper/native_host.js" "$STAGE/native-helper/native_host.js"
-cp "$ROOT_DIR/native-helper/native_host_bootstrap.js" "$STAGE/native-helper/native_host_bootstrap.js"
-cp "$ROOT_DIR/native-helper/connector_bridge.js" "$STAGE/native-helper/connector_bridge.js"
-cp "$ROOT_DIR/native-helper/process_launcher.js" "$STAGE/native-helper/process_launcher.js"
-cp "$ROOT_DIR/native-helper/update_checker.js" "$STAGE/native-helper/update_checker.js"
-cp "$ROOT_DIR/native-helper/update_installer.js" "$STAGE/native-helper/update_installer.js"
-cp "$ROOT_DIR/native-helper/file-archive.js" "$STAGE/native-helper/file-archive.js"
-cp "$ROOT_DIR/native-helper/file-archive-conversations.js" "$STAGE/native-helper/file-archive-conversations.js"
-cp "$ROOT_DIR/native-helper/depreciation-capex-forecast.js" "$STAGE/native-helper/depreciation-capex-forecast.js"
-cp "$ROOT_DIR/native-helper/alibaba-auction.js" "$STAGE/native-helper/alibaba-auction.js"
-cp "$ROOT_DIR/native-helper/update-sources.json" "$STAGE/native-helper/update-sources.json"
-cp "$ROOT_DIR/native-helper/platform/"*.js "$STAGE/native-helper/platform/"
 cat > "$STAGE/native-helper/runtime-compat.json" <<EOF
 {
   "version": 2,
