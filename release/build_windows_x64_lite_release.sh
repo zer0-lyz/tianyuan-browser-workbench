@@ -91,20 +91,7 @@ python3 -m pip download \
   --dest "$WHEEL_CACHE" \
   "lxml==6.1.0"
 
-cp "$ROOT_DIR/native-helper/native_host.js" "$STAGE/native-helper/native_host.js"
-cp "$ROOT_DIR/native-helper/native_host_bootstrap.js" "$STAGE/native-helper/native_host_bootstrap.js"
-cp "$ROOT_DIR/native-helper/connector_bridge.js" "$STAGE/native-helper/connector_bridge.js"
-cp "$ROOT_DIR/native-helper/process_launcher.js" "$STAGE/native-helper/process_launcher.js"
-cp "$ROOT_DIR/native-helper/update_checker.js" "$STAGE/native-helper/update_checker.js"
-cp "$ROOT_DIR/native-helper/update_installer.js" "$STAGE/native-helper/update_installer.js"
-cp "$ROOT_DIR/native-helper/file-archive.js" "$STAGE/native-helper/file-archive.js"
-cp "$ROOT_DIR/native-helper/file-archive-conversations.js" "$STAGE/native-helper/file-archive-conversations.js"
-cp "$ROOT_DIR/native-helper/depreciation-capex-forecast.js" "$STAGE/native-helper/depreciation-capex-forecast.js"
-cp "$ROOT_DIR/native-helper/alibaba-auction.js" "$STAGE/native-helper/alibaba-auction.js"
-cp "$ROOT_DIR/native-helper/platform/"*.js "$STAGE/native-helper/platform/"
-if [[ -f "$ROOT_DIR/native-helper/update-sources.json" ]]; then
-  cp "$ROOT_DIR/native-helper/update-sources.json" "$STAGE/native-helper/update-sources.json"
-fi
+/usr/bin/ditto "$ROOT_DIR/native-helper" "$STAGE/native-helper"
 cat > "$STAGE/native-helper/runtime-compat.json" <<EOF
 {
   "version": 2,

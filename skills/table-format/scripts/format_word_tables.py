@@ -26,6 +26,7 @@ from lxml import etree
 FORMAT_RULES = {
     "fontEastAsia": "宋体",
     "fontLatin": "Times New Roman",
+    "fontColor": "000000",
     "fontSizePt": 10,
     "fitToWindow": True,
     "minimumRowHeightCm": 0.6,
@@ -39,6 +40,7 @@ FORMAT_RULES = {
     "leftRightBorder": "none",
     "verticalAlignment": "center",
     "lineSpacing": 1.0,
+    "clearShading": True,
 }
 
 DOCX_REQUIRED_MEMBERS = ("[Content_Types].xml", "_rels/.rels", "word/document.xml")
@@ -173,10 +175,47 @@ def remove_children(parent, tag: str) -> None:
             parent.remove(child)
 
 
+def clear_table_shading(table) -> int:
+    """Override explicit and table-style shading with a white cell fill."""
+    cleared_cells = 0
+    table_properties = table._tbl.tblPr
+    remove_children(table_properties, "w:shd")
+    for row in table.rows:
+        for shading in list(row._tr.iter(qn("w:shd"))):
+            parent = shading.getparent()
+            if parent is not None:
+                parent.remove(shading)
+        for descriptor in row_descriptors(row):
+            cell = descriptor["cell"]
+            for shading in list(cell.iter(qn("w:shd"))):
+                parent = shading.getparent()
+                if parent is not None:
+                    parent.remove(shading)
+            cell_properties = cell.find(qn("w:tcPr"))
+            if cell_properties is None:
+                cell_properties = OxmlElement("w:tcPr")
+                cell.insert(0, cell_properties)
+            shading = OxmlElement("w:shd")
+            shading.set(qn("w:val"), "clear")
+            shading.set(qn("w:color"), "auto")
+            shading.set(qn("w:fill"), "FFFFFF")
+            cell_properties.append(shading)
+            cleared_cells += 1
+    return cleared_cells
+
+
 def set_run_fonts(run) -> None:
     run.font.name = FORMAT_RULES["fontLatin"]
     run.font.size = Pt(FORMAT_RULES["fontSizePt"])
     run_properties = run._element.get_or_add_rPr()
+    run.font.color.rgb = None
+    color = run_properties.find(qn("w:color"))
+    if color is None:
+        color = OxmlElement("w:color")
+        run_properties.append(color)
+    color.set(qn("w:val"), FORMAT_RULES["fontColor"])
+    for attribute in ("w:themeColor", "w:themeShade", "w:themeTint"):
+        color.attrib.pop(qn(attribute), None)
     fonts = run_properties.find(qn("w:rFonts"))
     if fonts is None:
         fonts = OxmlElement("w:rFonts")
@@ -958,21 +997,24 @@ def iter_tables(tables):
                 yield from iter_tables(cell.tables)
 
 
-def format_document(document: Document) -> tuple[int, int]:
+def format_document(document: Document) -> tuple[int, int, int]:
     table_list = list(iter_tables(document.tables))
     document_width_twips = document_table_width_twips(document)
     cleaned_remark_values = 0
+    cleared_shading_cells = 0
     for table in table_list:
         width_twips = table_available_width_twips(table, document_width_twips)
         header_rows = detect_header_rows(table)
         cleaned_remark_values += clear_redundant_remark_values(table, header_rows)
+        if FORMAT_RULES["clearShading"]:
+            cleared_shading_cells += clear_table_shading(table)
         grid_columns = set_table_width(table, width_twips)
         widths, compressed = calculate_column_widths(table, width_twips, header_rows)
         set_column_widths(table, grid_columns, widths)
         set_table_borders(table)
         set_table_rows(table, header_rows, preserve_no_wrap=not compressed)
         set_table_cell_borders(table, len(grid_columns))
-    return len(table_list), cleaned_remark_values
+    return len(table_list), cleaned_remark_values, cleared_shading_cells
 
 
 def parse_args() -> argparse.Namespace:
@@ -999,13 +1041,14 @@ def main() -> int:
             repairedRelationships=repaired_relationships,
         )
     document = Document(str(document_path))
-    table_count, cleaned_remark_values = format_document(document)
+    table_count, cleaned_remark_values, cleared_shading_cells = format_document(document)
     emit(
         "formatted",
         fileName=document_path.name,
         tableCount=table_count,
         repairedRelationships=repaired_relationships,
         cleanedRemarkValues=cleaned_remark_values,
+        clearedShadingCells=cleared_shading_cells,
     )
     document.save(str(document_path))
     emit(
@@ -1014,6 +1057,7 @@ def main() -> int:
         tableCount=table_count,
         repairedRelationships=repaired_relationships,
         cleanedRemarkValues=cleaned_remark_values,
+        clearedShadingCells=cleared_shading_cells,
     )
     return 0
 

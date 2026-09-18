@@ -26,6 +26,9 @@ function writePackage(extractRoot, { windows = false, legacyOnly = false } = {})
     "extension/manifest.json",
     "extension/version.json",
     "native-helper/native_host.js",
+    "native-helper/connector_bridge.js",
+    "native-helper/codex_catalog.js",
+    "native-helper/anjuke-property.js",
     "native-helper/update_installer.js",
     "plugins/tianyuan-browser-connector/.codex-plugin/plugin.json",
     "scripts/install-local-runtime.mjs",
@@ -144,6 +147,33 @@ async function run() {
   assert.equal(
     fs.readdirSync(selfTestRoot).some((name) => name.startsWith("self-test-")),
     false,
+  );
+
+  const missingCatalogUpdater = createWorkbenchUpdater({
+    updateChecker,
+    platformAdapter: {
+      ...platformAdapter,
+      runtimeRoot: path.join(tempRoot, "missing-catalog-runtime"),
+      async extractZip(_zipPath, destination) {
+        writePackage(destination);
+        fs.rmSync(
+          path.join(destination, "天源浏览器工作台", "native-helper", "codex_catalog.js"),
+        );
+      },
+    },
+    runtimeDirectory: path.join(tempRoot, "native-helper-missing-catalog"),
+    fetchImpl,
+    downloadRetryDelayMs: 0,
+  });
+  const missingCatalog = await missingCatalogUpdater.test({
+    currentVersion: "0.13.0",
+    currentBuildNumber: 2026072703,
+    currentRuntimeBuildId: "current",
+  });
+  assert.equal(missingCatalog.ok, false);
+  assert.equal(
+    missingCatalog.reason,
+    "UPDATE_PACKAGE_FILE_MISSING:native-helper/codex_catalog.js",
   );
 
   launched = false;
