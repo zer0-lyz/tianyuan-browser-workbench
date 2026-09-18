@@ -15,10 +15,12 @@ export const tableFormatTemplate = `
     <p class="table-format-note">包含嵌套表格；仅在处理成功并校验通过后替换原文件。</p>
     <div class="table-format-preset" aria-label="表格格式预设">
       <div><strong>字体</strong><span>宋体文本 · Times New Roman 数字 · 10 号</span></div>
+      <div><strong>文字</strong><span>统一黑色，覆盖原有主题色</span></div>
       <div><strong>布局</strong><span>按窗口调整 · 最小行高 0.6 厘米 · 重复标题</span></div>
       <div><strong>对齐</strong><span>单元格垂直居中 · 标题加粗居中 · 数字右对齐</span></div>
       <div><strong>行距</strong><span>表格段落统一单倍行距</span></div>
       <div><strong>边框</strong><span>上下线 1.5 磅 · 内部线 0.5 磅 · 左右无线</span></div>
+      <div><strong>底纹</strong><span>清除表格底纹及交替行底纹</span></div>
     </div>
   </section>
 

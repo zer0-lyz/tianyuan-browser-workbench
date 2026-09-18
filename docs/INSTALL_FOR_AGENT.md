@@ -42,6 +42,8 @@ Machines running `0.12.2` or earlier must manually install `0.13.0` once because
 
 Version `0.14.9` adds lightweight update packages and static mirror manifests. First install still uses the full package. Later updates can reuse the local Node, Python/openpyxl, and Tianyuan CLI runtime and download only the workbench files. A mirror manifest can be hosted in a Gitee repository raw path; the updater tries configured mirror manifests first and falls back to GitHub while still enforcing host allow-listing, file size checks, and SHA-256 verification.
 
+The `0.14.25` Windows repair build dated 2026-09-18 restores `native-helper/codex_catalog.js` and `native-helper/anjuke-property.js` in both full and lite packages. Windows release builders now copy the complete version-controlled `native-helper` directory, and package validation rejects archives missing either runtime dependency before installation starts.
+
 If Python print dependencies are unavailable, installation stops with `PRINT_PYTHON_OPENPYXL_NOT_FOUND` before registering a partial runtime.
 
 ## Browser Setup

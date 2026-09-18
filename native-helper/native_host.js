@@ -2301,7 +2301,7 @@ async function runTableFormat(message, emit) {
           try {
             const parsed = JSON.parse(text);
             if (parsed?.event === "repaired") messageText = `已修复 ${parsed.repairedRelationships || 0} 个无效内部关系`;
-            if (parsed?.event === "formatted") messageText = `已识别并设置 ${parsed.tableCount || 0} 个表格`;
+            if (parsed?.event === "formatted") messageText = `已识别并设置 ${parsed.tableCount || 0} 个表格，清除 ${parsed.clearedShadingCells || 0} 个底纹单元格`;
             if (parsed?.event === "saved") messageText = `已保存 ${parsed.fileName || path.basename(sourcePath)}`;
           } catch {}
           emit({
@@ -2327,6 +2327,7 @@ async function runTableFormat(message, emit) {
           tableCount: Number(summary.tableCount || 0),
           repairedRelationships: Number(summary.repairedRelationships || 0),
           cleanedRemarkValues: Number(summary.cleanedRemarkValues || 0),
+          clearedShadingCells: Number(summary.clearedShadingCells || 0),
           overwritten: outputMode === "overwrite",
           archiveVerified: true,
         });
