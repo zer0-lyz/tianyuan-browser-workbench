@@ -320,13 +320,15 @@ function sourceBuildDigest() {
   const roots = [
     "extension",
     "native-helper",
-    "skills",
     "plugins/tianyuan-browser-connector",
     "scripts/install-local-runtime.mjs",
+    "skills/depreciation-capex-forecast",
+    "skills/table-format",
   ];
   const files = [];
   for (const relativeRoot of roots) {
     const absoluteRoot = path.join(repoRoot, relativeRoot);
+    if (!fs.existsSync(absoluteRoot)) continue;
     const stats = fs.statSync(absoluteRoot);
     if (stats.isFile()) {
       files.push(relativeRoot);
@@ -335,6 +337,7 @@ function sourceBuildDigest() {
     const visit = (directory) => {
       for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
         if (entry.name === ".DS_Store" || entry.name.startsWith("._") || entry.name === "runtime-compat.json") continue;
+        if (entry.isDirectory() && entry.name === "__pycache__") continue;
         const absolutePath = path.join(directory, entry.name);
         if (entry.isDirectory()) visit(absolutePath);
         else if (entry.isFile()) files.push(path.relative(repoRoot, absolutePath));
