@@ -106,7 +106,7 @@ export const landPublicityModule = {
   manifest: {
     id: "land-publicity",
     type: "feature",
-    stage: "beta",
+    stage: "stable",
     route: "land-publicity",
     displayName: "浙江土地成交公示",
     messageNamespace: "land-publicity",

@@ -119,3 +119,7 @@ Codex 安装时自动注册本机来源并继续读取本机项目/对话目录�
 浏览器扩展、Native Helper、Bridge 和 `tianyuan-browser-connector` 是共享运行层；Codex、WorkBuddy 和后续 Agent 使用同一份工具定义和同一套只读/控制门禁，不分别开发上传、查证核对或清理能力。WorkBuddy 的 `connector-proxy` 会聚合这套 MCP 工具，Agent 只携带自己的来源身份和页面绑定。
 
 若 WorkBuddy 已连接但工具没有出现在 Agent 工具列表，优先检查其自定义 MCP 是否已启用并通过 Trust；不要重新开发或复制 Connector 工具。
+
+`0.14.25` / Connector `0.4.6` 起，`tianyuan.get_context` 会在当前绑定范围内返回最近一次选中文字，支持普通文本、`contenteditable`、`textarea` 和 `input`；光标位于受控编辑区且没有文字选中时，返回 `selection.mode=caret`、`selection.caretReference` 和对应的 `editingBlock.caretReference`。同时提供受控编辑块读取、预演、确认后执行和回读。选区与编辑块按 session、标签页、Agent 绑定和对话隔离；密码框、隐藏字段和凭据样式内容会被过滤，不提供通用网页编辑或任意 JavaScript。编辑块格式工具支持字体、字号、字体颜色、文本高亮、取消高亮、对齐、行高和缩进；`highlightColor` 只接受 `transparent`、`none` 或 `#RRGGBB`，表格工具支持在授权编辑块内插入表格、修改单元格和设置表格格式；无文字选区时可使用 `caretReference` 按光标位置插入表格，仍必须先预演、明确确认、回读并验证保存。
+
+`0.14.25-2026082803` 修复新报告页表格持久化：表格插入通过页面 ProseMirror 模型事务更新，不再只写 DOM；事务返回值、模型表格节点和可见 DOM 均必须确认。保存使用新报告页面实际的 `/ty/api/assignment_draft/seq/save`，必须有业务成功响应或页面成功证据并完成保存后回读。保存失败或模型已更新但 DOM 未渲染会回滚本次模型事务；成功结果返回可在页面刷新后继续调用 `tianyuan.table_readback` 的受控引用，避免重复插入。

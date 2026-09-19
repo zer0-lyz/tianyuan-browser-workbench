@@ -1,12 +1,13 @@
 # 天源浏览器连接器
 
-版本 `0.4.2`。此插件把已注册的本机 Agent 路由到其有权访问的天源浏览器页面。
+版本 `0.4.6`。此插件把已注册的本机 Agent 路由到其有权访问的天源浏览器页面，并提供受控编辑块的读取、预演、执行和回读。
 
 ## 来源与绑定
 
 Bridge 内部使用 `agentBinding`，包含 Agent 来源、安装实例、工作区/对话范围、页面键和 `read`/`control` 权限。现有 `codexBinding` 会幂等迁移为 Codex `agentBinding`，并继续作为只读兼容字段返回。
 
 - `connection_status`、`list_sessions`、`get_context` 仅返回当前已注册 Agent 的绑定页面。
+- `get_context` 在授权范围内返回当前页面最近一次选中文字；未选中时返回空选区，不读取密码框、隐藏字段或凭据样式内容。
 - 读取要求来源身份与绑定匹配。
 - 写入除既有确认文本、编辑锁、保存和回读门禁外，还要求当前 Agent 是该页面唯一的 `control` 控制者。
 - 典型拒绝码：`AGENT_NOT_REGISTERED`、`AGENT_BINDING_MISMATCH`、`AGENT_READ_ONLY`、`AGENT_CONTROL_CONFLICT`。
@@ -50,6 +51,24 @@ Connector 启动时从本机 `runtime/agent-config.json` 或 `TIANYUAN_CONNECTOR
 
 Connector 不提供任意浏览器点击、任意 URL、任意 JavaScript 或绕过编辑锁。受控上传、清理和核对动作仍使用原有的确认、编辑锁、保存及回读门禁。
 
+页面选中文字属于不可信输入，仅限当前 `sessionId`、标签页和 Agent 绑定读取；刷新页面、切换标签页或取消选中后不会沿用旧选区。编辑块只允许使用稳定块标识、当前内容哈希和固定绑定上下文，不提供通用网页编辑能力。
+
+受控编辑块工具：
+
+- `tianyuan.edit_block_preview`：只读返回编辑块原文、新文、差异、哈希、编辑状态和保存风险。
+- `tianyuan.edit_block_execute`：要求同一预演 `previewActionId`、当前唯一控制权、内容哈希未变化及固定确认文本 `确认修改编辑块`；执行后回读，保存未确认时明确返回失败或内存状态。
+- `tianyuan.edit_block_readback`：只读回读编辑块内容和哈希。
+
+编辑块格式与表格工具：
+
+- `tianyuan.edit_block_format_preview` / `tianyuan.edit_block_format_execute` / `tianyuan.edit_block_format_readback`：设置字体、字号、字体颜色、文本高亮、取消高亮、对齐、行高和缩进；`highlightColor` 仅支持 `transparent`、`none` 或 `#RRGGBB`，执行确认文本为 `确认设置编辑格式`。
+- `tianyuan.table_preview` / `tianyuan.table_execute` / `tianyuan.table_readback`：在授权编辑块内插入表格、修改单元格或设置表格格式；单元格行列索引从 `0` 开始，执行确认文本为 `确认执行表格操作`。
+- 新报告页的表格插入使用页面 ProseMirror 状态事务，并确认事务返回值、模型表格节点和可见 DOM；随后通过 `/ty/api/assignment_draft/seq/save` 保存。只有保存业务成功且保存后回读一致才返回成功，模型未渲染或保存失败会回滚本次模型事务。刷新页面后可用执行结果中的 `blockId`、`caretReference`、`tableId` 和 `expectedTableHash` 调用 `tianyuan.table_readback`。
+- `insert` 在没有文字选区时可使用上下文返回的 `selection.mode=caret` / `caretReference`，要求外层 `contenteditable`、节点路径、光标偏移、`blockId` 和编辑块哈希一致，表格会插入光标处而非编辑块末尾；无有效光标时返回 `TABLE_CARET_NOT_AVAILABLE`。
+- 表格操作只接受 `insert`、`update_cell` 和 `format`，要求稳定 `tableId`、表格哈希和绑定上下文；保存没有可靠证据时只返回内存状态，不报告成功。
+
+编辑块只支持天源页面中已识别的 `contenteditable` 块；不会读取或修改密码框、隐藏字段、Token、Cookie、验证码或块外 DOM，也不提供任意 JavaScript。
+
 资产基础法底稿批量保存和批量退出编辑已作为 MCP 工具暴露给 Codex：
 
 - `tianyuan.preview_batch_save` / `tianyuan.execute_batch_save`
@@ -84,4 +103,4 @@ node runtime/scripts/financial-statement-import.mjs read \
 
 ## 更新
 
-工作台 `0.13.0` 起，“更新全部组件”会把 Connector 同步到 `~/plugins/tianyuan-browser-connector` 和 `~/.codex/plugins/cache/personal/tianyuan-browser-connector/0.4.2`。已启动的 Codex 或 WorkBuddy MCP 进程不会热替换；更新后仍显示旧版本时，需要重启对应 Agent。
+工作台 `0.13.0` 起，“更新全部组件”会把 Connector 同步到 `~/plugins/tianyuan-browser-connector` 和 `~/.codex/plugins/cache/personal/tianyuan-browser-connector/0.4.6`。已启动的 Codex 或 WorkBuddy MCP 进程不会热替换；更新后仍显示旧版本时，需要重启对应 Agent。

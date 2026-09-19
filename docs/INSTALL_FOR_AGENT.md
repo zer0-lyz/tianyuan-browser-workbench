@@ -44,6 +44,9 @@ Version `0.14.9` adds lightweight update packages and static mirror manifests. F
 
 If Python print dependencies are unavailable, installation stops with `PRINT_PYTHON_OPENPYXL_NOT_FOUND` before registering a partial runtime.
 
+Version `0.14.25` / Connector `0.4.6` adds controlled edit-block formatting and table actions. After reloading the unpacked extension, use `tianyuan.edit_block_format_preview` before `tianyuan.edit_block_format_execute` with `确认设置编辑格式`; `format.highlightColor` accepts only `transparent`, `none`, or `#RRGGBB`. Use `tianyuan.table_preview` before `tianyuan.table_execute` with `确认执行表格操作`. When the caret is inside the bound outer `contenteditable` and no text is selected, `tianyuan.get_context` returns `selection.mode=caret` and `selection.caretReference`; pass that reference and `editingBlock.currentHash` to insert at the caret rather than at the end of the block. The reference is limited to the bound outer `contenteditable` and its DOM path/offset. The actions validate the session, binding, project, conversation, tab, stable block/table ID and content hash, trigger controlled editor events, read back the result, and report unconfirmed server saves as failure or memory-only state. They only allow the fixed formatting/table fields and never enable arbitrary DOM or JavaScript editing.
+Build `0.14.25-2026082803` fixes persistence on `/new-report/.../add`: insertion applies the returned ProseMirror transaction, verifies the table node in the editor document and the rendered table, then verifies the new-report save endpoint `/ty/api/assignment_draft/seq/save` and saves/readbacks the table. A failed save or model-only render failure rolls back the model transaction. After a page refresh, reuse the returned `blockId`, `caretReference`, `tableId`, and `expectedTableHash` with `tianyuan.table_readback`; no credentials are included.
+
 ## Browser Setup
 
 1. Open `chrome://extensions` in Chrome, or `edge://extensions` in Edge.
