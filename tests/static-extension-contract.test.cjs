@@ -35,6 +35,7 @@ const platformIndex = fs.readFileSync(path.join(repoRoot, "native-helper", "plat
 const windowsPlatform = fs.readFileSync(path.join(repoRoot, "native-helper", "platform", "windows.js"), "utf8");
 const macosPlatform = fs.readFileSync(path.join(repoRoot, "native-helper", "platform", "macos.js"), "utf8");
 const installer = fs.readFileSync(path.join(repoRoot, "scripts", "install-local-runtime.mjs"), "utf8");
+const runtimeFingerprint = fs.readFileSync(path.join(repoRoot, "scripts", "runtime-fingerprint.mjs"), "utf8");
 const nativeInstaller = fs.readFileSync(path.join(repoRoot, "native-helper", "install_native_host.sh"), "utf8");
 const windowsInstaller = fs.readFileSync(path.join(repoRoot, "release", "windows-x64", "install.ps1"), "utf8");
 const macosLiteBuilder = fs.readFileSync(path.join(repoRoot, "release", "build_macos_arm64_lite_release.sh"), "utf8");
@@ -94,10 +95,14 @@ for (const resource of manifest.web_accessible_resources || []) {
   }
 }
 
-assert.equal(installer.includes("sourceBuildDigest"), true);
-assert.equal(manifestGenerator.includes('"skills/depreciation-capex-forecast"'), true);
-assert.equal(installer.includes('"skills/depreciation-capex-forecast"'), true);
-assert.equal(installer.includes('    "skills",\n'), false);
+assert.equal(installer.includes("runtime-fingerprint"), true);
+assert.equal(fs.existsSync(path.join(repoRoot, "scripts", "runtime-fingerprint.mjs")), true);
+assert.equal(manifestGenerator.includes("runtime-fingerprint"), true);
+assert.equal(runtimeFingerprint.includes('"skills/depreciation-capex-forecast"'), true);
+assert.equal(runtimeFingerprint.includes('"skills/table-format"'), true);
+assert.equal(runtimeFingerprint.includes("__pycache__"), true);
+assert.equal(runtimeFingerprint.includes("native_host.exe"), true);
+assert.equal(runtimeFingerprint.includes('"skills",\n'), false);
 assert.equal(installer.includes(".staging-"), true);
 assert.equal(installer.includes("runtimeBuildId"), true);
 assert.equal(installer.includes("unblockWindowsFile"), true);
@@ -271,7 +276,7 @@ assert.equal(installer.includes('"src/core/module-registry.js"'), true);
 assert.equal(installer.includes('"src/modules/updates/template.js"'), true);
 assert.equal(installer.includes('"feedback.json"'), true);
 assert.equal(installer.includes('"src/modules/feedback/template.js"'), true);
-assert.equal(installer.includes('entry.name === ".DS_Store"'), true);
+assert.equal(runtimeFingerprint.includes('entry.name === ".DS_Store"'), true);
 assert.equal(nativeInstaller.includes("update_checker.js"), true);
 assert.equal(nativeInstaller.includes("update_installer.js"), true);
 assert.equal(nativeInstaller.includes("connector_bridge.js"), true);

@@ -47,6 +47,7 @@ const hasName = (suffix) => entries.some((entry) => entry.endsWith(suffix));
 assert.equal(hasName("/安装.command"), true);
 assert.equal(hasName("/native-helper/update_checker.js"), true);
 assert.equal(hasName("/scripts/install-local-runtime.mjs"), true);
+assert.equal(hasName("/scripts/runtime-fingerprint.mjs"), true);
 assert.equal(entries.some((entry) => entry.includes("/runtime/python-wheels/openpyxl-")), true);
 assert.equal(entries.some((entry) => entry.endsWith("/runtime/tycpv-setup-0.1.0-macos-arm64.pkg")), false);
 assert.equal(entries.some((entry) => entry.endsWith("/runtime/python-3.14.6-macos11.pkg")), false);
