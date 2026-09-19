@@ -36,6 +36,7 @@ const roots = ["extension", "native-helper", "plugins/tianyuan-browser-connector
 const files = [];
 for (const relativeRoot of roots) {
   const absoluteRoot = path.join(root, relativeRoot);
+  if (!fs.existsSync(absoluteRoot)) continue;
   const stats = fs.statSync(absoluteRoot);
   if (stats.isFile()) {
     files.push(relativeRoot);
@@ -44,6 +45,7 @@ for (const relativeRoot of roots) {
   const visit = (directory) => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       if (entry.name === ".DS_Store" || entry.name.startsWith("._") || entry.name === "runtime-compat.json") continue;
+      if (entry.isDirectory() && entry.name === "__pycache__") continue;
       const absolutePath = path.join(directory, entry.name);
       if (entry.isDirectory()) visit(absolutePath);
       else if (entry.isFile() && path.relative(root, absolutePath) !== "native-helper/native_host.exe") files.push(path.relative(root, absolutePath));
