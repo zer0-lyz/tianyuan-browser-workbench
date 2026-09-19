@@ -552,18 +552,29 @@ function Find-CompatiblePython {
     if (-not (Test-Path -LiteralPath $Candidate)) {
       continue
     }
-    $VersionText = (& $Candidate -c "import sys; print('.'.join(map(str, sys.version_info[:3]))); raise SystemExit(0 if sys.version_info >= (3, 9) else 1)" 2>$null |
-      Select-Object -First 1)
+    # Windows PowerShell 5.1: Select-Object -First 1 stops the pipeline early and
+    # terminates the native process, corrupting $LASTEXITCODE. Collect all output
+    # first so the python probe can exit normally before selecting the line.
+    $VersionOutput = (& $Candidate -c "import sys; print('.'.join(map(str, sys.version_info[:3]))); raise SystemExit(0 if sys.version_info >= (3, 9) else 1)" 2>$null)
+    $VersionText = @($VersionOutput | Select-Object -First 1)[0]
     if ($LASTEXITCODE -ne 0 -or -not $VersionText) {
       continue
     }
 
-    $OpenpyxlVersion = (& $Candidate -c "import docx, et_xmlfile, lxml, openpyxl; v=tuple(int(x) for x in openpyxl.__version__.split('.')[:3]); print(openpyxl.__version__); raise SystemExit(0 if v >= (3, 1, 5) else 1)" 2>$null |
-      Select-Object -First 1)
+    $OpenpyxlOutput = (& $Candidate -c "import docx, et_xmlfile, lxml, openpyxl; v=tuple(int(x) for x in openpyxl.__version__.split('.')[:3]); print(openpyxl.__version__); raise SystemExit(0 if v >= (3, 1, 5) else 1)" 2>$null)
+    $OpenpyxlVersion = @($OpenpyxlOutput | Select-Object -First 1)[0]
     $HasPrintDependencies = $LASTEXITCODE -eq 0
 
-    & $Candidate -m pip --version *> $null
-    $HasPip = $LASTEXITCODE -eq 0
+    # PS 5.1 + ErrorActionPreference=Stop: native stderr under redirection becomes
+    # a terminating error (e.g. "No module named pip"), so degrade to a soft
+    # pip-missing result instead of failing the whole update.
+    $HasPip = $true
+    try {
+      & $Candidate -m pip --version *> $null
+      if ($LASTEXITCODE -ne 0) { $HasPip = $false }
+    } catch {
+      $HasPip = $false
+    }
 
     return [PSCustomObject]@{
       Path = (Resolve-Path -LiteralPath $Candidate).Path

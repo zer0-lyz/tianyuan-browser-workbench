@@ -28,7 +28,17 @@ function safeReleaseUrl(value) {
       "gitee.com",
       "raw.giteeusercontent.com",
     ]);
-    return url.protocol === "https:" && hosts.has(url.hostname) ? url.href : "";
+    if (url.protocol !== "https:" || !hosts.has(url.hostname)) return "";
+    // Release manifests point releaseUrl at /releases/download/<tag>, which 404s
+    // without an asset name. The browsable page lives at /releases/tag/<tag>.
+    // Bare download URLs only; asset URLs keep their filename suffix.
+    const bareDownload = url.pathname.match(
+      /^\/([^/]+)\/([^/]+)\/releases\/download\/([^/]+)\/?$/,
+    );
+    if (bareDownload) {
+      url.pathname = `/${bareDownload[1]}/${bareDownload[2]}/releases/tag/${bareDownload[3]}`;
+    }
+    return url.href;
   } catch {
     return "";
   }
