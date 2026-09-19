@@ -12,11 +12,16 @@ const { filterRetainedCatalog, readCodexCatalog } = require("./codex_catalog.js"
 const platformAdapter = createPlatformAdapter();
 
 const PROTOCOL_VERSION = "connector-agent-binding-v3";
-const BUILD_ID = "2026-07-24-browser-contract-v2-capability-matrix";
+const BUILD_ID = "2026-08-27-browser-contract-v3-edit-highlight";
 const ACTION_TTL_MS = 5 * 60 * 1000;
 const ACTION_RESULT_TTL_MS = 15 * 60 * 1000;
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const ATTACHMENT_EXTENSIONS = new Set([".pdf", ".doc", ".docx", ".xls", ".xlsx", ".xlsm", ".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".zip", ".rar"]);
+const MAX_EDIT_BLOCK_TEXT = 200000;
+const MAX_TABLE_ROWS = 50;
+const MAX_TABLE_COLUMNS = 20;
+const MAX_TABLE_CELL_TEXT = 5000;
+const EDIT_BLOCK_SENSITIVE_TEXT_PATTERN = /(?:bearer\s+|authorization\s*[:=]|access[_-]?token\s*[:=]|mcp\s*token\s*[:=]|密码\s*[:：=]|验证码\s*[:：=])/i;
 const EXTENSION_ORIGINS = new Set([
   "chrome-extension://lkflndcnklpeaejohaacoaolnmhgigoc",
   "chrome-extension://fdbllnmaaklkcmoacoapbibiggnndkfpa",
@@ -46,22 +51,140 @@ function safePage(value = {}) {
     operationScope: limited(value.operationScope || "context-read", 120),
   };
 }
+function safeSelection(value = {}) {
+  const mode = value.mode === "caret" ? "caret" : "text";
+  const caretReference = safeCaretReference(value.caretReference);
+  const available = Boolean(value.available && (limited(value.text, 10000) || mode === "caret" && caretReference));
+  const element = value.element && typeof value.element === "object" ? value.element : null;
+  return {
+    available,
+    text: available ? limited(value.text, 10000) : "",
+    source: available ? limited(value.source, 80) : "",
+    mode: available ? mode : "",
+    pageUrl: available ? limited(value.pageUrl, 1000) : "",
+    pageTitle: available ? limited(value.pageTitle, 300) : "",
+    tabId: available && Number.isInteger(value.tabId) ? value.tabId : null,
+    capturedAt: available ? limited(value.capturedAt, 80) || null : null,
+    element: available && element ? {
+      tag: limited(element.tag, 40), id: limited(element.id, 160) || null,
+      name: limited(element.name, 160) || null, role: limited(element.role, 80) || null,
+      contentEditable: Boolean(element.contentEditable),
+    } : null,
+    sessionId: available ? limited(value.sessionId, 200) || null : null,
+    bindingId: available ? limited(value.bindingId, 200) || null : null,
+    workspaceId: available ? limited(value.workspaceId, 200) || null : null,
+    projectId: available ? limited(value.projectId, 200) || null : null,
+    conversationId: available ? limited(value.conversationId, 200) || null : null,
+    threadId: available ? limited(value.threadId, 200) || null : null,
+    caretReference: available ? caretReference : null,
+  };
+}
+function safeCaretReference(value) {
+  if (!value || typeof value !== "object" || value.mode !== "caret") return null;
+  const textOffset = Number(value.textOffset);
+  if (!Number.isInteger(textOffset) || textOffset < 0) return null;
+  if (!limited(value.containerPath, 1000) || !limited(value.domPath, 1000)) return null;
+  const result = {
+    mode: "caret",
+    baseId: limited(value.baseId, 500),
+    blockId: limited(value.blockId, 500),
+    containerPath: limited(value.containerPath, 1000),
+    domPath: limited(value.domPath, 1000),
+    textOffset,
+  };
+  if (Number.isInteger(value.containerTextOffset)) result.containerTextOffset = value.containerTextOffset;
+  if (value.available !== undefined) result.available = Boolean(value.available);
+  return result;
+}
+function safeEditingBlock(value = {}) {
+  const originalText = limited(value.originalText, MAX_EDIT_BLOCK_TEXT);
+  const currentText = limited(value.currentText, MAX_EDIT_BLOCK_TEXT);
+  const available = Boolean(value.available && limited(value.blockId, 500) && !EDIT_BLOCK_SENSITIVE_TEXT_PATTERN.test(originalText) && !EDIT_BLOCK_SENSITIVE_TEXT_PATTERN.test(currentText));
+  const element = value.element && typeof value.element === "object" ? value.element : null;
+  return {
+    available,
+    valid: available && value.valid !== false,
+    stale: available ? Boolean(value.stale) : Boolean(value.reason),
+    reason: limited(value.reason, 120),
+    blockId: available ? limited(value.blockId, 500) : "",
+    tabId: available && Number.isInteger(value.tabId) ? value.tabId : null,
+    pageUrl: available ? limited(value.pageUrl, 1000) : "",
+    pageTitle: available ? limited(value.pageTitle, 300) : "",
+    element: available && element ? {
+      tag: limited(element.tag, 40), id: limited(element.id, 160) || null,
+      name: limited(element.name, 160) || null, role: limited(element.role, 80) || null,
+      contentEditable: Boolean(element.contentEditable), blockId: limited(element.blockId, 500) || null,
+      stablePath: limited(element.stablePath, 1000) || null, scope: limited(element.scope, 40) || null,
+    } : null,
+    editable: available && value.editable !== false,
+    originalText: available ? originalText : "",
+    currentText: available ? currentText : "",
+    contentHash: available ? limited(value.contentHash, 80) : "",
+    currentHash: available ? limited(value.currentHash, 80) : "",
+    capturedAt: available ? limited(value.capturedAt, 80) || null : null,
+    paragraphHint: available ? limited(value.paragraphHint, 300) : "",
+    fieldHint: available ? limited(value.fieldHint, 200) : "",
+    blockMode: available ? limited(value.blockMode, 20) : "",
+    rangeStart: available && Number.isInteger(value.rangeStart) ? value.rangeStart : null,
+    rangeEnd: available && Number.isInteger(value.rangeEnd) ? value.rangeEnd : null,
+    selectedText: available ? limited(value.selectedText, MAX_EDIT_BLOCK_TEXT) : "",
+    caretReference: available ? safeCaretReference(value.caretReference) : null,
+    format: available && value.format && typeof value.format === "object" ? {
+      fontWeight: limited(value.format.fontWeight, 30), fontStyle: limited(value.format.fontStyle, 30),
+      textDecoration: limited(value.format.textDecoration, 40), textAlign: limited(value.format.textAlign, 30),
+      fontSizePx: Number.isInteger(value.format.fontSizePx) ? value.format.fontSizePx : null,
+      color: limited(value.format.color, 30), lineHeightPx: Number.isInteger(value.format.lineHeightPx) ? value.format.lineHeightPx : null,
+      highlightColor: limited(value.format.highlightColor, 30),
+      indentPx: Number.isInteger(value.format.indentPx) ? value.format.indentPx : null,
+    } : {},
+  };
+}
 function safeContext(value = {}) {
   const route = value.route && typeof value.route === "object" ? value.route : {};
   const spread = value.spread && typeof value.spread === "object" ? value.spread : {};
   const page = value.page && typeof value.page === "object" ? value.page : {};
+  const build = value.build && typeof value.build === "object" ? value.build : {};
   return {
-    route: { isTianyuanRoute: Boolean(route.isTianyuanRoute), isAssetDraftRoute: Boolean(route.isAssetDraftRoute), isEquityListRoute: Boolean(route.isEquityListRoute), projectId: limited(route.projectId, 80), companyId: limited(route.companyId, 80), subjectCode: limited(route.subjectCode, 120) },
+    build: { extensionVersion: limited(build.extensionVersion, 80), extensionBuildId: limited(build.extensionBuildId, 120), adapterVersion: limited(build.adapterVersion, 120), contentScriptAdapterVersion: limited(build.contentScriptAdapterVersion, 120), pageAdapterVersion: limited(build.pageAdapterVersion, 120), pageAdapterBuildId: limited(build.pageAdapterBuildId, 120), protocolMatch: Boolean(build.protocolMatch) },
+    route: { isTianyuanRoute: Boolean(route.isTianyuanRoute || route.isTianyuanOperationRoute), isTianyuanOperationRoute: Boolean(route.isTianyuanOperationRoute || route.isTianyuanRoute), isAssetDraftRoute: Boolean(route.isAssetDraftRoute), isEquityListRoute: Boolean(route.isEquityListRoute), projectId: limited(route.projectId, 80), companyId: limited(route.companyId, 80), subjectCode: limited(route.subjectCode, 120) },
     spread: { found: Boolean(spread.found), sheetName: limited(spread.sheetName, 160), activeRow: Number.isInteger(spread.activeRow) ? spread.activeRow : null, activeColumn: Number.isInteger(spread.activeColumn) ? spread.activeColumn : null },
     gates: { loginLikely: Boolean(page.loginLikely), saveVisible: Boolean(page.saveButton?.visible), saveDisabled: Boolean(page.saveButton?.disabled), hasLockText: Boolean(limited(page.lockText)), hasPermissionText: Boolean(limited(page.permissionText)) },
+    selection: safeSelection(value.selection),
+    editingBlock: safeEditingBlock(value.editingBlock),
   };
+}
+function contextForAgent(session, binding = null) {
+  const context = session.context && typeof session.context === "object" ? { ...session.context } : {};
+  const selection = safeSelection(context.selection);
+  const editingBlock = safeEditingBlock(context.editingBlock);
+  const scoped = { ...context, selection, editingBlock };
+  if (!selection.available && !editingBlock.available) return scoped;
+  return { ...scoped, selection: {
+    ...selection,
+    sessionId: session.sessionId,
+    tabId: session.binding.tabId,
+    bindingId: binding?.bindingId || null,
+    workspaceId: binding?.workspaceId || null,
+    projectId: session.binding.projectId || null,
+    conversationId: binding?.conversationId || null,
+    threadId: binding?.conversationId || null,
+  }, editingBlock: editingBlock.available ? {
+    ...editingBlock,
+    sessionId: session.sessionId,
+    tabId: session.binding.tabId,
+    bindingId: binding?.bindingId || null,
+    workspaceId: binding?.workspaceId || null,
+    projectId: session.binding.projectId || null,
+    conversationId: binding?.conversationId || null,
+    threadId: binding?.conversationId || null,
+  } : editingBlock };
 }
 function safeClient(value = {}) { return { name: limited(value.name || "tianyuan-browser-workbench", 120), version: limited(value.version, 80), extensionId: limited(value.extensionId, 120) }; }
 function publicSource(source) {
   return source ? { agentId: source.agentId, providerId: source.providerId, displayName: source.displayName, installationId: source.installationId, local: Boolean(source.local), manual: Boolean(source.manual), createdAt: source.createdAt || null, updatedAt: source.updatedAt || null, lastSeenAt: source.lastSeenAt || null } : null;
 }
 function publicBinding(binding) {
-  return binding ? { bindingId: binding.bindingId, agentId: binding.agentId, providerId: binding.providerId, displayName: binding.displayName, installationId: binding.installationId, workspaceId: binding.workspaceId, workspaceName: binding.workspaceName, workspacePath: binding.workspacePath, conversationId: binding.conversationId, conversationTitle: binding.conversationTitle, scope: binding.scope, accessMode: binding.accessMode, pageKey: binding.pageKey, manualBinding: Boolean(binding.manualBinding), createdAt: binding.createdAt || null, updatedAt: binding.updatedAt || null } : null;
+  return binding ? { bindingId: binding.bindingId, agentId: binding.agentId, providerId: binding.providerId, displayName: binding.displayName, installationId: binding.installationId, workspaceId: binding.workspaceId, workspaceName: binding.workspaceName, workspacePath: binding.workspacePath, pageProjectId: binding.pageProjectId || String(binding.pageKey || "").split("|")[0], conversationId: binding.conversationId, conversationTitle: binding.conversationTitle, scope: binding.scope, accessMode: binding.accessMode, pageKey: binding.pageKey, manualBinding: Boolean(binding.manualBinding), createdAt: binding.createdAt || null, updatedAt: binding.updatedAt || null } : null;
 }
 function codexCompatibility(binding) {
   if (!binding || binding.providerId !== "codex") return null;
@@ -69,6 +192,63 @@ function codexCompatibility(binding) {
 }
 function error(code, status = 400) { const value = new Error(code); value.code = code; value.status = status; return value; }
 function equal(a, b) { const left = Buffer.from(String(a || "")); const right = Buffer.from(String(b || "")); return left.length === right.length && timingSafeEqual(left, right); }
+function normalizeFormat(value, table = false) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw error(table ? "TABLE_FORMAT_REQUIRED" : "EDIT_BLOCK_FORMAT_REQUIRED");
+  const fields = table
+    ? ["rowHeightPx", "columnWidthPx", "borderStyle", "borderColor", "textAlign", "verticalAlign", "fontSizePx", "color", "fontWeight", "fontStyle"]
+    : ["fontWeight", "fontStyle", "textDecoration", "textAlign", "fontSizePx", "color", "highlightColor", "lineHeightPx", "indentPx"];
+  if (Object.keys(value).some((key) => !fields.includes(key))) throw error(table ? "TABLE_FORMAT_FIELD_NOT_ALLOWED" : "EDIT_BLOCK_FORMAT_FIELD_NOT_ALLOWED");
+  const output = {};
+  const numericRanges = table
+    ? { rowHeightPx: [16, 160], columnWidthPx: [24, 600], fontSizePx: [8, 72] }
+    : { fontSizePx: [8, 72], lineHeightPx: [12, 200], indentPx: [0, 400] };
+  for (const [key, range] of Object.entries(numericRanges)) {
+    if (value[key] === undefined) continue;
+    const number = Number(value[key]);
+    if (!Number.isInteger(number) || number < range[0] || number > range[1]) throw error(`${table ? "TABLE" : "EDIT_BLOCK"}_FORMAT_${key.toUpperCase()}_INVALID`);
+    output[key] = number;
+  }
+  const enums = table
+    ? { borderStyle: ["none", "solid", "dashed", "dotted"], textAlign: ["left", "center", "right", "justify"], verticalAlign: ["top", "middle", "bottom"], fontWeight: ["normal", "bold"], fontStyle: ["normal", "italic"] }
+    : { fontWeight: ["normal", "bold"], fontStyle: ["normal", "italic"], textDecoration: ["none", "underline", "line-through"], textAlign: ["left", "center", "right", "justify"] };
+  for (const [key, values] of Object.entries(enums)) {
+    if (value[key] === undefined) continue;
+    if (!values.includes(value[key])) throw error(`${table ? "TABLE" : "EDIT_BLOCK"}_FORMAT_${key.toUpperCase()}_INVALID`);
+    output[key] = value[key];
+  }
+  const colors = table ? ["borderColor", "color"] : ["color", "highlightColor"];
+  for (const key of colors) {
+    if (value[key] === undefined) continue;
+    if (typeof value[key] !== "string") {
+      const errorKey = key === "highlightColor" ? "HIGHLIGHT_COLOR" : key.toUpperCase();
+      throw error(`${table ? "TABLE" : "EDIT_BLOCK"}_FORMAT_${errorKey}_INVALID`);
+    }
+    const color = value[key].trim().toLowerCase();
+    if (!table && key === "highlightColor" && ["transparent", "none"].includes(color)) {
+      output[key] = "transparent";
+    } else if (/^#[0-9a-f]{6}$/i.test(color)) {
+      output[key] = color;
+    } else {
+      const errorKey = key === "highlightColor" ? "HIGHLIGHT_COLOR" : key.toUpperCase();
+      throw error(`${table ? "TABLE" : "EDIT_BLOCK"}_FORMAT_${errorKey}_INVALID`);
+    }
+  }
+  if (!Object.keys(output).length) throw error(table ? "TABLE_FORMAT_REQUIRED" : "EDIT_BLOCK_FORMAT_REQUIRED");
+  return output;
+}
+function normalizeTableCells(value) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_TABLE_ROWS) throw error("TABLE_CELLS_INVALID");
+  return value.slice(0, MAX_TABLE_ROWS).map((row) => {
+    if (!Array.isArray(row) || row.length > MAX_TABLE_COLUMNS) throw error("TABLE_CELLS_INVALID");
+    return row.slice(0, MAX_TABLE_COLUMNS).map((cell) => {
+      const text = limited(cell, MAX_TABLE_CELL_TEXT);
+      if (EDIT_BLOCK_SENSITIVE_TEXT_PATTERN.test(text)) throw error("TABLE_SENSITIVE_TEXT");
+      return text;
+    });
+  });
+}
+function sameJson(left, right) { return JSON.stringify(left) === JSON.stringify(right); }
 
 function readJson(filePath, fallback) { try { return JSON.parse(fs.readFileSync(filePath, "utf8")); } catch (cause) { if (cause?.code === "ENOENT") return fallback; throw cause; } }
 function writeJson(filePath, payload) { fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 }); const temporary = `${filePath}.tmp`; fs.writeFileSync(temporary, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 }); fs.renameSync(temporary, filePath); }
@@ -170,23 +350,28 @@ function createBridge(options = {}) {
 
   function legacyBinding(value, codexSource) {
     const createdAt = value.createdAt || now();
-    return { bindingId: limited(value.bindingId || randomUUID(), 200), agentId: codexSource?.agentId || "codex", providerId: "codex", displayName: codexSource?.displayName || "Codex", installationId: codexSource?.installationId || "legacy-codex", workspaceId: limited(value.projectId, 200), workspaceName: limited(value.projectName, 200), workspacePath: normalizePath(value.projectPath), conversationId: limited(value.threadId, 200), conversationTitle: limited(value.threadTitle, 300), scope: value.scope === "project" ? "workspace" : "conversation", accessMode: value.accessMode === "read" ? "read" : "control", pageKey: limited(value.pageKey, 1200), manualBinding: false, createdAt, updatedAt: value.updatedAt || createdAt, migratedFrom: "codexBinding-v1" };
+    return { bindingId: limited(value.bindingId || randomUUID(), 200), agentId: codexSource?.agentId || "codex", providerId: "codex", displayName: codexSource?.displayName || "Codex", installationId: codexSource?.installationId || "legacy-codex", workspaceId: limited(value.projectId, 200), workspaceName: limited(value.projectName, 200), workspacePath: normalizePath(value.projectPath), pageProjectId: limited(value.pageProjectId || String(value.pageKey || "").split("|")[0], 80), conversationId: limited(value.threadId, 200), conversationTitle: limited(value.threadTitle, 300), scope: value.scope === "project" ? "workspace" : "conversation", accessMode: value.accessMode === "read" ? "read" : "control", pageKey: limited(value.pageKey, 1200), manualBinding: false, createdAt, updatedAt: value.updatedAt || createdAt, migratedFrom: "codexBinding-v1" };
   }
   function loadBindings() {
     if (loaded) return; loaded = true; loadSources();
     const payload = readJson(bindingsPath, { bindings: [] }); const codexSource = [...sources.values()].find((entry) => entry.providerId === "codex");
     for (const item of Array.isArray(payload.bindings) ? payload.bindings : []) {
-      const binding = item?.providerId ? item : legacyBinding(item || {}, codexSource);
+      const binding = item?.providerId ? { ...item, pageProjectId: item.pageProjectId || String(item.pageKey || "").split("|")[0] } : legacyBinding(item || {}, codexSource);
       if (!item?.providerId) migrated = true;
       if (binding.bindingId && binding.pageKey) bindings.set(binding.bindingId, binding);
     }
     if (migrated) saveBindings();
   }
-  function saveBindings() { writeJson(bindingsPath, { version: 2, updatedAt: now(), bindings: [...bindings.values()] }); }
-  function bindingsFor(page) { loadBindings(); const key = pageKey(page); return [...bindings.values()].filter((binding) => binding.pageKey === key).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt))); }
+  function saveBindings(source = bindings) { writeJson(bindingsPath, { version: 2, updatedAt: now(), bindings: [...source.values()] }); }
+  function bindingSort(left, right) {
+    if (left.accessMode !== right.accessMode) return left.accessMode === "control" ? -1 : 1;
+    return String(right.updatedAt || right.createdAt || "").localeCompare(String(left.updatedAt || left.createdAt || ""));
+  }
+  function bindingsFor(page) { loadBindings(); const key = pageKey(page); return [...bindings.values()].filter((binding) => binding.pageKey === key).sort(bindingSort); }
+  function preferredBinding(entries = []) { return [...entries].sort(bindingSort)[0] || null; }
   function syncSession(session) {
     const entries = bindingsFor(session.binding); session.agentBindings = entries.map(publicBinding);
-    const codex = entries.filter((binding) => binding.providerId === "codex").sort((a, b) => (a.accessMode === "control" ? -1 : 1))[0] || null;
+    const codex = preferredBinding(entries.filter((binding) => binding.providerId === "codex"));
     session.codexBinding = codexCompatibility(codex);
     return session;
   }
@@ -194,8 +379,8 @@ function createBridge(options = {}) {
     if (!session) return null; syncSession(session);
     const related = agent ? session.agentBindings.filter((binding) => binding.agentId === agent.agentId && binding.providerId === agent.providerId && binding.installationId === agent.installationId) : session.agentBindings;
     const copy = { sessionId: session.sessionId, status: session.status, registeredAt: session.registeredAt, lastSeenAt: session.lastSeenAt, binding: session.binding, client: session.client, agentBindings: related, capabilities: session.capabilities };
-    if (!agent || agent.providerId === "codex") copy.codexBinding = agent ? codexCompatibility(related.find((binding) => binding.providerId === "codex") || null) : session.codexBinding;
-    if (includeContext) copy.context = session.context;
+    if (!agent || agent.providerId === "codex") copy.codexBinding = agent ? codexCompatibility(preferredBinding(related.filter((binding) => binding.providerId === "codex"))) : session.codexBinding;
+    if (includeContext) copy.context = contextForAgent(session, preferredBinding(related));
     return copy;
   }
   function sessionForBinding(sessionId) { const session = sessions.get(sessionId); if (!session) throw error("SESSION_NOT_FOUND", 404); return session; }
@@ -204,9 +389,9 @@ function createBridge(options = {}) {
     if (!selected || selected.pageKey !== pageKey(session.binding) || selected.agentId !== agent.agentId || selected.providerId !== agent.providerId || selected.installationId !== agent.installationId) throw error("AGENT_BINDING_MISMATCH", 403);
     return selected;
   }
-  function ensureBindingInput(binding, input = {}) {
+  function ensureBindingInput(session, binding, input = {}) {
     if (input.workspaceId && String(input.workspaceId) !== binding.workspaceId) throw error("AGENT_BINDING_MISMATCH", 403);
-    if (input.projectId && String(input.projectId) !== binding.workspaceId) throw error("AGENT_BINDING_MISMATCH", 403);
+    if (input.projectId && ![binding.workspaceId, binding.pageProjectId, session.binding.projectId].filter(Boolean).includes(String(input.projectId))) throw error("AGENT_BINDING_MISMATCH", 403);
     if (input.workspacePath && normalizePath(input.workspacePath) !== normalizePath(binding.workspacePath)) throw error("AGENT_BINDING_MISMATCH", 403);
     if (input.projectPath && normalizePath(input.projectPath) !== normalizePath(binding.workspacePath)) throw error("AGENT_BINDING_MISMATCH", 403);
     const conversation = input.conversationId || input.threadId;
@@ -215,19 +400,32 @@ function createBridge(options = {}) {
   }
   function currentController(session) { syncSession(session); const current = [...bindings.values()].filter((binding) => binding.pageKey === pageKey(session.binding) && binding.accessMode === "control").sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))); return current[0] || null; }
   function authorize(session, agent, input, control = false) {
-    const binding = bindingForAgent(session, agent, input.bindingId); ensureBindingInput(binding, input);
+    const binding = bindingForAgent(session, agent, input.bindingId); ensureBindingInput(session, binding, input);
     if (control) { if (binding.accessMode !== "control") throw error("AGENT_READ_ONLY", 403); const controller = currentController(session); if (!controller || controller.bindingId !== binding.bindingId) throw error("AGENT_CONTROL_CONFLICT", 409); }
     return binding;
   }
-  function browserBinding(session, bindingId, control = false) {
+  function browserBinding(session, bindingId, control = false, expectedControlEpoch = "") {
     const binding = bindings.get(String(bindingId || "")); if (!binding || binding.pageKey !== pageKey(session.binding)) throw error("AGENT_BINDING_MISMATCH", 403);
     if (control && (binding.accessMode !== "control" || currentController(session)?.bindingId !== binding.bindingId)) throw error("AGENT_CONTROL_CONFLICT", 409);
+    if (control && expectedControlEpoch && binding.updatedAt !== expectedControlEpoch) throw error("AGENT_CONTROL_CONFLICT", 409);
     return binding;
   }
   function capabilities() { return {
     agentSourceRegistration: { supported: true, level: "routing", label: "已注册 Agent 来源" },
     agentBinding: { supported: true, level: "routing", label: "绑定 Agent 工作区或对话" },
     contextRead: { supported: true, level: "read", label: "读取当前页面上下文" },
+    selectionRead: { supported: true, level: "read", label: "读取当前页面选中内容" },
+    editBlockPreview: { supported: true, level: "preview", label: "编辑块预演" },
+    editBlockExecute: { supported: true, level: "confirm", label: "确认后执行编辑块" },
+    editBlockReadback: { supported: true, level: "read", label: "编辑块回读" },
+    editBlockFormatPreview: { supported: true, level: "preview", label: "编辑块格式预演" },
+    editBlockFormatExecute: { supported: true, level: "confirm", label: "确认后设置编辑块格式" },
+    editBlockFormatReadback: { supported: true, level: "read", label: "编辑块格式回读" },
+    editBlockHighlight: { supported: true, level: "confirm", label: "文本高亮及取消高亮" },
+    tablePreview: { supported: true, level: "preview", label: "表格操作预演" },
+    tableExecute: { supported: true, level: "confirm", label: "确认后执行表格操作" },
+    tableReadback: { supported: true, level: "read", label: "表格回读" },
+    tableCaretInsert: { supported: true, level: "confirm", label: "按光标位置插入表格" },
     projectBinding: { supported: true, level: "read", label: "绑定项目与标签页" },
     companyList: { supported: true, level: "read", label: "读取公司清单" },
     subjectList: { supported: true, level: "read", label: "读取科目清单" },
@@ -253,7 +451,7 @@ function createBridge(options = {}) {
   function prune() { const instant = Date.now(); for (const [key, session] of sessions) if (instant - Date.parse(session.lastSeenAt) > 120000) sessions.delete(key); for (const [key, action] of actions) { const age = Date.parse(action.completedAt || action.createdAt); const ttl = action.completedAt ? ACTION_RESULT_TTL_MS : ACTION_TTL_MS; if (!Number.isFinite(age) || instant - age > ttl) actions.delete(key); } }
   function attachment(filePath) { const resolved = path.resolve(String(filePath || "")); if (!path.isAbsolute(String(filePath || ""))) throw error("ATTACHMENT_PATH_MUST_BE_ABSOLUTE"); const stat = fs.statSync(resolved); if (!stat.isFile()) throw error("ATTACHMENT_NOT_A_FILE"); if (stat.size <= 0) throw error("ATTACHMENT_FILE_EMPTY"); if (stat.size > MAX_ATTACHMENT_BYTES) throw error("ATTACHMENT_FILE_TOO_LARGE"); const extension = path.extname(resolved).toLowerCase(); if (!ATTACHMENT_EXTENSIONS.has(extension)) throw error("ATTACHMENT_FILE_TYPE_NOT_ALLOWED"); return { path: resolved, name: path.basename(resolved), size: stat.size, type: "application/octet-stream" }; }
   function actionIsWrite(type) {
-    return ["upload_audit_attachment", "batch_upload_audit_attachments", "save_batch_upload_draft", "clear_audit_attachments", "clear_audit_test_rows", "set_audit_check_result", "batch_set_audit_check_results", "batch_save_asset_draft", "batch_exit_edit"].includes(type);
+    return ["upload_audit_attachment", "batch_upload_audit_attachments", "save_batch_upload_draft", "clear_audit_attachments", "clear_audit_test_rows", "set_audit_check_result", "batch_set_audit_check_results", "batch_save_asset_draft", "batch_exit_edit", "edit_block_execute", "edit_block_format_execute", "table_execute"].includes(type);
   }
   function normalizeBatchSubjectCode(value) {
     const subject = limited(value, 240);
@@ -272,16 +470,91 @@ function createBridge(options = {}) {
   }
   function createAction(session, agent, input) {
     const type = limited(input.action, 80);
-    const allowed = new Set(["preview_batch_save", "batch_save_asset_draft", "preview_batch_exit_edit", "batch_exit_edit", "preview_audit_attachment_upload", "upload_audit_attachment", "batch_upload_audit_attachments", "save_batch_upload_draft", "inspect_audit_check_row", "set_audit_check_result", "scan_audit_index_check_rows", "batch_set_audit_check_results", "clear_audit_attachments", "clear_audit_test_rows"]);
+    const allowed = new Set(["preview_batch_save", "batch_save_asset_draft", "preview_batch_exit_edit", "batch_exit_edit", "preview_audit_attachment_upload", "upload_audit_attachment", "batch_upload_audit_attachments", "save_batch_upload_draft", "inspect_audit_check_row", "set_audit_check_result", "scan_audit_index_check_rows", "batch_set_audit_check_results", "clear_audit_attachments", "clear_audit_test_rows", "edit_block_preview", "edit_block_execute", "edit_block_readback", "edit_block_format_preview", "edit_block_format_execute", "edit_block_format_readback", "table_preview", "table_execute", "table_readback"]);
     if (!allowed.has(type)) throw error("ACTION_NOT_ALLOWED");
     const binding = authorize(session, agent, input, actionIsWrite(type));
     if (session.status !== "online") throw error("SESSION_NOT_ONLINE", 409);
-    if (!session.binding.projectId || !session.binding.companyId || session.binding.pageType !== "asset-draft") throw error("ASSET_DRAFT_SESSION_REQUIRED", 409);
+    const isEditBlockAction = ["edit_block_preview", "edit_block_execute", "edit_block_readback", "edit_block_format_preview", "edit_block_format_execute", "edit_block_format_readback", "table_preview", "table_execute", "table_readback"].includes(type);
+    const isEditBlockFormatAction = ["edit_block_format_preview", "edit_block_format_execute"].includes(type);
+    const isTableAction = ["table_preview", "table_execute", "table_readback"].includes(type);
+    if (!isEditBlockAction && (!session.binding.projectId || !session.binding.companyId || session.binding.pageType !== "asset-draft")) throw error("ASSET_DRAFT_SESSION_REQUIRED", 409);
+    if (isEditBlockAction) {
+      if (input.sessionId && String(input.sessionId) !== session.sessionId) throw error("EDIT_BLOCK_SESSION_MISMATCH", 403);
+      if (!input.projectId || !input.threadId || !Number.isInteger(Number(input.tabId)) || Number(input.tabId) !== session.binding.tabId) throw error("EDIT_BLOCK_BINDING_REQUIRED", 403);
+      if (!limited(input.blockId, 500)) throw error("EDIT_BLOCK_ID_REQUIRED");
+      const expectedHash = limited(input.expectedHash, 80);
+      const expectedText = input.expectedText === undefined ? "" : limited(input.expectedText, MAX_EDIT_BLOCK_TEXT);
+      const readOnlyBlockAction = ["edit_block_readback", "edit_block_format_readback", "table_readback"].includes(type);
+      if (!readOnlyBlockAction && !isTableAction && !expectedHash && input.expectedText === undefined) throw error("EDIT_BLOCK_EXPECTED_CONTENT_REQUIRED");
+      if ((expectedHash && !/^fnv1a32-[0-9a-f]{8}$/i.test(expectedHash)) || EDIT_BLOCK_SENSITIVE_TEXT_PATTERN.test(expectedText)) throw error("EDIT_BLOCK_EXPECTED_CONTENT_INVALID");
+      if (["edit_block_preview", "edit_block_execute"].includes(type)) {
+        if (input.replacementText === undefined) throw error("EDIT_BLOCK_REPLACEMENT_REQUIRED");
+        if (EDIT_BLOCK_SENSITIVE_TEXT_PATTERN.test(limited(input.replacementText, MAX_EDIT_BLOCK_TEXT))) throw error("EDIT_BLOCK_SENSITIVE_TEXT");
+      }
+      if (type === "edit_block_execute") {
+        if (input.confirmText !== "确认修改编辑块") throw error("EDIT_BLOCK_CONFIRM_TEXT_REQUIRED");
+        const previewAction = actions.get(String(input.previewActionId || ""));
+        if (!previewAction || previewAction.type !== "edit_block_preview" || previewAction.sessionId !== session.sessionId || previewAction.bindingId !== binding.bindingId || previewAction.status !== "completed" || previewAction.result?.ok !== true) throw error("EDIT_BLOCK_PREVIEW_REQUIRED", 409);
+        const previewTarget = previewAction.target || {};
+        if (previewTarget.blockId !== limited(input.blockId, 500) || previewTarget.tabId !== Number(input.tabId) || previewTarget.projectId !== session.binding.projectId || previewTarget.threadId !== limited(input.threadId, 200) || previewTarget.expectedHash !== expectedHash || previewTarget.expectedText !== (input.expectedText === undefined ? null : limited(input.expectedText, MAX_EDIT_BLOCK_TEXT)) || previewTarget.replacementText !== limited(input.replacementText, MAX_EDIT_BLOCK_TEXT)) throw error("EDIT_BLOCK_PREVIEW_MISMATCH", 409);
+      }
+      if (isEditBlockFormatAction) {
+        const format = normalizeFormat(input.format);
+        if (type === "edit_block_format_execute") {
+          if (input.confirmText !== "确认设置编辑格式") throw error("EDIT_BLOCK_FORMAT_CONFIRM_TEXT_REQUIRED");
+          const previewAction = actions.get(String(input.previewActionId || ""));
+          if (!previewAction || previewAction.type !== "edit_block_format_preview" || previewAction.sessionId !== session.sessionId || previewAction.bindingId !== binding.bindingId || previewAction.status !== "completed" || previewAction.result?.ok !== true) throw error("EDIT_BLOCK_FORMAT_PREVIEW_REQUIRED", 409);
+          const previewTarget = previewAction.target || {};
+          if (previewTarget.blockId !== limited(input.blockId, 500) || previewTarget.tabId !== Number(input.tabId) || previewTarget.projectId !== session.binding.projectId || previewTarget.threadId !== limited(input.threadId, 200) || previewTarget.expectedHash !== expectedHash || previewTarget.expectedText !== (input.expectedText === undefined ? null : limited(input.expectedText, MAX_EDIT_BLOCK_TEXT)) || !sameJson(previewTarget.format, format)) throw error("EDIT_BLOCK_FORMAT_PREVIEW_MISMATCH", 409);
+        }
+      }
+      if (isTableAction) {
+        const tableAction = limited(input.tableAction, 40);
+        const caretReference = input.caretReference === undefined ? null : safeCaretReference(input.caretReference);
+        if (input.caretReference !== undefined && !caretReference) throw error("TABLE_CARET_REFERENCE_INVALID");
+        if (tableAction === "insert" && caretReference && !limited(input.expectedHash, 80)) throw error("TABLE_CARET_HASH_REQUIRED");
+        if (!["insert", "update_cell", "format"].includes(tableAction) && type !== "table_readback") throw error("TABLE_ACTION_INVALID");
+        if (!limited(input.blockId, 500)) throw error("EDIT_BLOCK_ID_REQUIRED");
+        if (type === "table_readback") {
+          if (!limited(input.tableId, 500)) throw error("TABLE_ID_REQUIRED");
+          if (input.expectedTableHash && !/^fnv1a32-[0-9a-f]{8}$/i.test(String(input.expectedTableHash))) throw error("TABLE_EXPECTED_HASH_INVALID");
+        } else if (tableAction === "insert") {
+          const cells = normalizeTableCells(input.cells);
+          const rowCount = Number(input.rowCount || cells.length);
+          const columnCount = Number(input.columnCount || Math.max(0, ...cells.map((row) => row.length)));
+          if (!Number.isInteger(rowCount) || rowCount < 1 || rowCount > MAX_TABLE_ROWS) throw error("TABLE_ROW_COUNT_INVALID");
+          if (!Number.isInteger(columnCount) || columnCount < 1 || columnCount > MAX_TABLE_COLUMNS) throw error("TABLE_COLUMN_COUNT_INVALID");
+          if (input.tableFormat !== undefined) normalizeFormat(input.tableFormat, true);
+        } else {
+          if (!limited(input.tableId, 500)) throw error("TABLE_ID_REQUIRED");
+          if (!input.expectedTableHash || !/^fnv1a32-[0-9a-f]{8}$/i.test(String(input.expectedTableHash))) throw error("TABLE_EXPECTED_HASH_REQUIRED");
+          const rowIndex = Number(input.rowIndex);
+          if (!Number.isInteger(rowIndex) || rowIndex < 0 || rowIndex >= MAX_TABLE_ROWS) throw error("TABLE_ROW_INDEX_INVALID");
+          if (tableAction === "update_cell") {
+            const columnIndex = Number(input.columnIndex);
+            if (!Number.isInteger(columnIndex) || columnIndex < 0 || columnIndex >= MAX_TABLE_COLUMNS) throw error("TABLE_COLUMN_INDEX_INVALID");
+            if (EDIT_BLOCK_SENSITIVE_TEXT_PATTERN.test(limited(input.cellText, MAX_TABLE_CELL_TEXT))) throw error("TABLE_SENSITIVE_TEXT");
+          } else {
+            normalizeFormat(input.tableFormat, true);
+            if (!["table", "row", "cell"].includes(input.formatScope || "table")) throw error("TABLE_FORMAT_SCOPE_INVALID");
+            if ((input.formatScope === "cell") && (!Number.isInteger(Number(input.columnIndex)) || Number(input.columnIndex) < 0 || Number(input.columnIndex) >= MAX_TABLE_COLUMNS)) throw error("TABLE_COLUMN_INDEX_INVALID");
+          }
+        }
+        if (type === "table_execute") {
+          if (input.confirmText !== "确认执行表格操作") throw error("TABLE_CONFIRM_TEXT_REQUIRED");
+          const previewAction = actions.get(String(input.previewActionId || ""));
+          if (!previewAction || previewAction.type !== "table_preview" || previewAction.sessionId !== session.sessionId || previewAction.bindingId !== binding.bindingId || previewAction.status !== "completed" || previewAction.result?.ok !== true) throw error("TABLE_PREVIEW_REQUIRED", 409);
+          const previewTarget = previewAction.target || {};
+          const expectedTableHash = input.expectedTableHash ? String(input.expectedTableHash) : null;
+          if (previewTarget.blockId !== limited(input.blockId, 500) || previewTarget.tabId !== Number(input.tabId) || previewTarget.projectId !== session.binding.projectId || previewTarget.threadId !== limited(input.threadId, 200) || previewTarget.tableAction !== limited(input.tableAction, 40) || previewTarget.tableId !== limited(input.tableId, 500) || previewTarget.expectedHash !== limited(input.expectedHash, 80) || previewTarget.caretReference?.domPath !== caretReference?.domPath || previewTarget.caretReference?.textOffset !== caretReference?.textOffset || previewTarget.caretReference?.containerPath !== caretReference?.containerPath || previewTarget.expectedTableHash !== expectedTableHash || previewTarget.rowIndex !== (input.rowIndex === undefined ? null : Number(input.rowIndex)) || previewTarget.columnIndex !== (input.columnIndex === undefined ? null : Number(input.columnIndex)) || previewTarget.cellText !== (input.cellText === undefined ? null : limited(input.cellText, MAX_TABLE_CELL_TEXT)) || !sameJson(previewTarget.tableFormat, input.tableFormat === undefined ? null : normalizeFormat(input.tableFormat, true))) throw error("TABLE_PREVIEW_MISMATCH", 409);
+        }
+      }
+    }
     const isBatchSubjectAction = ["preview_batch_save", "batch_save_asset_draft", "preview_batch_exit_edit", "batch_exit_edit"].includes(type);
     const isBatchPageAction = isBatchSubjectAction;
     const rowNumbers = Array.isArray(input.rowNumbers) ? input.rowNumbers.map(Number).filter((row) => Number.isInteger(row) && row >= 2 && row <= 100000) : [];
     const rowNumber = Number(input.rowNumber);
-    if (!isBatchPageAction && !rowNumbers.length && !["scan_audit_index_check_rows"].includes(type) && (!Number.isInteger(rowNumber) || rowNumber < 2)) throw error("ROW_NUMBER_INVALID");
+    if (!isEditBlockAction && !isBatchPageAction && !rowNumbers.length && !["scan_audit_index_check_rows"].includes(type) && (!Number.isInteger(rowNumber) || rowNumber < 2)) throw error("ROW_NUMBER_INVALID");
     const subjectCode = limited(input.subjectCode === "current" ? "" : input.subjectCode || session.binding.subjectCode, 120);
     if (subjectCode && !/^C\d+(?:-\d+)*$/.test(subjectCode)) throw error("SUBJECT_CODE_INVALID");
     const subjectCodes = isBatchSubjectAction
@@ -320,21 +593,70 @@ function createBridge(options = {}) {
         }))
       : [];
     if (type === "batch_upload_audit_attachments" && !files.length) throw error("BATCH_UPLOAD_FILES_REQUIRED");
-    const action = { actionId: id("action"), sessionId: session.sessionId, bindingId: binding.bindingId, agentId: agent.agentId, providerId: agent.providerId, installationId: agent.installationId, controlEpoch: binding.updatedAt, type, status: "queued", target: { projectId: session.binding.projectId, companyId: session.binding.companyId, subjectCode, subjectCodes, companyScope, companyFilters: normalizedSelection(input.companyFilters), selectedCompanies: normalizedSelection(input.selectedCompanies), companyValues: normalizedSelection(input.companyValues), mode: ["batch_save_asset_draft", "batch_exit_edit"].includes(type) ? "execute" : "dry_run", rowNumber: rowNumbers.length ? 0 : rowNumber, rowNumbers, expectedIndexValues, expectedCleanupValues, fieldTitle: limited(input.fieldTitle || (type.includes("check") ? "查证核对情况" : "查证资料索引"), 80), fieldColumn: Number.isInteger(input.fieldColumn) ? input.fieldColumn : null, sheetName: limited(input.sheetName, 200), resultText: limited(input.resultText, 80), procedureText: limited(input.procedureText, 80), moduleName: limited(input.moduleName, 80), moduleIndex: Number.isInteger(input.moduleIndex) ? input.moduleIndex : 0, deferSave: Boolean(input.deferSave), maxRows: Math.max(2, Math.min(Number(input.maxRows || 500), 5000)) }, file, files, confirmText: limited(input.confirmText, 80), createdAt: now() }; actions.set(action.actionId, action); return action;
+    const caretReference = isTableAction && input.caretReference !== undefined ? safeCaretReference(input.caretReference) : null;
+    const action = { actionId: id("action"), sessionId: session.sessionId, bindingId: binding.bindingId, agentId: agent.agentId, providerId: agent.providerId, installationId: agent.installationId, controlEpoch: binding.updatedAt, type, status: "queued", target: { projectId: session.binding.projectId, companyId: session.binding.companyId, threadId: isEditBlockAction ? limited(input.threadId || binding.conversationId, 200) : "", subjectCode, subjectCodes, companyScope, companyFilters: normalizedSelection(input.companyFilters), selectedCompanies: normalizedSelection(input.selectedCompanies), companyValues: normalizedSelection(input.companyValues), mode: ["batch_save_asset_draft", "batch_exit_edit"].includes(type) ? "execute" : "dry_run", rowNumber: rowNumbers.length ? 0 : rowNumber, rowNumbers, expectedIndexValues, expectedCleanupValues, fieldTitle: limited(input.fieldTitle || (type.includes("check") ? "查证核对情况" : "查证资料索引"), 80), fieldColumn: Number.isInteger(input.fieldColumn) ? input.fieldColumn : null, sheetName: limited(input.sheetName, 200), resultText: limited(input.resultText, 80), procedureText: limited(input.procedureText, 80), moduleName: limited(input.moduleName, 80), moduleIndex: Number.isInteger(input.moduleIndex) ? input.moduleIndex : 0, deferSave: Boolean(input.deferSave), maxRows: Math.max(2, Math.min(Number(input.maxRows || 500), 5000)), tabId: isEditBlockAction ? Number(input.tabId) : null, blockId: isEditBlockAction ? limited(input.blockId, 500) : "", expectedHash: isEditBlockAction ? limited(input.expectedHash, 80) : "", expectedText: isEditBlockAction && input.expectedText !== undefined ? limited(input.expectedText, MAX_EDIT_BLOCK_TEXT) : null, replacementText: isEditBlockAction && input.replacementText !== undefined ? limited(input.replacementText, MAX_EDIT_BLOCK_TEXT) : "", previewActionId: isEditBlockAction ? limited(input.previewActionId, 200) : "", format: isEditBlockFormatAction ? normalizeFormat(input.format) : null, tableAction: isTableAction && type !== "table_readback" ? limited(input.tableAction, 40) : "", tableId: isTableAction ? limited(input.tableId, 500) : "", caretReference, expectedTableHash: isTableAction && input.expectedTableHash ? limited(input.expectedTableHash, 80) : null, rowIndex: isTableAction && input.rowIndex !== undefined ? Number(input.rowIndex) : null, columnIndex: isTableAction && input.columnIndex !== undefined ? Number(input.columnIndex) : null, cellText: isTableAction && input.cellText !== undefined ? limited(input.cellText, MAX_TABLE_CELL_TEXT) : null, rowCount: isTableAction && input.rowCount !== undefined ? Number(input.rowCount) : null, columnCount: isTableAction && input.columnCount !== undefined ? Number(input.columnCount) : null, cells: isTableAction && type !== "table_readback" ? normalizeTableCells(input.cells) : [], tableFormat: isTableAction && input.tableFormat !== undefined ? normalizeFormat(input.tableFormat, true) : null, formatScope: isTableAction ? limited(input.formatScope || "table", 20) : "" }, file, files, confirmText: limited(input.confirmText, 80), createdAt: now() }; actions.set(action.actionId, action); return action;
   }
-  function publicAction(action) { return action ? { actionId: action.actionId, sessionId: action.sessionId, bindingId: action.bindingId, type: action.type, status: action.status, target: action.target, file: action.file ? { name: action.file.name, size: action.file.size, type: action.file.type } : null, files: (action.files || []).map((item) => ({ name: item.name, size: item.size, type: item.type, moduleName: item.moduleName, moduleIndex: item.moduleIndex })), createdAt: action.createdAt, claimedAt: action.claimedAt || null, completedAt: action.completedAt || null, cancellationReason: action.cancellationReason || null, result: action.result || null } : null; }
+  function publicAction(action) { return action ? { actionId: action.actionId, sessionId: action.sessionId, bindingId: action.bindingId, type: action.type, status: action.status, controlEpoch: action.controlEpoch, target: action.target, file: action.file ? { name: action.file.name, size: action.file.size, type: action.file.type } : null, files: (action.files || []).map((item) => ({ name: item.name, size: item.size, type: item.type, moduleName: item.moduleName, moduleIndex: item.moduleIndex })), createdAt: action.createdAt, claimedAt: action.claimedAt || null, completedAt: action.completedAt || null, cancellationReason: action.cancellationReason || null, result: action.result || null } : null; }
 
   function cancelControllerActions(bindingId) { for (const action of actions.values()) if (action.bindingId === bindingId && ["queued", "claimed", "running"].includes(action.status)) { action.status = "cancelled"; action.cancellationReason = "AGENT_CONTROL_REVOKED"; action.completedAt = now(); } }
+  function sameAgentBinding(binding, source) {
+    return binding?.agentId === source.agentId
+      && binding?.providerId === source.providerId
+      && binding?.installationId === source.installationId;
+  }
   function createBinding(session, input) {
-    const source = requireSource(input); const previous = input.bindingId ? bindings.get(String(input.bindingId)) : null; const scope = input.scope === "workspace" || input.scope === "project" ? "workspace" : "conversation"; const accessMode = input.accessMode === "control" ? "control" : "read";
-    const binding = { bindingId: limited(input.bindingId || previous?.bindingId || randomUUID(), 200), agentId: source.agentId, providerId: source.providerId, displayName: limited(input.displayName || source.displayName, 120), installationId: source.installationId, workspaceId: limited(input.workspaceId ?? input.projectId ?? previous?.workspaceId, 200), workspaceName: limited(input.workspaceName ?? input.projectName ?? previous?.workspaceName, 200), workspacePath: normalizePath(input.workspacePath ?? input.projectPath ?? previous?.workspacePath), conversationId: scope === "workspace" ? "" : limited(input.conversationId ?? input.threadId ?? previous?.conversationId, 200), conversationTitle: scope === "workspace" ? "" : limited(input.conversationTitle ?? input.threadTitle ?? previous?.conversationTitle, 300), scope, accessMode, pageKey: pageKey(session.binding), manualBinding: Boolean(input.manualBinding || source.manual), createdAt: previous?.createdAt || now(), updatedAt: now() };
-    if (!binding.workspaceId && !binding.conversationId) throw error("AGENT_WORKSPACE_OR_CONVERSATION_REQUIRED"); if (scope === "conversation" && !binding.conversationId) throw error("AGENT_CONVERSATION_BINDING_REQUIRED");
+    const source = requireSource(input);
+    const pageBindings = bindingsFor(session.binding);
+    const requestedBindingId = String(input.bindingId || "").trim();
+    const explicit = requestedBindingId ? bindings.get(requestedBindingId) : null;
+    if (requestedBindingId && (!explicit || explicit.pageKey !== pageKey(session.binding) || !sameAgentBinding(explicit, source))) {
+      throw error("AGENT_BINDING_MISMATCH", 403);
+    }
+    const previous = explicit || preferredBinding(pageBindings.filter((entry) => sameAgentBinding(entry, source)));
+    const scope = input.scope === "workspace" || input.scope === "project" ? "workspace" : "conversation";
+    const accessMode = input.accessMode === "control" ? "control" : "read";
+    const binding = {
+      bindingId: limited(previous?.bindingId || requestedBindingId || randomUUID(), 200),
+      agentId: source.agentId,
+      providerId: source.providerId,
+      displayName: limited(input.displayName || source.displayName, 120),
+      installationId: source.installationId,
+      workspaceId: limited(input.workspaceId ?? input.projectId ?? previous?.workspaceId, 200),
+      workspaceName: limited(input.workspaceName ?? input.projectName ?? previous?.workspaceName, 200),
+      workspacePath: normalizePath(input.workspacePath ?? input.projectPath ?? previous?.workspacePath),
+      conversationId: scope === "workspace" ? "" : limited(input.conversationId ?? input.threadId ?? previous?.conversationId, 200),
+      conversationTitle: scope === "workspace" ? "" : limited(input.conversationTitle ?? input.threadTitle ?? previous?.conversationTitle, 300),
+      scope,
+      accessMode,
+      pageProjectId: limited(input.pageProjectId || input.tianyuanProjectId || session.binding.projectId, 80),
+      pageKey: pageKey(session.binding),
+      manualBinding: Boolean(input.manualBinding || source.manual),
+      createdAt: previous?.createdAt || now(),
+      updatedAt: now(),
+    };
+    if (!binding.workspaceId && !binding.conversationId) throw error("AGENT_WORKSPACE_OR_CONVERSATION_REQUIRED");
+    if (scope === "conversation" && !binding.conversationId) throw error("AGENT_CONVERSATION_BINDING_REQUIRED");
     const controller = currentController(session);
+    const next = new Map(bindings);
+    const cancelledBindingIds = new Set();
+    for (const entry of pageBindings) {
+      if (entry.bindingId !== binding.bindingId && sameAgentBinding(entry, source)) {
+        next.delete(entry.bindingId);
+        cancelledBindingIds.add(entry.bindingId);
+      }
+    }
     if (accessMode === "control" && controller && controller.bindingId !== binding.bindingId) {
       if (input.confirmControlTransfer !== "确认切换控制权") throw error("CONTROL_TRANSFER_CONFIRMATION_REQUIRED", 409);
-      controller.accessMode = "read"; controller.updatedAt = now(); bindings.set(controller.bindingId, controller); cancelControllerActions(controller.bindingId);
+      next.set(controller.bindingId, { ...controller, accessMode: "read", updatedAt: now() });
+      cancelledBindingIds.add(controller.bindingId);
     }
-    bindings.set(binding.bindingId, binding); saveBindings(); syncSession(session); return binding;
+    next.set(binding.bindingId, binding);
+    saveBindings(next);
+    bindings.clear();
+    for (const [key, value] of next) bindings.set(key, value);
+    for (const bindingId of cancelledBindingIds) cancelControllerActions(bindingId);
+    syncSession(session);
+    return binding;
   }
   function createCredentialRef(providerId, installationId) {
     const service = `com.tianyuan.workbench.agent.${providerId}.${installationId}`;
@@ -516,16 +838,16 @@ function createBridge(options = {}) {
       if (req.method === "POST" && parts.length === 4 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "agent-bindings") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const binding = createBinding(session, await body(req)); return json(res, 200, { ok: true, binding: publicBinding(binding), session: publicSession(session) }, origin); }
       if (req.method === "DELETE" && parts.length === 5 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "agent-bindings") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const binding = bindings.get(parts[4]); if (!binding || binding.pageKey !== pageKey(session.binding)) throw error("AGENT_BINDING_MISMATCH", 404); bindings.delete(binding.bindingId); cancelControllerActions(binding.bindingId); saveBindings(); syncSession(session); return json(res, 200, { ok: true, cleared: true, bindingId: binding.bindingId, session: publicSession(session) }, origin); }
       if (req.method === "POST" && parts.length === 6 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "agent-bindings" && parts[5] === "access") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const input = await body(req); const previous = bindings.get(parts[4]); if (!previous || previous.pageKey !== pageKey(session.binding)) throw error("AGENT_BINDING_MISMATCH", 404); const changed = createBinding(session, { ...previous, ...input, bindingId: previous.bindingId, providerId: previous.providerId, installationId: previous.installationId, agentId: previous.agentId }); return json(res, 200, { ok: true, binding: publicBinding(changed), session: publicSession(session) }, origin); }
-      if (req.method === "POST" && parts.length === 4 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "binding") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const input = await body(req); const source = [...sources.values()].find((item) => item.providerId === "codex"); if (!source) throw error("AGENT_NOT_REGISTERED", 409); const binding = createBinding(session, { ...input, providerId: "codex", installationId: source.installationId, agentId: source.agentId, workspaceId: input.projectId, workspaceName: input.projectName, workspacePath: input.projectPath, conversationId: input.threadId, conversationTitle: input.threadTitle, scope: input.scope === "project" ? "workspace" : "conversation", accessMode: input.accessMode || "control" }); return json(res, 200, { ok: true, binding: codexCompatibility(binding), agentBinding: publicBinding(binding), session: publicSession(session) }, origin); }
+      if (req.method === "POST" && parts.length === 4 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "binding") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const input = await body(req); const source = [...sources.values()].find((item) => item.providerId === "codex"); if (!source) throw error("AGENT_NOT_REGISTERED", 409); const binding = createBinding(session, { ...input, providerId: "codex", installationId: source.installationId, agentId: source.agentId, workspaceId: input.projectId, workspaceName: input.projectName, workspacePath: input.projectPath, conversationId: input.threadId, conversationTitle: input.threadTitle, scope: input.scope === "project" ? "workspace" : "conversation", accessMode: input.accessMode || "control", confirmControlTransfer: input.confirmControlTransfer }); return json(res, 200, { ok: true, binding: codexCompatibility(binding), agentBinding: publicBinding(binding), session: publicSession(session) }, origin); }
       if (req.method === "POST" && parts.length === 5 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "binding" && parts[4] === "current-thread") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const input = await body(req); const catalog = await codexCatalog(); const candidate = catalog.threads.find((thread) => (input.projectId && thread.projectId === input.projectId) || (input.projectPath && normalizePath(thread.projectPath) === normalizePath(input.projectPath))) || null; if (!candidate) throw error("CURRENT_THREAD_NOT_FOUND", 404); const source = [...sources.values()].find((item) => item.providerId === "codex"); if (!source) throw error("AGENT_NOT_REGISTERED", 409); const binding = createBinding(session, { providerId: "codex", installationId: source.installationId, workspaceId: candidate.projectId, workspaceName: candidate.projectName, workspacePath: candidate.projectPath, conversationId: candidate.threadId, conversationTitle: candidate.title, scope: "conversation", accessMode: "control", confirmControlTransfer: input.confirmControlTransfer }); return json(res, 200, { ok: true, binding: codexCompatibility(binding), agentBinding: publicBinding(binding), thread: candidate, session: publicSession(session) }, origin); }
       if (req.method === "DELETE" && parts.length === 4 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "binding") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const target = bindingsFor(session.binding).find((binding) => binding.providerId === "codex"); if (target) { bindings.delete(target.bindingId); cancelControllerActions(target.bindingId); saveBindings(); } return json(res, 200, { ok: true, cleared: Boolean(target), session: publicSession(session) }, origin); }
       if (parts.length === 3 && parts[0] === "api" && parts[1] === "sessions" && req.method === "GET") { const session = sessionForBinding(parts[2]); const agent = isBrowser(req) ? null : identity(req, true); if (agent && !bindingsFor(session.binding).some((binding) => binding.agentId === agent.agentId && binding.providerId === agent.providerId && binding.installationId === agent.installationId)) throw error("AGENT_BINDING_MISMATCH", 403); return json(res, 200, { ok: true, session: publicSession(session, agent) }, origin); }
       if (req.method === "POST" && parts.length === 4 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "actions") { const agent = identity(req, true); const session = sessionForBinding(parts[2]); const action = createAction(session, agent, await body(req)); return json(res, 200, { ok: true, action: publicAction(action), security: { fileContentsReturned: false } }, origin); }
       if (req.method === "POST" && parts.length === 4 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "ui-actions") { requireBrowser(req); const session = sessionForBinding(parts[2]); const controller = currentController(session); if (!controller) throw error("AGENT_CONTROL_CONFLICT", 409); const input = await body(req); const agent = { agentId: controller.agentId, providerId: controller.providerId, installationId: controller.installationId, displayName: controller.displayName }; const action = createAction(session, agent, { ...input, bindingId: controller.bindingId, projectId: input.projectId || controller.workspaceId, threadId: input.threadId || controller.conversationId }); return json(res, 200, { ok: true, action: publicAction(action), security: { fileContentsReturned: false } }, origin); }
-      if (req.method === "GET" && parts.length === 5 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "actions" && parts[4] === "next") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const binding = browserBinding(session, url.searchParams.get("bindingId"), false); const action = [...actions.values()].filter((item) => item.sessionId === session.sessionId && item.bindingId === binding.bindingId && item.status === "queued").sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))[0] || null; if (!action) return json(res, 200, { ok: true, action: null }, origin); if (actionIsWrite(action.type)) browserBinding(session, binding.bindingId, true); action.status = "claimed"; action.claimedAt = now(); const file = action.file ? { name: action.file.name, size: action.file.size, type: action.file.type, base64: fs.readFileSync(action.file.path).toString("base64") } : null; const files = (action.files || []).map((item) => ({ name: item.name, size: item.size, type: item.type, moduleName: item.moduleName, moduleIndex: item.moduleIndex, base64: fs.readFileSync(item.path).toString("base64") })); return json(res, 200, { ok: true, action: { ...publicAction(action), payload: { action: action.type, ...action.target, confirmText: action.confirmText, file, files } }, security: { filePathReturned: false, fileContentsEphemeral: Boolean(file || files.length) } }, origin); }
-      if (req.method === "POST" && parts.length === 6 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "actions" && parts[5] === "result") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const input = await body(req); const action = actions.get(parts[4]); if (!action || action.sessionId !== session.sessionId) throw error("ACTION_NOT_FOUND", 404); browserBinding(session, input.bindingId, actionIsWrite(action.type)); if (action.status === "cancelled") throw error("AGENT_CONTROL_REVOKED", 409); if (!["claimed", "running"].includes(action.status)) throw error("ACTION_NOT_CLAIMED", 409); action.result = input.result && typeof input.result === "object" ? input.result : {}; action.status = action.result.ok ? "completed" : "failed"; action.completedAt = now(); return json(res, 200, { ok: true, action: publicAction(action) }, origin); }
+      if (req.method === "GET" && parts.length === 5 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "actions" && parts[4] === "next") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const binding = browserBinding(session, url.searchParams.get("bindingId"), false); const action = [...actions.values()].filter((item) => item.sessionId === session.sessionId && item.bindingId === binding.bindingId && item.status === "queued").sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))[0] || null; if (!action) return json(res, 200, { ok: true, action: null }, origin); if (actionIsWrite(action.type)) browserBinding(session, binding.bindingId, true, action.controlEpoch); action.status = "claimed"; action.claimedAt = now(); const file = action.file ? { name: action.file.name, size: action.file.size, type: action.file.type, base64: fs.readFileSync(action.file.path).toString("base64") } : null; const files = (action.files || []).map((item) => ({ name: item.name, size: item.size, type: item.type, moduleName: item.moduleName, moduleIndex: item.moduleIndex, base64: fs.readFileSync(item.path).toString("base64") })); return json(res, 200, { ok: true, action: { ...publicAction(action), payload: { sessionId: action.sessionId, bindingId: action.bindingId, agentId: action.agentId, providerId: action.providerId, installationId: action.installationId, controlEpoch: action.controlEpoch, action: action.type, ...action.target, confirmText: action.confirmText, file, files } }, security: { filePathReturned: false, fileContentsEphemeral: Boolean(file || files.length) } }, origin); }
+      if (req.method === "POST" && parts.length === 6 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "actions" && parts[5] === "result") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const input = await body(req); const action = actions.get(parts[4]); if (!action || action.sessionId !== session.sessionId) throw error("ACTION_NOT_FOUND", 404); browserBinding(session, input.bindingId, actionIsWrite(action.type), action.controlEpoch); if (action.status === "cancelled") throw error("AGENT_CONTROL_REVOKED", 409); if (!["claimed", "running"].includes(action.status)) throw error("ACTION_NOT_CLAIMED", 409); action.result = input.result && typeof input.result === "object" ? input.result : {}; action.status = action.result.ok ? "completed" : "failed"; action.completedAt = now(); return json(res, 200, { ok: true, action: publicAction(action) }, origin); }
       if (req.method === "GET" && parts.length === 5 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "ui-actions") { requireBrowser(req); const session = sessionForBinding(parts[2]); const action = actions.get(parts[4]); const controller = currentController(session); if (!action || action.sessionId !== session.sessionId) throw error("ACTION_NOT_FOUND", 404); if (!controller || action.bindingId !== controller.bindingId) throw error("AGENT_CONTROL_CONFLICT", 409); return json(res, 200, { ok: true, action: publicAction(action) }, origin); }
-      if (req.method === "GET" && parts.length === 5 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "actions") { const agent = identity(req, true); const session = sessionForBinding(parts[2]); const action = actions.get(parts[4]); if (!action || action.sessionId !== session.sessionId) throw error("ACTION_NOT_FOUND", 404); authorize(session, agent, { bindingId: action.bindingId, workspaceId: url.searchParams.get("workspaceId") || url.searchParams.get("projectId") || "", conversationId: url.searchParams.get("conversationId") || url.searchParams.get("threadId") || "" }, actionIsWrite(action.type)); return json(res, 200, { ok: true, action: publicAction(action) }, origin); }
+      if (req.method === "GET" && parts.length === 5 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "actions") { const agent = identity(req, true); const session = sessionForBinding(parts[2]); const action = actions.get(parts[4]); if (!action || action.sessionId !== session.sessionId) throw error("ACTION_NOT_FOUND", 404); authorize(session, agent, { bindingId: action.bindingId, workspaceId: url.searchParams.get("workspaceId") || "", projectId: url.searchParams.get("projectId") || "", conversationId: url.searchParams.get("conversationId") || "", threadId: url.searchParams.get("threadId") || "" }, actionIsWrite(action.type)); return json(res, 200, { ok: true, action: publicAction(action) }, origin); }
       throw error("NOT_FOUND", 404);
     } catch (cause) { return fail(res, cause, origin); }
   }

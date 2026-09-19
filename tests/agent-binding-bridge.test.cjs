@@ -196,8 +196,8 @@ async function main() {
     const protocol = await request("GET", "/api/protocol");
     const capabilityEntries = Object.entries(protocol.payload.capabilities);
     assert.equal(protocol.status, 200);
-    assert.equal(capabilityEntries.length, 24);
-    assert.equal(capabilityEntries.filter(([, item]) => item.supported).length, 22);
+    assert.equal(capabilityEntries.length, 36);
+    assert.equal(capabilityEntries.filter(([, item]) => item.supported).length, 34);
     assert.equal(protocol.payload.capabilities.batchAuditAttachmentUpload.label, "确认后批量上传评估核实附件并保存");
     assert.equal(protocol.payload.capabilities.clearAuditAttachments.label, "确认后批量清理资料索引附件关联");
     assert.equal(protocol.payload.capabilities.clearAuditTestRows.label, "确认后清理测试数据并保存");
@@ -210,6 +210,22 @@ async function main() {
     assert.equal(registered.payload.session.agentBindings[0].providerId, "codex");
     assert.equal(registered.payload.session.agentBindings[0].scope, "conversation");
     assert.equal(registered.payload.session.codexBinding.bindingId, "legacy-codex-binding");
+
+    const compatibilityUpdate = await request("POST", "/api/sessions/session-a/binding", {
+      bindingId: "legacy-codex-binding", projectId: "workspace-codex", projectName: "Codex Workspace", projectPath: "/tmp/codex-workspace", threadId: "conversation-codex-new", threadTitle: "Codex Conversation Renamed", scope: "thread", accessMode: "control",
+    });
+    assert.equal(compatibilityUpdate.status, 200);
+    assert.equal(compatibilityUpdate.payload.binding.bindingId, "legacy-codex-binding");
+    assert.equal(compatibilityUpdate.payload.binding.threadId, "conversation-codex-new");
+    assert.equal(compatibilityUpdate.payload.binding.threadTitle, "Codex Conversation Renamed");
+    assert.equal(compatibilityUpdate.payload.agentBinding.pageProjectId, "project-a");
+    assert.equal(compatibilityUpdate.payload.session.agentBindings.filter((binding) => binding.providerId === "codex").length, 1);
+    const idempotentCompatibilityUpdate = await request("POST", "/api/sessions/session-a/binding", {
+      projectId: "workspace-codex", projectName: "Codex Workspace", projectPath: "/tmp/codex-workspace", threadId: "conversation-codex-new", threadTitle: "Codex Conversation Renamed", scope: "thread", accessMode: "control",
+    });
+    assert.equal(idempotentCompatibilityUpdate.status, 200);
+    assert.equal(idempotentCompatibilityUpdate.payload.binding.bindingId, "legacy-codex-binding");
+    assert.equal(idempotentCompatibilityUpdate.payload.session.agentBindings.filter((binding) => binding.providerId === "codex").length, 1);
 
     const codexStatus = await request("GET", "/api/sessions", undefined, codex);
     assert.equal(codexStatus.status, 200);
@@ -267,10 +283,12 @@ async function main() {
     assert.equal(bindingMismatch.payload.reason, "AGENT_BINDING_MISMATCH");
 
     const queued = await request("POST", "/api/sessions/session-a/actions", {
-      action: "set_audit_check_result", bindingId: "legacy-codex-binding", projectId: "workspace-codex", threadId: "conversation-codex", subjectCode: "C1", rowNumber: 2, resultText: "不一致", confirmText: "确认填写核对情况并保存",
+      action: "set_audit_check_result", bindingId: "legacy-codex-binding", projectId: "project-a", threadId: "conversation-codex-new", subjectCode: "C1", rowNumber: 2, resultText: "不一致", confirmText: "确认填写核对情况并保存",
     }, codex);
     assert.equal(queued.status, 200);
     assert.equal(queued.payload.action.status, "queued");
+    const pageProjectAction = await request("GET", `/api/sessions/session-a/actions/${queued.payload.action.actionId}?projectId=project-a&conversationId=conversation-codex-new`, undefined, codex);
+    assert.equal(pageProjectAction.status, 200);
 
     const missingConfirm = await request("POST", `/api/sessions/session-a/agent-bindings/${workbuddyBinding.bindingId}/access`, { accessMode: "control" });
     assert.equal(missingConfirm.status, 409);
@@ -291,12 +309,12 @@ async function main() {
     assert.equal(revokedQueue.status, 409);
     assert.equal(revokedQueue.payload.reason, "AGENT_CONTROL_CONFLICT");
 
-    const cancelled = await request("GET", `/api/sessions/session-a/actions/${queued.payload.action.actionId}?workspaceId=workspace-codex&conversationId=conversation-codex`, undefined, codex);
+    const cancelled = await request("GET", `/api/sessions/session-a/actions/${queued.payload.action.actionId}?workspaceId=workspace-codex&conversationId=conversation-codex-new`, undefined, codex);
     assert.equal(cancelled.status, 403);
     assert.equal(cancelled.payload.reason, "AGENT_READ_ONLY");
 
     const postTransferWrite = await request("POST", "/api/sessions/session-a/actions", {
-      action: "set_audit_check_result", bindingId: "legacy-codex-binding", projectId: "workspace-codex", threadId: "conversation-codex", subjectCode: "C1", rowNumber: 2, resultText: "不一致", confirmText: "确认填写核对情况并保存",
+      action: "set_audit_check_result", bindingId: "legacy-codex-binding", projectId: "workspace-codex", threadId: "conversation-codex-new", subjectCode: "C1", rowNumber: 2, resultText: "不一致", confirmText: "确认填写核对情况并保存",
     }, codex);
     assert.equal(postTransferWrite.status, 403);
     assert.equal(postTransferWrite.payload.reason, "AGENT_READ_ONLY");
@@ -389,7 +407,7 @@ async function main() {
     assert.equal(clientResult.ok, true);
     assert.equal(clientResult.counts.matched, 1);
 
-    console.log(JSON.stringify({ ok: true, checks: ["batch_upload_resume_handler", "batch_upload_failure_stop", "batch_upload_saved_checkpoint", "batch_upload_skip_saved", "batch_upload_row_grouping", "batch_upload_empty_row_preflight", "batch_upload_multi_file_action", "batch_cleanup_ui_action", "upload_dialog_close_is_not_business_failure", "upload_dialog_auto_close", "page_save_excludes_dialog_button", "installed_extension_header_contract", "extension_version_mismatch", "capability_matrix_24_entries", "legacy_codex_migration", "workbuddy_catalog_metadata_only", "manual_workbuddy_read_binding", "local_script_source_registration", "local_script_binding_without_agent_credentials", "local_script_ui_action", "local_script_batch_save_action", "agent_context_isolation", "read_cannot_write", "control_conflict_confirmation", "control_transfer_cancels_queue", "agent_error_codes", "codex_client_identity"], tempRoot: root }, null, 2));
+    console.log(JSON.stringify({ ok: true, checks: ["batch_upload_resume_handler", "batch_upload_failure_stop", "batch_upload_saved_checkpoint", "batch_upload_skip_saved", "batch_upload_row_grouping", "batch_upload_empty_row_preflight", "batch_upload_multi_file_action", "batch_cleanup_ui_action", "upload_dialog_close_is_not_business_failure", "upload_dialog_auto_close", "page_save_excludes_dialog_button", "installed_extension_header_contract", "extension_version_mismatch", "capability_matrix_34_entries", "legacy_codex_migration", "workbuddy_catalog_metadata_only", "manual_workbuddy_read_binding", "local_script_source_registration", "local_script_binding_without_agent_credentials", "local_script_ui_action", "local_script_batch_save_action", "agent_context_isolation", "read_cannot_write", "control_conflict_confirmation", "control_transfer_cancels_queue", "agent_error_codes", "codex_client_identity"], tempRoot: root }, null, 2));
   } finally {
     await new Promise((resolve) => server.close(resolve));
     fs.rmSync(root, { recursive: true, force: true });

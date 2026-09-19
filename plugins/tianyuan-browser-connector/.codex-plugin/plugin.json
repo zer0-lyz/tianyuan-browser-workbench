@@ -1,6 +1,6 @@
 {
   "name": "tianyuan-browser-connector",
-  "version": "0.4.2",
+  "version": "0.4.6",
   "description": "把本地 Agent 安全连接到已绑定的天源浏览器页面，并执行受控查询和操作。",
   "author": {
     "name": "Tianyuan Browser Connector"

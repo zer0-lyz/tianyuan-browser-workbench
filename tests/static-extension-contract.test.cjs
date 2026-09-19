@@ -38,6 +38,7 @@ const declarationPrintScript = fs.readFileSync(path.join(repoRoot, "skills", "ap
 const detailPrintScript = fs.readFileSync(path.join(repoRoot, "skills", "appraisal-detail-print-format", "scripts", "adjust_appraisal_detail_print.py"), "utf8");
 const versionConfig = JSON.parse(fs.readFileSync(path.join(extensionRoot, "version.json"), "utf8"));
 const pluginServer = fs.readFileSync(path.join(repoRoot, "plugins", "tianyuan-browser-connector", "runtime", "apps", "mcp", "server.mjs"), "utf8");
+const pluginClient = fs.readFileSync(path.join(repoRoot, "plugins", "tianyuan-browser-connector", "runtime", "apps", "shared", "client.mjs"), "utf8");
 const pluginReadme = fs.readFileSync(path.join(repoRoot, "plugins", "tianyuan-browser-connector", "README.md"), "utf8");
 const pluginManifest = JSON.parse(fs.readFileSync(path.join(repoRoot, "plugins", "tianyuan-browser-connector", ".codex-plugin", "plugin.json"), "utf8"));
 
@@ -71,8 +72,36 @@ for (const id of referencedIds) {
 }
 
 assert.equal(quotedConstant(content, "ADAPTER_VERSION"), quotedConstant(adapter, "ADAPTER_VERSION"));
+assert.equal(quotedConstant(content, "EXTENSION_BUILD_ID"), quotedConstant(adapter, "EXTENSION_BUILD_ID"));
+assert.equal(content.includes("minBuildId"), true);
+assert.equal(content.includes("PAGE_ADAPTER_STATE_KEY"), true);
+assert.equal(adapter.includes("buildId: EXTENSION_BUILD_ID"), true);
+assert.equal(bridge.includes("pageAdapterBuildId"), true);
 assert.equal(quotedConstant(sidepanel, "EXPECTED_CONNECTOR_PROTOCOL_VERSION"), quotedConstant(bridge, "PROTOCOL_VERSION"));
 assert.equal(quotedConstant(nativeHost, "CONNECTOR_PROTOCOL_VERSION"), quotedConstant(bridge, "PROTOCOL_VERSION"));
+assert.equal(content.includes("const actionPayload"), true);
+assert.equal(content.includes("sender?.tab?.id"), true);
+assert.equal(bridge.includes("threadId: isEditBlockAction"), true);
+assert.equal(bridge.includes("EDIT_BLOCK_PREVIEW_MISMATCH"), true);
+assert.equal(adapter.includes("确认修改编辑块"), true);
+assert.equal(adapter.includes("确认设置编辑格式"), true);
+assert.equal(adapter.includes("highlightColor"), true);
+assert.equal(adapter.includes('"transparent"'), true);
+assert.equal(content.includes("highlightColor"), true);
+assert.equal(bridge.includes("HIGHLIGHT_COLOR"), true);
+assert.equal(pluginClient.includes("highlightColor"), true);
+assert.equal(pluginClient.includes("transparent|none"), true);
+assert.equal(adapter.includes("确认执行表格操作"), true);
+assert.equal(adapter.includes("function previewTable"), true);
+assert.equal(adapter.includes("function executeTable"), true);
+assert.equal(adapter.includes('mode: "caret"'), true);
+assert.equal(adapter.includes("TABLE_CARET_NOT_AVAILABLE"), true);
+assert.equal(content.includes("caretReference"), true);
+assert.equal(pluginClient.includes("caretReference"), true);
+assert.equal(bridge.includes("tableCaretInsert"), true);
+assert.equal(bridge.includes("editBlockFormatPreview"), true);
+assert.equal(bridge.includes("tablePreview"), true);
+assert.equal(sidepanel.includes("table_execute"), true);
 assert.equal(manifest.version, versionConfig.chromeVersion);
 assert.equal(manifest.version_name, versionConfig.versionName);
 assert.match(versionConfig.productVersion, /^\d+\.\d+\.\d+$/);

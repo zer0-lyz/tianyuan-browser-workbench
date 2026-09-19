@@ -28,6 +28,8 @@ description: Connect Codex to the exact Tianyuan browser session bound to the cu
 - 经明确确认的单文件上传、分类、底稿保存和回读。
 - 经明确确认的测试资料索引清理、底稿保存和回读。
 - 已解析财务报表的 valuation-mcp 预检、用户确认后导入和回读校验。
+- 受控编辑块格式预演、执行和回读；`highlightColor` 支持文本高亮颜色 `#RRGGBB`，以及 `transparent`/`none` 取消高亮。
+- 表格插入支持使用 `tianyuan.get_context` 返回的 `selection.mode=caret`、`selection.caretReference` 和 `editingBlock.caretReference` 在段首、段中、段尾或段落之间定位；必须先预演，再以 `确认执行表格操作` 执行并回读。
 
 当前版本不提供：
 

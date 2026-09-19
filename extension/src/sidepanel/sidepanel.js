@@ -4510,7 +4510,14 @@ function connectorBindingPayload() {
   const threadId = elements.connectorThreadSelect.value;
   const thread = connectorCatalog.threads.find((item) => (item.threadId || item.id) === threadId);
   const scope = threadId ? "thread" : "project";
+  const existingBinding = (connectorSession?.agentBindings || [])
+    .filter((binding) => binding.providerId === "codex")
+    .sort((left, right) => {
+      if (left.accessMode !== right.accessMode) return left.accessMode === "control" ? -1 : 1;
+      return String(right.updatedAt || right.createdAt || "").localeCompare(String(left.updatedAt || left.createdAt || ""));
+    })[0] || connectorSession?.codexBinding || null;
   return {
+    bindingId: existingBinding?.bindingId || "",
     projectId: project?.projectId || "",
     projectName: project?.projectName || project?.label || "",
     projectPath: project?.projectPath || project?.path || "",
@@ -4907,7 +4914,7 @@ async function navigateConnectorActionTarget(tab, target = {}) {
   return await chrome.tabs.get(tab.id);
 }
 
-async function reportConnectorActionResult(actionId, result) {
+async function reportConnectorActionResult(actionId, result, controlEpoch = "") {
   const binding = currentControlBinding() || {};
   return await connectorFetch(
     `/api/sessions/${encodeURIComponent(connectorSessionId)}/actions/${encodeURIComponent(actionId)}/result`,
@@ -4917,6 +4924,7 @@ async function reportConnectorActionResult(actionId, result) {
         bindingId: binding.bindingId || "",
         projectId: binding.projectId || "",
         threadId: binding.threadId || "",
+        controlEpoch,
         result,
       }),
     },
@@ -4961,6 +4969,15 @@ async function processConnectorActionQueue() {
       set_audit_check_result: "查证核对情况填写",
       scan_audit_index_check_rows: "查证资料索引批量扫描",
       batch_set_audit_check_results: "查证核对情况批量填写",
+      edit_block_preview: "编辑块预演",
+      edit_block_execute: "编辑块执行",
+      edit_block_readback: "编辑块回读",
+      edit_block_format_preview: "编辑块格式预演",
+      edit_block_format_execute: "编辑块格式执行",
+      edit_block_format_readback: "编辑块格式回读",
+      table_preview: "表格操作预演",
+      table_execute: "表格操作执行",
+      table_readback: "表格回读",
     };
     setConnectorBindingFeedback(
       `${binding.displayName || binding.providerId || "当前 Agent"} 已下达${actionLabels[claimedAction.type] || "天源页面任务"}，正在通过当前天源页面执行...`,
@@ -4970,7 +4987,8 @@ async function processConnectorActionQueue() {
     let tab = await connectorBoundTab();
     tab = await navigateConnectorActionTarget(tab, claimedAction.target || {});
     const context = await sendToTab(tab, { type: REQUEST_TYPE });
-    if (!context?.ok || !context.route?.isAssetDraftRoute) {
+    const isEditBlockAction = ["edit_block_preview", "edit_block_execute", "edit_block_readback", "edit_block_format_preview", "edit_block_format_execute", "edit_block_format_readback", "table_preview", "table_execute", "table_readback"].includes(claimedAction.type);
+    if (!context?.ok || (!context.route?.isAssetDraftRoute && !(isEditBlockAction && context.route?.isTianyuanOperationRoute))) {
       throw new Error(context?.reason || "目标资产基础法底稿页面未就绪。");
     }
     if (
@@ -4988,7 +5006,7 @@ async function processConnectorActionQueue() {
     const result = ["preview_batch_save", "batch_save_asset_draft", "preview_batch_exit_edit", "batch_exit_edit"].includes(claimedAction.type)
       ? await runConnectorBatchSubjectAction(tab, context, claimedAction.payload || {}, claimedAction.type)
       : await runSaveActionForTab(tab, claimedAction.payload || {});
-    await reportConnectorActionResult(claimedAction.actionId, result);
+    await reportConnectorActionResult(claimedAction.actionId, result, claimedAction.controlEpoch);
     setConnectorBindingFeedback(
       result?.ok
         ? `${actionLabels[claimedAction.type] || "天源页面任务"}完成，结果已回传 ${binding.displayName || binding.providerId || "当前 Agent"}`
@@ -5011,7 +5029,7 @@ async function processConnectorActionQueue() {
     };
     if (claimedAction?.actionId) {
       try {
-        await reportConnectorActionResult(claimedAction.actionId, result);
+        await reportConnectorActionResult(claimedAction.actionId, result, claimedAction.controlEpoch);
       } catch {
         // The visible feedback remains useful if the Bridge disconnected.
       }
