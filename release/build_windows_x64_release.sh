@@ -212,6 +212,7 @@ cp "$STAGE/native-helper/runtime-compat.json" "$STAGE/extension/runtime-compat.j
 /usr/bin/ditto "$ROOT_DIR/skills" "$STAGE/skills"
 /usr/bin/ditto "$ROOT_DIR/plugins" "$STAGE/plugins"
 cp "$ROOT_DIR/scripts/install-local-runtime.mjs" "$STAGE/scripts/install-local-runtime.mjs"
+cp "$ROOT_DIR/scripts/runtime-fingerprint.mjs" "$STAGE/scripts/runtime-fingerprint.mjs"
 cp "$TYCPV_SOURCE" "$STAGE/runtime/tycpv-setup-0.1.0-win-x64.exe"
 
 node "$ROOT_DIR/scripts/prepare-windows-launchers.mjs" \

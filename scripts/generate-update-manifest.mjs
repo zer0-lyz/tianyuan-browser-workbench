@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { computeRuntimeBuildId } from "./runtime-fingerprint.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const workbenchRoot = process.env.TIANYUAN_WORKBENCH_ROOT
@@ -18,43 +19,15 @@ function sha256(targetPath) {
   return createHash("sha256").update(fs.readFileSync(targetPath)).digest("hex");
 }
 
+function releasePageUrl(baseUrl) {
+  // Release assets live under /releases/download/<tag>/, but the release page
+  // that the extension opens lives at /releases/tag/<tag>. Keep asset URLs on
+  // the download path and point releaseUrl at the browsable page.
+  return String(baseUrl).replace("/releases/download/", "/releases/tag/");
+}
+
 function runtimeBuildId() {
-  const roots = [
-    "extension",
-    "native-helper",
-    "plugins/tianyuan-browser-connector",
-    "scripts/install-local-runtime.mjs",
-    "skills/depreciation-capex-forecast",
-    "skills/table-format",
-  ];
-  const files = [];
-  for (const relativeRoot of roots) {
-    const absoluteRoot = path.join(repoRoot, relativeRoot);
-    if (!fs.existsSync(absoluteRoot)) continue;
-    const stats = fs.statSync(absoluteRoot);
-    if (stats.isFile()) {
-      files.push(relativeRoot);
-      continue;
-    }
-    const visit = (directory) => {
-      for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-        if (entry.name === ".DS_Store" || entry.name.startsWith("._") || entry.name === "runtime-compat.json") continue;
-        if (entry.isDirectory() && entry.name === "__pycache__") continue;
-        const absolutePath = path.join(directory, entry.name);
-        if (entry.isDirectory()) visit(absolutePath);
-        else if (entry.isFile() && path.relative(repoRoot, absolutePath) !== "native-helper/native_host.exe") files.push(path.relative(repoRoot, absolutePath));
-      }
-    };
-    visit(absoluteRoot);
-  }
-  const hash = createHash("sha256");
-  for (const relativePath of files.sort()) {
-    hash.update(relativePath);
-    hash.update("\0");
-    hash.update(fs.readFileSync(path.join(repoRoot, relativePath)));
-    hash.update("\0");
-  }
-  return hash.digest("hex");
+  return computeRuntimeBuildId(repoRoot);
 }
 
 function findPackage(patterns, targetFileName, { includeLite = null } = {}) {
@@ -121,7 +94,7 @@ if (macos) assets["macos-arm64"] = macos;
 const payload = {
   schemaVersion: 1,
   repository: versionConfig.repository,
-  ...(releaseBaseUrl ? { source: "static-manifest", releaseUrl: releaseBaseUrl } : {}),
+  ...(releaseBaseUrl ? { source: "static-manifest", releaseUrl: releasePageUrl(releaseBaseUrl) } : {}),
   productVersion: versionConfig.productVersion,
   chromeVersion: versionConfig.chromeVersion,
   channel: versionConfig.channel,

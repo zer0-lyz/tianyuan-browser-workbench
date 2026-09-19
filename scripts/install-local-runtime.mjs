@@ -318,43 +318,10 @@ function explainSpawnFailure(error, command) {
   return message;
 }
 
+import { computeRuntimeBuildId } from "./runtime-fingerprint.mjs";
+
 function sourceBuildDigest() {
-  const hash = createHash("sha256");
-  const roots = [
-    "extension",
-    "native-helper",
-    "plugins/tianyuan-browser-connector",
-    "scripts/install-local-runtime.mjs",
-    "skills/depreciation-capex-forecast",
-    "skills/table-format",
-  ];
-  const files = [];
-  for (const relativeRoot of roots) {
-    const absoluteRoot = path.join(repoRoot, relativeRoot);
-    if (!fs.existsSync(absoluteRoot)) continue;
-    const stats = fs.statSync(absoluteRoot);
-    if (stats.isFile()) {
-      files.push(relativeRoot);
-      continue;
-    }
-    const visit = (directory) => {
-      for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-        if (entry.name === ".DS_Store" || entry.name.startsWith("._") || entry.name === "runtime-compat.json") continue;
-        if (entry.isDirectory() && entry.name === "__pycache__") continue;
-        const absolutePath = path.join(directory, entry.name);
-        if (entry.isDirectory()) visit(absolutePath);
-        else if (entry.isFile() && path.relative(repoRoot, absolutePath) !== "native-helper/native_host.exe") files.push(path.relative(repoRoot, absolutePath));
-      }
-    };
-    visit(absoluteRoot);
-  }
-  for (const relativePath of files.sort()) {
-    hash.update(relativePath);
-    hash.update("\0");
-    hash.update(fs.readFileSync(path.join(repoRoot, relativePath)));
-    hash.update("\0");
-  }
-  return hash.digest("hex");
+  return computeRuntimeBuildId(repoRoot);
 }
 
 function readJson(targetPath, fallback) {
