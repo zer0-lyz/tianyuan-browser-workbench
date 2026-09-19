@@ -23,37 +23,8 @@ OUTPUT_SHA="$OUTPUT.sha256"
 CACHE_DIR="$WORKBENCH_ROOT/release-cache"
 WHEEL_CACHE="$CACHE_DIR/python-wheels"
 
-RUNTIME_BUILD_ID="$(node - "$ROOT_DIR" <<'NODE'
-const fs = require("node:fs");
-const path = require("node:path");
-const { createHash } = require("node:crypto");
-const root = process.argv[2];
-const roots = ["extension", "native-helper", "plugins/tianyuan-browser-connector", "scripts/install-local-runtime.mjs", "skills/depreciation-capex-forecast", "skills/table-format"];
-const files = [];
-for (const relativeRoot of roots) {
-  const absoluteRoot = path.join(root, relativeRoot);
-  if (!fs.existsSync(absoluteRoot)) continue;
-  const stats = fs.statSync(absoluteRoot);
-  if (stats.isFile()) { files.push(relativeRoot); continue; }
-  const visit = (directory) => {
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-      if (entry.name === ".DS_Store" || entry.name.startsWith("._") || entry.name === "runtime-compat.json") continue;
-      if (entry.isDirectory() && entry.name === "__pycache__") continue;
-      const absolutePath = path.join(directory, entry.name);
-      if (entry.isDirectory()) visit(absolutePath);
-      else if (entry.isFile() && path.relative(root, absolutePath) !== "native-helper/native_host.exe") files.push(path.relative(root, absolutePath));
-    }
-  };
-  visit(absoluteRoot);
-}
-const hash = createHash("sha256");
-for (const relativePath of files.sort()) {
-  hash.update(relativePath); hash.update("\0");
-  hash.update(fs.readFileSync(path.join(root, relativePath))); hash.update("\0");
-}
-process.stdout.write(hash.digest("hex"));
-NODE
-)"
+# 运行指纹统一由 scripts/runtime-fingerprint.mjs 计算，这里只调用封装脚本。
+RUNTIME_BUILD_ID="$(node "$ROOT_DIR/scripts/print-runtime-build-id.mjs" "$ROOT_DIR")"
 
 [[ "$(uname -s)" == "Darwin" ]] || { echo "macOS required" >&2; exit 1; }
 [[ "$(uname -m)" == "arm64" ]] || { echo "arm64 required" >&2; exit 1; }
@@ -77,6 +48,8 @@ cp "$STAGE/native-helper/runtime-compat.json" "$STAGE/extension/runtime-compat.j
 /usr/bin/ditto "$ROOT_DIR/skills" "$STAGE/skills"
 /usr/bin/ditto "$ROOT_DIR/plugins" "$STAGE/plugins"
 cp "$ROOT_DIR/scripts/install-local-runtime.mjs" "$STAGE/scripts/install-local-runtime.mjs"
+cp "$ROOT_DIR/scripts/runtime-fingerprint.mjs" "$STAGE/scripts/runtime-fingerprint.mjs"
+cp "$ROOT_DIR/scripts/print-runtime-build-id.mjs" "$STAGE/scripts/print-runtime-build-id.mjs"
 cp "$WHEEL_CACHE"/openpyxl-3.1.5-*.whl "$WHEEL_CACHE"/et_xmlfile-2.0.0-*.whl "$WHEEL_CACHE"/python_docx-1.2.0-*.whl "$WHEEL_CACHE"/typing_extensions-*.whl "$WHEEL_CACHE"/lxml-6.1.0-*-macosx_*.whl "$STAGE/runtime/python-wheels/"
 cp "$ROOT_DIR/release/macos-arm64/安装.command" "$STAGE/安装.command"
 cp "$ROOT_DIR/release/macos-arm64/卸载.command" "$STAGE/卸载.command"

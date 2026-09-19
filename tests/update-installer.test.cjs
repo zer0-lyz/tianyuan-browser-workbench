@@ -32,6 +32,8 @@ function writePackage(extractRoot, { windows = false, legacyOnly = false } = {})
     "native-helper/update_installer.js",
     "plugins/tianyuan-browser-connector/.codex-plugin/plugin.json",
     "scripts/install-local-runtime.mjs",
+    "scripts/runtime-fingerprint.mjs",
+    "scripts/print-runtime-build-id.mjs",
   ]) {
     const target = path.join(packageRoot, relativePath);
     fs.mkdirSync(path.dirname(target), { recursive: true });
