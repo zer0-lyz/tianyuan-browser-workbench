@@ -214,6 +214,8 @@ function validatePackage(packageRoot, platformAdapter) {
     path.join("native-helper", "update_installer.js"),
     path.join("plugins", "tianyuan-browser-connector", ".codex-plugin", "plugin.json"),
     path.join("scripts", "install-local-runtime.mjs"),
+    path.join("scripts", "runtime-fingerprint.mjs"),
+    path.join("scripts", "print-runtime-build-id.mjs"),
   ];
   for (const relativePath of required) {
     if (!fs.existsSync(path.join(packageRoot, relativePath))) {
