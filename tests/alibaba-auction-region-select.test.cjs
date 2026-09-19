@@ -326,10 +326,19 @@ test("selecting a Guangdong city takes effect and updates the source URL", async
   assert.equal(view.city.value, "440100", "城市选择应生效");
   const url = new URL(view.sourceUrl.value);
   assert.equal(url.pathname, "/list/50025969__2___%B9%E3%D6%DD.htm", "广州应生成城市路径后缀的列表 URL");
-  // regions.js 目前只给浙江省城市维护了区县 children，广州暂无区县数据，
-  // 因此区县下拉按现有逻辑保持禁用（首选项显示“不限定区县”）。
+  // regions.js 已按全国行政区划数据补齐区县 children，广州应出现天河区等区县。
   assert.equal(view.district.optionTexts()[0], "不限定区县");
-  assert.equal(view.district.disabled, true);
+  assert.equal(view.district.disabled, false, "广州已具备区县数据，区县下拉应可用");
+  assert.ok(view.district.optionValues().includes("440106"), "广州区县下拉应包含天河区(440106)");
+
+  // 再选天河区：省份/城市不得回跳，buildSourceUrl 的 location_code 应落到区县级。
+  changeValue(view.district, "440106");
+  assert.equal(view.province.value, "440000", "选择区县后省份应保持广东省");
+  assert.equal(view.city.value, "440100", "选择区县后城市应保持广州");
+  assert.equal(view.district.value, "440106", "区县选择应生效");
+  const districtUrl = new URL(view.sourceUrl.value);
+  assert.equal(districtUrl.pathname, "/list/50025969__2___%B9%E3%D6%DD.htm", "区县级仍保留广州城市路径后缀");
+  assert.equal(districtUrl.searchParams.get("location_code"), "440106", "buildSourceUrl 应携带天河区 location_code");
 
   // 对照组：浙江杭州具备区县数据，同样的联动应把区县下拉置为可用。
   changeValue(view.province, "330000");
@@ -366,5 +375,22 @@ test("restoring a stored non-Zhejiang config keeps the province after remount", 
   const view = await mountAlibabaAuctionModule({ stored });
   assert.equal(view.province.value, "440000", "重新挂载后省份应恢复为广东省");
   assert.equal(view.city.value, "440100", "重新挂载后城市应恢复为广州");
-  assert.equal(view.district.disabled, true);
+  assert.equal(view.district.disabled, false, "广州已具备区县数据，重新挂载后区县下拉应可用");
+  assert.ok(view.district.optionValues().includes("440106"), "重新挂载后广州区县下拉应包含天河区");
+});
+
+test("selecting Beijing 市辖区 exposes 东城区 and keeps the selection", async () => {
+  const view = await mountAlibabaAuctionModule();
+  changeValue(view.province, "110000");
+  changeValue(view.city, "110100");
+  assert.equal(view.province.value, "110000", "选择城市后省份应保持北京市");
+  assert.equal(view.city.value, "110100", "城市选择应生效");
+  assert.equal(view.district.disabled, false, "北京市辖区已具备区县数据，区县下拉应可用");
+  assert.ok(view.district.optionValues().includes("110101"), "区县下拉应包含东城区(110101)");
+  changeValue(view.district, "110101");
+  assert.equal(view.province.value, "110000", "选择区县后省份不应回跳");
+  assert.equal(view.city.value, "110100", "选择区县后城市不应回跳");
+  assert.equal(view.district.value, "110101", "东城区选择应生效");
+  const url = new URL(view.sourceUrl.value);
+  assert.equal(url.searchParams.get("location_code"), "110101", "buildSourceUrl 应携带东城区 location_code");
 });
