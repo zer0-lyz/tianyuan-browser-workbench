@@ -17,6 +17,20 @@ fs.copyFileSync(
   path.join(repoRoot, "scripts", "install-local-runtime.mjs"),
   path.join(tempRoot, "scripts", "install-local-runtime.mjs"),
 );
+// 安装器 import 了共享指纹模块 scripts/runtime-fingerprint.mjs，fixture 必须一并复制，
+// 否则安装器在输出失败报告前就会因 ERR_MODULE_NOT_FOUND 直接崩溃。
+fs.copyFileSync(
+  path.join(repoRoot, "scripts", "runtime-fingerprint.mjs"),
+  path.join(tempRoot, "scripts", "runtime-fingerprint.mjs"),
+);
+// 可选的指纹封装脚本按存在性复制，保持 fixture 对 scripts 目录文件增减稳健。
+const optionalFingerprintScript = path.join(repoRoot, "scripts", "print-runtime-build-id.mjs");
+if (fs.existsSync(optionalFingerprintScript)) {
+  fs.copyFileSync(
+    optionalFingerprintScript,
+    path.join(tempRoot, "scripts", "print-runtime-build-id.mjs"),
+  );
+}
 fs.cpSync(
   path.join(repoRoot, "native-helper"),
   path.join(tempRoot, "native-helper"),

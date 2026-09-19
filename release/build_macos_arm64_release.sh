@@ -27,42 +27,8 @@ PYTHON_URL="https://www.python.org/ftp/python/3.14.6/python-3.14.6-macos11.pkg"
 PYTHON_SHA256="d3c9fff52214847e4fab03e9eaf53dd2a8e51e3534aa0b61f201b749f86bef28"
 WHEEL_CACHE="$CACHE_DIR/python-wheels"
 
-RUNTIME_BUILD_ID="$(node - "$ROOT_DIR" <<'NODE'
-const fs = require("node:fs");
-const path = require("node:path");
-const { createHash } = require("node:crypto");
-const root = process.argv[2];
-const roots = ["extension", "native-helper", "plugins/tianyuan-browser-connector", "scripts/install-local-runtime.mjs", "skills/depreciation-capex-forecast", "skills/table-format"];
-const files = [];
-for (const relativeRoot of roots) {
-  const absoluteRoot = path.join(root, relativeRoot);
-  if (!fs.existsSync(absoluteRoot)) continue;
-  const stats = fs.statSync(absoluteRoot);
-  if (stats.isFile()) {
-    files.push(relativeRoot);
-    continue;
-  }
-  const visit = (directory) => {
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-      if (entry.name === ".DS_Store" || entry.name.startsWith("._") || entry.name === "runtime-compat.json") continue;
-      if (entry.isDirectory() && entry.name === "__pycache__") continue;
-      const absolutePath = path.join(directory, entry.name);
-      if (entry.isDirectory()) visit(absolutePath);
-      else if (entry.isFile() && path.relative(root, absolutePath) !== "native-helper/native_host.exe") files.push(path.relative(root, absolutePath));
-    }
-  };
-  visit(absoluteRoot);
-}
-const hash = createHash("sha256");
-for (const relativePath of files.sort()) {
-  hash.update(relativePath);
-  hash.update("\0");
-  hash.update(fs.readFileSync(path.join(root, relativePath)));
-  hash.update("\0");
-}
-process.stdout.write(hash.digest("hex"));
-NODE
-)"
+# 运行指纹统一由 scripts/runtime-fingerprint.mjs 计算，这里只调用封装脚本。
+RUNTIME_BUILD_ID="$(node "$ROOT_DIR/scripts/print-runtime-build-id.mjs" "$ROOT_DIR")"
 
 [[ "$(uname -s)" == "Darwin" ]] || { echo "macOS required" >&2; exit 1; }
 [[ "$(uname -m)" == "arm64" ]] || { echo "arm64 required" >&2; exit 1; }
@@ -100,6 +66,8 @@ cp "$STAGE/native-helper/runtime-compat.json" "$STAGE/extension/runtime-compat.j
 /usr/bin/ditto "$ROOT_DIR/skills" "$STAGE/skills"
 /usr/bin/ditto "$ROOT_DIR/plugins" "$STAGE/plugins"
 cp "$ROOT_DIR/scripts/install-local-runtime.mjs" "$STAGE/scripts/install-local-runtime.mjs"
+cp "$ROOT_DIR/scripts/runtime-fingerprint.mjs" "$STAGE/scripts/runtime-fingerprint.mjs"
+cp "$ROOT_DIR/scripts/print-runtime-build-id.mjs" "$STAGE/scripts/print-runtime-build-id.mjs"
 cp "$TYCPV_SOURCE" "$STAGE/runtime/tycpv-setup-0.1.0-macos-arm64.pkg"
 cp "$PYTHON_PKG" "$STAGE/runtime/python-3.14.6-macos11.pkg"
 cp "$WHEEL_CACHE"/openpyxl-3.1.5-*.whl "$WHEEL_CACHE"/et_xmlfile-2.0.0-*.whl "$WHEEL_CACHE"/python_docx-1.2.0-*.whl "$WHEEL_CACHE"/typing_extensions-*.whl "$WHEEL_CACHE"/lxml-6.1.0-*-macosx_*.whl "$STAGE/runtime/python-wheels/"
