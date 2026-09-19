@@ -71,7 +71,7 @@ for (const relativeRoot of roots) {
       if (entry.name === ".DS_Store" || entry.name.startsWith("._") || entry.name === "runtime-compat.json") continue;
       const absolutePath = path.join(directory, entry.name);
       if (entry.isDirectory()) visit(absolutePath);
-      else if (entry.isFile()) files.push(path.relative(root, absolutePath));
+      else if (entry.isFile() && path.relative(root, absolutePath) !== "native-helper/native_host.exe") files.push(path.relative(root, absolutePath));
     }
   };
   visit(absoluteRoot);
