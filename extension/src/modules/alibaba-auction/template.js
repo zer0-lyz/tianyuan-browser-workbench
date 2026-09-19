@@ -1,3 +1,6 @@
+// 说明：下面的省/市/区县下拉只保留与 DEFAULT_CONFIG 一致的静态占位 option，
+// 模块 initialize/activate 时 renderRegionOptions 总会用全国区域目录整体重建，
+// 占位项不会残留到交互阶段；区县空选项文案与重建后的“不限定区县”保持一致。
 export const alibabaAuctionTemplate = `
   <div class="page-heading alibaba-auction-heading">
     <div>
@@ -18,7 +21,7 @@ export const alibabaAuctionTemplate = `
     <div class="form-grid alibaba-auction-parameter-grid">
       <label><span>省份</span><select id="alibabaAuctionProvince" aria-label="省份"><option value="330000">浙江省</option></select></label>
       <label><span>城市</span><select id="alibabaAuctionCity" aria-label="城市"><option value="330100">杭州市</option></select></label>
-      <label><span>区县</span><select id="alibabaAuctionDistrict" aria-label="区县" disabled><option value="">全市</option></select></label>
+      <label><span>区县</span><select id="alibabaAuctionDistrict" aria-label="区县" disabled><option value="">不限定区县</option></select></label>
       <label><span>物业类型</span><select id="alibabaAuctionPropertyType">
         <option value="residential">住宅用房</option>
         <option value="commercial">商业房</option>
