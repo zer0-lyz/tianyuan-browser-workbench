@@ -343,7 +343,7 @@ function sourceBuildDigest() {
         if (entry.isDirectory() && entry.name === "__pycache__") continue;
         const absolutePath = path.join(directory, entry.name);
         if (entry.isDirectory()) visit(absolutePath);
-        else if (entry.isFile()) files.push(path.relative(repoRoot, absolutePath));
+        else if (entry.isFile() && path.relative(repoRoot, absolutePath) !== "native-helper/native_host.exe") files.push(path.relative(repoRoot, absolutePath));
       }
     };
     visit(absoluteRoot);
