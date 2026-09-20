@@ -348,6 +348,8 @@ let latestContext = null;
 let busy = false;
 let connectionCheckPromise = null;
 let connectionCheckProbe = false;
+let autoConnectionProbeTimer = null;
+let lastAutomaticConnectionProbeAt = 0;
 let cliAuthBusy = false;
 let cliAuthorizationUrl = "";
 let availableSubjects = [];
@@ -5079,6 +5081,7 @@ async function processConnectorActionQueue() {
 }
 
 async function performConnectionCheck({ probe = false } = {}) {
+  if (probe) lastAutomaticConnectionProbeAt = Date.now();
   const connectorCheck = checkConnectorConnection({ silent: true, lightweight: !probe });
   setConnection(elements.connectorStatus, "检查中", "idle");
   setConnection(elements.helperStatus, "检查中", "idle");
@@ -5096,7 +5099,7 @@ async function performConnectionCheck({ probe = false } = {}) {
     if (health.mcp?.connected) {
       setConnection(elements.mcpStatus, "已连接", "ok");
     } else if (health.mcp?.configured && !probe) {
-      setConnection(elements.mcpStatus, "已配置，待检查", "warn");
+      setConnection(elements.mcpStatus, "已配置，待验证", "idle");
     } else if (health.mcp?.configured) {
       setConnection(elements.mcpStatus, health.mcp.reason || "连接失败", "error");
     } else {
@@ -5105,13 +5108,16 @@ async function performConnectionCheck({ probe = false } = {}) {
 
     if (health.cli?.ok) {
       setConnection(elements.cliStatus, health.cli.version || "可用", "ok");
+    } else if (!probe && health.cli?.authenticated) {
+      setConnection(elements.cliStatus, "已授权，待验证", "idle");
     } else if (!probe && health.cli?.reason === "CLI_NOT_PROBED") {
-      setConnection(elements.cliStatus, "待主动检查", "warn");
+      setConnection(elements.cliStatus, "未检查授权状态", "warn");
     } else {
       setConnection(elements.cliStatus, health.cli?.reason || "不可用", "warn");
     }
 
     await connectorCheck;
+    if (!probe) scheduleAutomaticConnectionProbe();
     return health;
   } catch (error) {
     const message = error?.message || String(error);
@@ -5134,6 +5140,19 @@ async function performConnectionCheck({ probe = false } = {}) {
     setStatus(`helper 启动失败：${message}`, "error");
     return payload;
   }
+}
+
+function scheduleAutomaticConnectionProbe() {
+  const mcpUnverified = elements.mcpStatus?.textContent === "已配置，待验证";
+  const cliUnverified = elements.cliStatus?.textContent === "已授权，待验证";
+  if (!mcpUnverified && !cliUnverified) return;
+  if (Date.now() - lastAutomaticConnectionProbeAt < 60_000) return;
+  if (autoConnectionProbeTimer) return;
+  lastAutomaticConnectionProbeAt = Date.now();
+  autoConnectionProbeTimer = window.setTimeout(() => {
+    autoConnectionProbeTimer = null;
+    if (!busy) void checkConnections({ probe: true });
+  }, 250);
 }
 
 function checkConnections({ probe = false } = {}) {
@@ -6335,7 +6354,7 @@ async function bootstrapApplication() {
     await restoreRememberedMcpToken();
     setStatus("工作台已就绪，正在后台读取连接和页面状态…", "idle");
     window.setTimeout(() => {
-      void refreshAll({ probe: false }).catch((error) => {
+      void refreshAll({ probe: true }).catch((error) => {
         setStatus(`后台读取失败：${error?.message || String(error)}`, "error");
         console.error(error);
       });
