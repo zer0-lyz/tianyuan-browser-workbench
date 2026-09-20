@@ -171,6 +171,8 @@ print(json.dumps(result, ensure_ascii=False))
     for (const marker of ["legend-panel", "work-panel", "case-tab", "unlocated-tab", "case-search", "case-sort", "unlocated-list", "syncLabels", "markercluster", "marker-highlight", "focusSourceCodes", "setSelectedSourceCodes", "add-reference-marker", "reference-marker-list", "reference-marker-edit", "setReferenceMarkerEditing", "ZJ_LAND_MAP_DISTANCE_REQUEST", "renderDistanceResults", "haversineKm"]) {
       assert.match(map, new RegExp(marker), `map should include ${marker}`);
     }
+    assert.match(map, /server\.arcgisonline\.com\/ArcGIS\/rest\/services\/World_Street_Map/);
+    assert.doesNotMatch(map, /https:\/\/\{\{?s\}\}?\.tile\.openstreetmap\.org/);
     assert.match(map, /插入位置标记/);
     assert.match(map, /marker-dialog-backdrop/);
     assert.match(map, /marker-dialog-name/);

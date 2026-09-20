@@ -85,8 +85,27 @@ execFileSync(process.execPath, [
   },
   stdio: ["ignore", "pipe", "pipe"],
 });
-assert.equal(fs.readFileSync(staleTarget, "utf8"), "lite");
-assert.equal(fs.readFileSync(path.join(tempRoot, `tianyuan-workbench-v${version}-macos-arm64.zip`), "utf8"), "mac-lite");
+  assert.equal(fs.readFileSync(staleTarget, "utf8"), "fresh");
+  assert.equal(
+    fs.readFileSync(path.join(tempRoot, `tianyuan-workbench-v${version}-windows-x64-lite.zip`), "utf8"),
+    "lite",
+  );
+  assert.equal(fs.readFileSync(path.join(tempRoot, `tianyuan-workbench-v${version}-macos-arm64.zip`), "utf8"), "mac-full");
+  assert.equal(
+    fs.readFileSync(path.join(tempRoot, `tianyuan-workbench-v${version}-macos-arm64-lite.zip`), "utf8"),
+    "mac-lite",
+  );
+  const liteManifest = JSON.parse(
+    fs.readFileSync(path.join(tempRoot, "update-manifest.json"), "utf8"),
+  );
+  assert.equal(
+    liteManifest.assets["windows-x64"].fileName,
+    `tianyuan-workbench-v${version}-windows-x64-lite.zip`,
+  );
+  assert.equal(
+    liteManifest.assets["macos-arm64"].fileName,
+    `tianyuan-workbench-v${version}-macos-arm64-lite.zip`,
+  );
 
 fs.rmSync(tempRoot, { recursive: true, force: true });
 console.log("Update manifest tests passed.");
