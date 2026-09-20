@@ -1046,6 +1046,8 @@ test("custom output directory creates stable result and map artifacts", async ()
   assert.match(mapHtml, /reference-marker-edit/);
   assert.match(mapHtml, /setReferenceMarkerEditing/);
   assert.match(mapHtml, /marker\.dragging\?\.disable\(\)/);
+  assert.match(mapHtml, /server\.arcgisonline\.com\/ArcGIS\/rest\/services\/World_Street_Map/);
+  assert.doesNotMatch(mapHtml, /https:\/\/\{s\}\.tile\.openstreetmap\.org/);
   assert.match(mapHtml, /位置已锁定/);
   assert.match(mapHtml, /marker-dialog-name/);
   assert.match(mapHtml, /marker-dialog-note/);

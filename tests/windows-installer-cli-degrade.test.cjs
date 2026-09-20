@@ -27,7 +27,8 @@ assert.equal(installer.includes("待修复（未阻断工作台组件安装）")
 assert.equal(installer.includes("Remove-Item Env:TYCPV_BIN"), true);
 assert.equal(installer.includes("天源 CLI 状态：$TycpvStatus"), true);
 assert.equal(installer.includes("工作台组件更新完成，天源 CLI 待修复"), true);
-assert.equal(runtimeInstaller.includes("tycpvBin: process.env.TYCPV_BIN || undefined"), true);
+assert.equal(runtimeInstaller.includes("function resolveTycpvBin(runtimeConfigPath)"), true);
+assert.equal(runtimeInstaller.includes("tycpvBin: resolveTycpvBin(runtimeConfigPath)"), true);
 assert.equal(runtimeInstaller.includes("for (let attempt = 1; attempt <= 3; attempt += 1)"), true);
 assert.equal(runtimeInstaller.includes("fs.cpSync("), false);
 assert.equal(runtimeInstaller.includes("function copyTreeSync"), true);
