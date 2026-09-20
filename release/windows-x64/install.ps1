@@ -406,7 +406,12 @@ function Get-TycpvVersionInfo([string]$Candidate, $TrustedDirectories) {
   if (-not (Test-TycpvExecutableCandidate $Candidate $TrustedDirectories)) {
     return $null
   }
-  $Probe = Invoke-TycpvProbe $Candidate 5
+  $Probe = Invoke-TycpvProbe $Candidate 15
+  if ($Probe.TimedOut) {
+    # Cold node start under AV scanning can exceed the first window; retry once
+    # before declaring the CLI unavailable so a slow machine keeps its binding.
+    $Probe = Invoke-TycpvProbe $Candidate 15
+  }
   if (-not $Probe.Ok) {
     $script:TycpvProbeFailure = "$Candidate：$($Probe.Output)"
     return $null
@@ -726,7 +731,7 @@ try {
     $TycpvExe = $null
     $TycpvVersion = "不可用"
     $TycpvStatus = "待修复（未阻断工作台组件安装）"
-    $Warnings.Add("天源 CLI 未通过 5 秒 --help 探测；工作台组件继续安装，CLI 导出能力需后续修复。")
+    $Warnings.Add("天源 CLI 未通过 --help 探测；工作台组件继续安装，CLI 导出能力需后续修复。")
     Write-Warning "天源 CLI 当前不可用：$TycpvRepairMessage"
     Write-Warning "将继续更新浏览器扩展、Native Helper、Connector 和打印组件；仅 CLI 导出功能暂不可用。"
   }
