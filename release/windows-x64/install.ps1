@@ -1,5 +1,6 @@
-param(
-  [switch]$Agent
+﻿param(
+  [switch]$Agent,
+  [string]$InstallRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -8,7 +9,30 @@ $ErrorActionPreference = "Stop"
 $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
 $RootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$InstallRoot = Join-Path $env:LOCALAPPDATA "TianyuanWorkbench"
+$DefaultInstallRoot = Join-Path $env:LOCALAPPDATA "TianyuanWorkbench"
+if (-not $InstallRoot -and $env:TIANYUAN_INSTALL_ROOT) {
+  $InstallRoot = [string]$env:TIANYUAN_INSTALL_ROOT
+}
+if (-not $InstallRoot -and -not ($Agent.IsPresent -or $env:TIANYUAN_AGENT_MODE -eq "1")) {
+  Write-Host "安装根目录（扩展、组件都将安装在此目录下；直接回车 = 默认 %LOCALAPPDATA%\TianyuanWorkbench）"
+  $InputRoot = Read-Host "安装根目录"
+  $InputRoot = $InputRoot.Trim('"', ' ')
+  if ($InputRoot) { $InstallRoot = $InputRoot }
+}
+if (-not $InstallRoot) {
+  $InstallRoot = $DefaultInstallRoot
+}
+try {
+  $InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
+  New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
+  $InstallRootProbe = Join-Path $InstallRoot ".tianyuan-write-test"
+  Set-Content -LiteralPath $InstallRootProbe -Value "ok" -Encoding ASCII
+  Remove-Item -LiteralPath $InstallRootProbe -Force
+}
+catch {
+  Write-Warning "安装根目录不可用（$($_.Exception.Message)），回退默认目录：$DefaultInstallRoot"
+  $InstallRoot = $DefaultInstallRoot
+}
 $ExtensionDir = Join-Path $InstallRoot "projects\天源评估系统\extension"
 $NativeHelperDir = Join-Path $InstallRoot "native-helper"
 $NativeHostExe = Join-Path $NativeHelperDir "native_host.exe"
@@ -800,6 +824,9 @@ try {
     Remove-Item Env:TYCPV_BIN -ErrorAction SilentlyContinue
   }
   $env:TIANYUAN_UPDATE_DEFER_COMPLETE = "1"
+  $env:TIANYUAN_PROJECT_RUNTIME_ROOT = Join-Path $InstallRoot "projects\天源评估系统"
+  $env:TIANYUAN_NATIVE_RUNTIME_ROOT = Join-Path $InstallRoot "native-helper"
+  $env:TIANYUAN_PRINT_SKILLS_ROOT = Join-Path $InstallRoot "print-format-skills"
   $InstallJson = (& $NodeForInstall (Join-Path $RootDir "scripts\install-local-runtime.mjs") 2>&1 | Out-String).Trim()
   if ($LASTEXITCODE -ne 0) {
     try {
@@ -967,6 +994,13 @@ try {
   } else {
     Write-Warning "工作台组件更新完成，但天源 CLI 仍需单独修复。"
     Write-UpdateStatus "complete" 100 "工作台组件更新完成，天源 CLI 待修复"
+  }
+  if (-not $AgentMode) {
+    Set-Clipboard -Value $ExtensionDir
+    Start-Process explorer.exe -ArgumentList ('"' + $ExtensionDir + '"')
+    $lnk = Join-Path ([Environment]::GetFolderPath('Desktop')) "天源工作台-浏览器扩展.lnk"
+    $ws = New-Object -ComObject WScript.Shell; $sc = $ws.CreateShortcut($lnk); $sc.TargetPath = $ExtensionDir; $sc.Save()
+    Write-Host "扩展目录已复制到剪贴板，并在桌面创建快捷方式：$lnk"
   }
   if (-not $UpdateMode -and -not $AgentMode -and $BrowserExe) {
     Start-Process "explorer.exe" -ArgumentList "`"$ExtensionDir`""

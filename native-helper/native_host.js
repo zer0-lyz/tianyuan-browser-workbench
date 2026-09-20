@@ -1649,14 +1649,23 @@ function startCliLogin() {
 
   const sessionId = randomUUID();
   const launch = processLauncher.commandLaunchSpec(CLI_BIN, ["login"]);
+  let spawnCommand = launch.command;
+  let spawnArgs = launch.args;
+  let spawnOptions = { detached: true, stdio: ["ignore", "pipe", "pipe"], env: launch.env, windowsHide: true };
+  if (process.platform === "win32") {
+    // The CLI needs a REAL console to run its login flow: with piped or
+    // ignored stdio it exits 0 silently before printing the authorization
+    // URL. `start` opens a dedicated visible console where the CLI prints
+    // the URL, opens the default browser itself, and waits for the local
+    // callback; /wait keeps this wrapper process alive so the session stays
+    // trackable while the user completes authorization.
+    spawnCommand = process.env.ComSpec || "cmd.exe";
+    spawnArgs = ["/d", "/s", "/c", "start", "天源 CLI 授权", "/wait", launch.command].concat(launch.args);
+    spawnOptions = { detached: true, stdio: "ignore", env: launch.env, windowsHide: false };
+  }
   let child;
   try {
-    child = spawn(launch.command, launch.args, {
-      detached: true,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: launch.env,
-      windowsHide: true,
-    });
+    child = spawn(spawnCommand, spawnArgs, spawnOptions);
   } catch (error) {
     return Promise.resolve({
       ok: false,
@@ -1685,6 +1694,11 @@ function startCliLogin() {
     if (timer) clearTimeout(timer);
     callback(value);
   };
+
+  if (process.platform === "win32") {
+    const status = writeCliLoginStatus({ ...started, state: "authorization_required", authenticated: false });
+    return Promise.resolve({ ok: true, action: "cli_login", state: "authorization_required", sessionId, pid: child.pid, authorizationUrl: "", security: { credentialsReturned: false }, statusUpdatedAt: status.updatedAt });
+  }
 
   return new Promise((resolve) => {
     const onOutput = (chunk) => {

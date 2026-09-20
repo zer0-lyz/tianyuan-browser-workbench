@@ -31,9 +31,9 @@ const runtimeProjectRoot = process.env.TIANYUAN_PROJECT_RUNTIME_ROOT || (isWindo
 const nativeRuntimeRoot = process.env.TIANYUAN_NATIVE_RUNTIME_ROOT || (isWindows
   ? path.join(localAppData, "TianyuanWorkbench", "native-helper")
   : path.join(os.homedir(), ".tianyuan-workbench", "native-helper"));
-const printSkillsRoot = isWindows
+const printSkillsRoot = process.env.TIANYUAN_PRINT_SKILLS_ROOT || (isWindows
   ? path.join(localAppData, "TianyuanWorkbench", "print-format-skills")
-  : path.join(os.homedir(), ".tianyuan-workbench", "dependencies", PROJECT_NAME, "print-format-skills");
+  : path.join(os.homedir(), ".tianyuan-workbench", "dependencies", PROJECT_NAME, "print-format-skills"));
 const userPluginRoot = path.join(os.homedir(), "plugins", "tianyuan-browser-connector");
 const codexPluginRoot = path.join(
   os.homedir(),

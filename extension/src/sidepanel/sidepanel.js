@@ -3177,7 +3177,10 @@ function normalizeErrorItems(items) {
 
 async function openConnectionPage(url, label) {
   try {
-    await chrome.tabs.create({ url, active: true });
+    // Keep the browser tab in the background: activating a new tab can tear
+    // down and recreate this side panel document, which reloads it back to
+    // the home route and closes the modal that was just opened.
+    await chrome.tabs.create({ url, active: false });
     return { ok: true };
   } catch (error) {
     const reason = error?.message || String(error);
@@ -3303,27 +3306,23 @@ async function authorizeCli() {
       await checkConnections({ probe: true });
       return;
     }
-    if (!result.authorizationUrl) throw new Error("CLI_AUTHORIZATION_URL_MISSING");
-    setCliAuthorizationFallback(result.authorizationUrl);
-    let page;
-    try {
-      page = await focusOrOpenCliAuthorizationPage(result.authorizationUrl);
-    } catch (error) {
-      page = { ok: false, reason: error?.message || String(error) };
-    }
-    setConnection(elements.cliStatus, "等待授权", "warn");
-    if (page.ok) {
-      updateCliStatusMessage(
-        page.reused
-          ? "已切换到现有 CLI 授权页，等待用户完成授权..."
-          : "真实 CLI 授权页已打开，等待用户完成授权...",
-        "idle",
-      );
+    if (result.authorizationUrl) {
+      setCliAuthorizationFallback(result.authorizationUrl);
+      let page;
+      try {
+        page = await focusOrOpenCliAuthorizationPage(result.authorizationUrl);
+      } catch (error) {
+        page = { ok: false, reason: error?.message || String(error) };
+      }
+      setConnection(elements.cliStatus, "等待授权", "warn");
+      if (page.ok) {
+        updateCliStatusMessage(page.reused ? "已切换到现有 CLI 授权页，等待用户完成授权..." : "真实 CLI 授权页已打开，等待用户完成授权...", "idle");
+      } else {
+        updateCliStatusMessage("授权页自动打开失败：" + (page.reason || "") + "。请点击下方链接或手动执行：tycpv login", "warn");
+      }
     } else {
-      updateCliStatusMessage(
-        `授权页自动打开失败：${page.reason}。请点击下方链接或手动执行：tycpv login`,
-        "warn",
-      );
+      setConnection(elements.cliStatus, "等待授权", "warn");
+      updateCliStatusMessage("已在新控制台窗口启动 tycpv login，浏览器会自动打开授权页；完成授权后此处将自动变为已授权。", "idle");
     }
     await pollCliAuthorization(result.sessionId);
   } catch (error) {
@@ -5158,13 +5157,23 @@ function checkConnections({ probe = false } = {}) {
 }
 
 async function openMcpTokenDialog() {
-  const page = await openConnectionPage(MCP_CONNECT_URL, "MCP 接入");
+  // Show the dialog synchronously in this panel document first. Opening the
+  // MCP page before showModal() used to deactivate the side panel's tab
+  // (chrome.tabs.create with active: true), which can recreate the panel
+  // document — and a recreated panel boots back to the home route
+  // (bootstrapApplication renders "home" for an empty hash) — so the user
+  // saw the panel flash and land on the home page instead of this dialog.
+  try {
+    elements.mcpTokenDialog.showModal();
+  } catch (error) {
+    // Already open (double click): reuse the dialog that is on screen.
+  }
   elements.mcpTokenInput.value = "";
   elements.rememberMcpToken.checked = mcpTokenPersisted;
-  elements.mcpTokenDialog.showModal();
   elements.mcpTokenInput.focus();
+  const page = await openConnectionPage(MCP_CONNECT_URL, "MCP 接入");
   if (page.ok) {
-    setStatus("MCP 接入页已打开；完成配置后返回此面板粘贴 token", "idle");
+    setStatus("MCP 接入页已在后台标签页打开；切换过去完成配置后返回此面板粘贴 token", "idle");
   }
 }
 
