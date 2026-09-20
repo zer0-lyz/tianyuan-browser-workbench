@@ -259,9 +259,9 @@ def _build_basic_map_assets(rows, output_path):
   <script src="./{Path(points_js).name}"></script>
   <script>
     const map = L.map('map', {{ preferCanvas: true }}).setView([29.2, 120.2], 8);
-    L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{{z}}/{{y}}/{{x}}', {{
       maxZoom: 19,
-      attribution: '&copy; OpenStreetMap contributors'
+      attribution: '&copy; Esri, Maxar, Earthstar Geographics'
     }}).addTo(map);
 
     const cluster = L.markerClusterGroup({{ disableClusteringAtZoom: 16 }});
@@ -573,7 +573,7 @@ def build_map_assets(rows, output_path):
     const DATA = __DATA__;
     const map = L.map('map', { zoomControl: false }).setView([DATA.center.lat, DATA.center.lon], 8);
     L.control.zoom({ position: 'bottomright' }).addTo(map);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: '&copy; Esri, Maxar, Earthstar Geographics' }).addTo(map);
     const cluster = L.markerClusterGroup({ disableClusteringAtZoom: 15, spiderfyOnMaxZoom: true, showCoverageOnHover: false, maxClusterRadius: 48 });
     const bounds = [], markerRecords = [], pointMarkers = [];
     function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
