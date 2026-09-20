@@ -508,13 +508,29 @@ function writeMacNativeHost(nodeBin, pythonBin) {
   return manifestPath;
 }
 
+function resolveTycpvBin(runtimeConfigPath) {
+  if (process.env.TYCPV_BIN) return process.env.TYCPV_BIN;
+  // Preserve a previously verified CLI binding when the installer could not
+  // re-probe it this run (e.g. a transient --help timeout); dropping it would
+  // silently disable CLI export on machines where the CLI still works.
+  try {
+    const existing = JSON.parse(fs.readFileSync(runtimeConfigPath, "utf8"));
+    if (typeof existing.tycpvBin === "string" && fs.existsSync(existing.tycpvBin)) {
+      return existing.tycpvBin;
+    }
+  } catch {
+    // missing or unreadable config: nothing to preserve
+  }
+  return undefined;
+}
+
 function writeWindowsNativeHost(nodeBin, pythonBin) {
   const launcherPath = path.join(nativeRuntimeRoot, "native_host_launcher.cmd");
   const logPath = path.join(nativeRuntimeRoot, "native_host.log");
   const runtimeConfigPath = path.join(nativeRuntimeRoot, "runtime-config.json");
   fs.writeFileSync(runtimeConfigPath, JSON.stringify({
     version: 1,
-    tycpvBin: process.env.TYCPV_BIN || undefined,
+    tycpvBin: resolveTycpvBin(runtimeConfigPath),
     pythonBin,
     printSkillsDir: printSkillsRoot,
     depreciationSkillDir: path.join(runtimeProjectRoot, "skills", "depreciation-capex-forecast"),

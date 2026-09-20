@@ -61,7 +61,10 @@ function findPackage(patterns, targetFileName, { includeLite = null } = {}) {
 }
 
 function releaseAsset(patterns, key, options = {}) {
-  const fileName = `tianyuan-workbench-v${versionConfig.productVersion}-${key}.zip`;
+  // In lite mode the canonical copy holds lite content; name it with the -lite
+  // suffix so the release page never offers lite bytes under a full-package name.
+  const liteSuffix = options.includeLite === true ? "-lite" : "";
+  const fileName = `tianyuan-workbench-v${versionConfig.productVersion}-${key}${liteSuffix}.zip`;
   const source = findPackage(patterns, fileName, options);
   if (!source) return null;
   const targetPath = path.join(distRoot, fileName);
