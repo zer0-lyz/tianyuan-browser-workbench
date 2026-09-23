@@ -13,10 +13,13 @@ const sidepanel = fs.readFileSync(path.join(extensionRoot, "src", "sidepanel", "
 const updatesModule = fs.readFileSync(path.join(extensionRoot, "src", "modules", "updates", "module.js"), "utf8");
 const updatesTemplate = fs.readFileSync(path.join(extensionRoot, "src", "modules", "updates", "template.js"), "utf8");
 const feedbackModule = fs.readFileSync(path.join(extensionRoot, "src", "modules", "feedback", "module.js"), "utf8");
+const mapSettingsModule = fs.readFileSync(path.join(extensionRoot, "src", "modules", "map-settings", "module.js"), "utf8");
 const feedbackTemplate = fs.readFileSync(path.join(extensionRoot, "src", "modules", "feedback", "template.js"), "utf8");
 const tableFormatModule = fs.readFileSync(path.join(extensionRoot, "src", "modules", "table-format", "module.js"), "utf8");
 const tableFormatTemplate = fs.readFileSync(path.join(extensionRoot, "src", "modules", "table-format", "template.js"), "utf8");
 const tableFormatScript = fs.readFileSync(path.join(repoRoot, "skills", "table-format", "scripts", "format_word_tables.py"), "utf8");
+const detailWorkflowModule = fs.readFileSync(path.join(extensionRoot, "src", "modules", "detail-table-workflow", "module.js"), "utf8");
+const detailWorkflowTemplate = fs.readFileSync(path.join(extensionRoot, "src", "modules", "detail-table-workflow", "template.js"), "utf8");
 const feedbackConfig = JSON.parse(fs.readFileSync(path.join(extensionRoot, "feedback.json"), "utf8"));
 const moduleRegistry = fs.readFileSync(path.join(extensionRoot, "src", "core", "module-registry.js"), "utf8");
 const legacyFeatureModules = fs.readFileSync(path.join(extensionRoot, "src", "app", "legacy-feature-modules.js"), "utf8");
@@ -63,7 +66,7 @@ for (const relativePath of referencedManifestFiles()) {
   assert.equal(fs.existsSync(path.join(extensionRoot, relativePath)), true, `manifest file missing: ${relativePath}`);
 }
 
-const ids = [html, updatesTemplate, feedbackTemplate, tableFormatTemplate]
+const ids = [html, updatesTemplate, feedbackTemplate, tableFormatTemplate, detailWorkflowTemplate]
   .flatMap((source) => [...source.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]));
 assert.equal(new Set(ids).size, ids.length, "sidepanel HTML contains duplicate ids");
 const referencedIds = [sidepanel, updatesModule, feedbackModule, moduleRegistry]
@@ -81,6 +84,14 @@ assert.equal(quotedConstant(nativeHost, "CONNECTOR_PROTOCOL_VERSION"), quotedCon
 assert.equal(manifest.version, versionConfig.chromeVersion);
 assert.equal(manifest.version_name, versionConfig.versionName);
 assert.equal(html.includes("connection-status-summary-toggle"), false);
+assert.match(nativeHost, /chooseManagedOutputDirectory/);
+for (const directoryName of ["浙江土地成交公示", "阿里司法拍卖", "安居客物业案例", "表格格式设置"]) {
+  assert.match(nativeHost, new RegExp(directoryName));
+}
+assert.match(nativeHost, /outputDirectory: selectedPath/);
+assert.match(tableFormatModule, /result\.outputDirectory \|\| result\.path \|\| result\.paths\?\.\[0\]/);
+assert.match(detailWorkflowModule, /directoryName: "明细表导出与整理"/);
+assert.match(fs.readFileSync(path.join(extensionRoot, "src", "modules", "declaration-table-workflow", "module.js"), "utf8"), /directoryName: "申报表导出与整理"/);
 assert.match(versionConfig.productVersion, /^\d+\.\d+\.\d+$/);
 assert.equal(versionConfig.repository, "zer0-lyz/tianyuan-browser-workbench-releases");
 
@@ -98,6 +109,7 @@ for (const resource of manifest.web_accessible_resources || []) {
 assert.equal(installer.includes("runtime-fingerprint"), true);
 assert.equal(fs.existsSync(path.join(repoRoot, "scripts", "runtime-fingerprint.mjs")), true);
 assert.equal(manifestGenerator.includes("runtime-fingerprint"), true);
+assert.equal(manifestGenerator.includes('runtimeBuildKind: "release"'), true);
 assert.equal(runtimeFingerprint.includes('"skills/depreciation-capex-forecast"'), true);
 assert.equal(runtimeFingerprint.includes('"skills/table-format"'), true);
 assert.equal(runtimeFingerprint.includes("__pycache__"), true);
@@ -105,6 +117,8 @@ assert.equal(runtimeFingerprint.includes("native_host.exe"), true);
 assert.equal(runtimeFingerprint.includes('"skills",\n'), false);
 assert.equal(installer.includes(".staging-"), true);
 assert.equal(installer.includes("runtimeBuildId"), true);
+assert.equal(installer.includes('runtimeBuildKind: "local"'), true);
+assert.equal(updateChecker.includes("normalizeRuntimeBuildKind"), true);
 assert.equal(installer.includes("unblockWindowsFile"), true);
 assert.equal(installer.includes("WINDOWS_NATIVE_HOST_EXECUTION_BLOCKED"), true);
 assert.equal(windowsInstaller.includes("function Unblock-WorkbenchPath"), true);
@@ -113,6 +127,8 @@ assert.equal(windowsInstaller.includes("Unblock-WorkbenchPath $NativeHelperDir")
 assert.equal(sidepanel.includes("x-tianyuan-runtime-build-id"), true);
 assert.equal(sidepanel.includes('runtimeContractMissing ? "路径不正确"'), true);
 assert.equal(sidepanel.includes("当前扩展加载路径不正确"), true);
+assert.equal(sidepanel.includes("mcpProbeVerified"), true);
+assert.equal(sidepanel.includes("cliProbeVerified"), true);
 assert.equal(sidepanel.includes('const MCP_CONNECT_URL = "https://mcp.zhrdc.net/connect?source=valuation"'), true);
 assert.equal(sidepanel.includes("CLI_AUTH_URL"), false);
 assert.equal(sidepanel.includes("authorizationUrl"), true);
@@ -160,6 +176,11 @@ const stableSection = html.slice(
 );
 const buildingSection = html.slice(html.indexOf('id="moduleSectionBuilding"'));
 assert.equal(stableSection.includes('id="openTableFormat"'), true);
+assert.equal(stableSection.includes('id="openMapSettings"'), false);
+assert.equal(html.includes('id="basicSettings"'), false);
+const connectionBar = html.slice(html.indexOf('class="connection-bar"'), html.indexOf('</nav>', html.indexOf('class="connection-bar"')));
+assert.equal(connectionBar.includes('id="openMapSettings"'), true);
+assert.equal(connectionBar.includes('id="mapSettingsStatus"'), true);
 assert.equal(stableSection.includes('id="openAnjukeProperty"'), false);
 assert.equal(stableSection.includes('id="openDepreciationCapex"'), false);
 assert.equal(buildingSection.includes('id="openAnjukeProperty"'), true);
@@ -182,10 +203,14 @@ assert.equal(updatesModule.includes("get_workbench_update_status"), true);
 assert.equal(updatesModule.includes("runtime.reload"), true);
 assert.equal(updatesModule.includes("maybeAutoCheck"), true);
 assert.equal(updatesModule.includes("cacheMatchesRuntime"), true);
+assert.equal(updatesModule.includes("currentRuntimeBuildKind"), true);
 assert.equal(sidepanel.includes("check_github_update"), false);
 assert.equal(sidepanel.includes("function checkForUpdates"), false);
 assert.equal(sidepanel.includes("moduleRegistry.register(updatesModule)"), true);
 assert.equal(sidepanel.includes("moduleRegistry.register(feedbackModule)"), true);
+assert.equal(sidepanel.includes("moduleRegistry.register(mapSettingsModule)"), true);
+assert.equal(mapSettingsModule.includes("countInModuleBadge: false"), true);
+assert.equal(html.includes('id="page-map-settings"'), true);
 assert.equal(sidepanel.includes("moduleRegistry.register(fileArchiveModule)"), false);
 assert.equal(html.includes('id="openFileArchive"'), false);
 assert.equal(html.includes('id="page-file-archive"'), false);
@@ -199,6 +224,15 @@ assert.equal(sidepanel.includes("await Promise.all(["), true);
 assert.equal(sidepanel.includes("void refreshAll({ probe: true }).catch"), true);
 assert.equal(sidepanel.includes("function scheduleAutomaticConnectionProbe()"), true);
 assert.equal(sidepanel.includes("scheduleAutomaticConnectionProbe()"), true);
+assert.equal(sidepanel.includes("moduleRegistry.register(detailTableWorkflowModule)"), true);
+assert.equal(sidepanel.includes('on(elements.runExportDetail, "click"'), false);
+assert.equal(detailWorkflowModule.includes('action: "run_detail_table_workflow"'), true);
+assert.equal(detailWorkflowModule.includes('route: "export-detail"'), true);
+assert.equal(detailWorkflowTemplate.includes('id="detailTableWorkflowModeAfterExport"'), true);
+assert.equal(detailWorkflowTemplate.includes('id="detailTableWorkflowModeManual"'), true);
+assert.equal(detailWorkflowTemplate.includes('id="detailTableWorkflowRestoreFormulas"'), true);
+assert.equal(detailWorkflowTemplate.includes('id="detailTableWorkflowApplyFormat"'), true);
+assert.equal(detailWorkflowTemplate.includes('id="runExportDetail"'), true);
 assert.equal(fs.existsSync(path.join(repoRoot, "native-helper", "codex_catalog.js")), true);
 assert.equal(html.includes('id="agentBindingProviderSelect"'), true);
 assert.equal(html.includes('id="saveAgentBinding"'), true);
@@ -239,12 +273,15 @@ assert.equal(legacyFeatureModules.includes('id: "batch-cleanup"'), true);
 assert.equal(nativeHost.includes('message?.action === "check_github_update"'), true);
 assert.equal(nativeHost.includes('message?.action === "test_workbench_update"'), true);
 assert.equal(nativeHost.includes('message?.action === "install_workbench_update"'), true);
+assert.equal(nativeHost.includes("currentRuntimeBuildKind"), true);
 assert.equal(nativeHost.includes('message?.action === "get_workbench_update_status"'), true);
 assert.equal(nativeHost.includes('message?.action === "cli_login"'), true);
 assert.equal(nativeHost.includes('message?.action === "cli_login_status"'), true);
 assert.equal(nativeHost.includes("class NativeDetailTableExportApi"), true);
 assert.equal(nativeHost.includes("runDirectCliExport"), true);
 assert.equal(nativeHost.includes("tokenUsed: true"), true);
+assert.equal(nativeHost.includes('message?.action === "run_detail_table_workflow"'), true);
+assert.equal(nativeHost.includes('action: "run_detail_table_workflow"'), true);
 assert.equal(nativeHost.includes('stdio: ["ignore", "pipe", "pipe"]'), true);
 assert.equal(nativeHost.includes("CLI_AUTHORIZATION_URL_TIMEOUT"), true);
 assert.equal(updateChecker.includes("api.github.com"), true);
@@ -262,6 +299,8 @@ assert.equal(updateInstaller.includes("UPDATE_DOWNLOAD_SIZE_MISMATCH"), true);
 assert.equal(declarationPrintScript.includes("autoPageBreaks = False"), true);
 assert.equal(declarationPrintScript.includes("fitToWidth = 1"), true);
 assert.equal(declarationPrintScript.includes("fitToHeight = 0"), true);
+assert.equal(declarationPrintScript.includes("restore_or_create_visible_sheet"), true);
+assert.equal(declarationPrintScript.includes("fallback_visible="), true);
 assert.equal(detailPrintScript.includes("autoPageBreaks = False"), true);
 assert.equal(detailPrintScript.includes("fitToPage = True"), true);
 assert.equal(detailPrintScript.includes("fitToWidth = 1"), true);
@@ -279,6 +318,14 @@ assert.equal(installer.includes('"src/modules/updates/template.js"'), true);
 assert.equal(installer.includes('"feedback.json"'), true);
 assert.equal(installer.includes('"src/modules/feedback/template.js"'), true);
 assert.equal(runtimeFingerprint.includes('entry.name === ".DS_Store"'), true);
+assert.equal(installer.includes('"src/modules/detail-table-workflow/module.js"'), true);
+assert.equal(installer.includes('"src/modules/detail-table-workflow/template.js"'), true);
+assert.equal(installer.includes('"src/modules/detail-table-workflow/styles.css"'), true);
+assert.equal(installer.includes('"src/modules/declaration-table-workflow/module.js"'), true);
+assert.equal(installer.includes('"src/modules/declaration-table-workflow/template.js"'), true);
+assert.equal(installer.includes('"src/modules/declaration-table-workflow/styles.css"'), true);
+assert.equal(nativeHost.includes('message?.action === "run_declaration_table_workflow"'), true);
+assert.equal(nativeHost.includes('action: "run_declaration_table_workflow"'), true);
 assert.equal(nativeInstaller.includes("update_checker.js"), true);
 assert.equal(nativeInstaller.includes("update_installer.js"), true);
 assert.equal(nativeInstaller.includes("connector_bridge.js"), true);

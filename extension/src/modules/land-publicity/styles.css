@@ -123,6 +123,48 @@
   flex: 1;
 }
 
+[data-module-id="land-publicity"] .land-publicity-history-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+[data-module-id="land-publicity"] .land-publicity-history-refresh {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border, #e5e9f0);
+}
+
+[data-module-id="land-publicity"] .land-publicity-history-refresh label {
+  color: var(--muted, #667085);
+  font-size: 12px;
+}
+
+[data-module-id="land-publicity"] .land-publicity-network-action {
+  border-color: #b8cdfb;
+  background: #f7faff;
+}
+
+[data-module-id="land-publicity"] .land-publicity-history-controls select {
+  min-width: 260px;
+  flex: 1 1 300px;
+}
+
+[data-module-id="land-publicity"] .land-publicity-history-status[data-kind="error"] {
+  color: #b42318;
+}
+
+[data-module-id="land-publicity"] .land-publicity-history-status[data-kind="ok"] {
+  color: #027a48;
+}
+
 [data-module-id="land-publicity"] .land-publicity-progress-counts {
   justify-content: flex-start;
   flex-wrap: wrap;

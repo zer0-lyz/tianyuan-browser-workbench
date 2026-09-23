@@ -331,6 +331,7 @@ function createWorkbenchUpdater({
         currentVersion: input.currentVersion,
         currentBuildNumber: input.currentBuildNumber,
         currentRuntimeBuildId: input.currentRuntimeBuildId,
+        currentRuntimeBuildKind: input.currentRuntimeBuildKind,
         platform: process.platform,
         architecture: process.arch,
       }, { fetchImpl });
@@ -450,6 +451,7 @@ function createWorkbenchUpdater({
         currentVersion: input.currentVersion,
         currentBuildNumber: input.currentBuildNumber,
         currentRuntimeBuildId: input.currentRuntimeBuildId,
+        currentRuntimeBuildKind: input.currentRuntimeBuildKind,
         platform: process.platform,
         architecture: process.arch,
       }, { fetchImpl });

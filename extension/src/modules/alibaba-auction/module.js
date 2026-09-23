@@ -391,6 +391,9 @@ const DEFAULT_CONFIG = {
   endDate: "",
   outputDirectory: "",
   generateMap: true,
+  historyDirectory: "",
+  historyPath: "",
+  historyRefresh: true,
 };
 
 const ALIBABA_PARAMETER_SNAPSHOT_FIELDS = [
@@ -419,6 +422,7 @@ function elementMap(documentRef) {
     "alibabaAuctionEndDate", "alibabaAuctionSourceUrl", "openAlibabaAuctionSource", "runAlibabaAuction",
     "saveAlibabaAuctionParams", "resetAlibabaAuctionParams", "alibabaAuctionParameterState", "alibabaAuctionParameterMessage",
     "alibabaAuctionOutputDirectory", "chooseAlibabaAuctionOutput", "alibabaAuctionGenerateMap",
+    "alibabaAuctionHistoryDirectory", "chooseAlibabaAuctionHistoryDirectory", "loadAlibabaAuctionHistoryCatalog", "alibabaAuctionHistorySelect", "loadAlibabaAuctionHistory", "alibabaAuctionRefreshHistory", "alibabaAuctionHistoryStatus", "runAlibabaAuctionHistory",
     "alibabaAuctionResultCount", "alibabaAuctionResultStatus", "openAlibabaAuctionResult", "exportAlibabaAuctionExcel", "openAlibabaAuctionExcel", "openAlibabaAuctionMap", "pauseAlibabaAuction", "stopAlibabaAuction",
     "clearAlibabaAuctionResults", "alibabaAuctionResultMessage", "alibabaAuctionProgressPhase",
     "alibabaAuctionProgressPercent", "alibabaAuctionProgressBar", "alibabaAuctionProgressFetched",
@@ -431,6 +435,10 @@ function setMessage(element, text, kind = "") {
   if (!element) return;
   element.textContent = text;
   element.dataset.kind = kind;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character]));
 }
 
 function usableDistricts(cityRegion) {
@@ -473,6 +481,9 @@ function normalizeConfig(value = {}) {
     endDate: String(source.endDate || "").trim(),
     outputDirectory: String(source.outputDirectory || "").trim(),
     generateMap: source.generateMap !== false,
+    historyDirectory: String(source.historyDirectory || "").trim(),
+    historyPath: String(source.historyPath || "").trim(),
+    historyRefresh: source.historyRefresh !== false,
   };
 }
 
@@ -533,15 +544,18 @@ async function waitForRunResume(control, emit) {
 
 function extractAlibabaListPage() {
   const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
+  const isVisible = (element) => {
+    if (!element) return false;
+    for (let current = element; current; current = current.parentElement) {
+      if (current.hasAttribute?.("hidden") || current.getAttribute?.("aria-hidden") === "true") return false;
+      const style = window.getComputedStyle(current);
+      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
+    }
+    const rect = element.getBoundingClientRect?.();
+    return rect ? rect.width > 0 && rect.height > 0 : element.getClientRects?.().length > 0;
+  };
   const items = [];
   const seen = new Set();
-  const isVisible = (element) => {
-    if (!element || element.closest('[aria-hidden="true"]')) return false;
-    const style = window.getComputedStyle(element);
-    if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
-    const rect = element.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
-  };
   const isRecommended = (element) => {
     let current = element;
     for (let depth = 0; current && depth < 8; depth += 1, current = current.parentElement) {
@@ -562,21 +576,36 @@ function extractAlibabaListPage() {
     }
     if (!text) continue;
     seen.add(href);
-    items.push({ href, text });
+    const listedAmount = text.match(/(?:成交价|拍下价|最终成交价|成交金额|当前价|最终价)\s*[：:]?\s*[¥￥]?\s*[\d,]+(?:\.\d+)?\s*(?:万|亿|元)?/i)?.[0] || "";
+    const listedBidCount = Number(text.match(/(\d+)\s*次出价/i)?.[1] || 0);
+    items.push({ href, text, listedAmount, listedBidCount, listedHasEndedText: /已结束/.test(text), listedHasExplicitSoldPrice: /(?:成交价|拍下价|最终成交价|成交金额)/.test(text) });
   }
   const body = document.body?.innerText || "";
   const totalMatch = body.match(/共找到\s*([\d,]+)\s*条/);
+  const verificationRequired = [...document.querySelectorAll('[class*="captcha"],[id*="captcha"],[class*="slider"],[id*="slider"],[class*="verify"],[id*="verify"]')].some(isVisible)
+    || /验证码|滑块|安全验证|访问验证|人机验证|请完成.{0,8}验证/.test(body);
   return {
     url: location.href,
     title: document.title,
     total: totalMatch ? totalMatch[1] : "",
     items,
     pageText: clean(body.slice(0, 1200)),
+    verificationRequired,
   };
 }
 
-function extractAlibabaDetailPage() {
+async function extractAlibabaDetailPage() {
   const clean = (value) => String(value || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+  const isVisible = (element) => {
+    if (!element) return false;
+    for (let current = element; current; current = current.parentElement) {
+      if (current.hasAttribute?.("hidden") || current.getAttribute?.("aria-hidden") === "true") return false;
+      const style = window.getComputedStyle(current);
+      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
+    }
+    const rect = element.getBoundingClientRect?.();
+    return rect ? rect.width > 0 && rect.height > 0 : element.getClientRects?.().length > 0;
+  };
   const coordinate = (value, minimum, maximum) => {
     const number = Number(String(value || "").replace(/,/g, "").trim());
     return Number.isFinite(number) && number >= minimum && number <= maximum ? number : null;
@@ -604,11 +633,14 @@ function extractAlibabaDetailPage() {
     return null;
   };
   const extractBuildingArea = (value) => {
-    const text = clean(value).replace(/[，]/g, ",").replace(/[：]/g, ":");
+    const text = clean(value).replace(/[，]/g, ",").replace(/[：]/g, ":")
+      .replace(/建\s*筑\s*面\s*积/g, "建筑面积")
+      .replace(/房\s*屋\s*面\s*积/g, "房屋面积");
     const patterns = [
       /(?:房屋|房产|不动产|建筑物)?(?:总)?建筑面积\s*(?:[（(][^）)]{0,20}[）)])?\s*(?:(?:约|大约)\s*)?(?:为|是|等于|合计|共计)?\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
       /(?:房屋|房产|不动产|建筑物)?(?:总)?建筑面积\s*[（(]\s*(?:平方米|平米|㎡|m²|m2|平方公尺)\s*[）)]\s*(?:(?:约|大约)\s*)?(?:为|是|等于|合计|共计)?\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)/i,
       /(?:房屋|房产|不动产|建筑物)?(?:建筑|房屋|房产|产权)面积\s*(?:约|大约|合计|共计|为|是|等于)?\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
+      /(?:登记建筑面积|登记面积|证载建筑面积|证载面积|产权证载面积|产权证建筑面积|房产证建筑面积|不动产权证书?建筑面积|建筑面积|房屋建筑面积|房屋面积)\s*(?:[（(][^）)]{0,20}[）)])?\s*(?:约|大约|为|是|等于|合计|共计|登记为)?\s*[:=：-]?\s*([\d][\d,\s]*(?:\.\s*\d+)?)(?=\s*(?:平方米|平米|㎡|m²|m2|平方公尺)?(?:\s|$|[,，。；;]))/i,
       /(?:房屋|房产|不动产|建筑物)?(?:总)?建筑面积\s*(?:[（(][^）)]{0,20}[）)])?\s*(?:(?:约|大约|合计|共计)\s*)?(?:为|是|等于)?\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?=$|[,。；;])/i,
     ];
     for (const pattern of patterns) {
@@ -641,9 +673,36 @@ function extractAlibabaDetailPage() {
       if (coordinates) break;
     }
   }
+  const detailRoot = document.querySelector("#J_desc") || document.querySelector("#J_ItemDetailContent");
+  const detailContentText = clean(detailRoot?.innerText || detailRoot?.textContent || "");
+  const detailContentReady = !detailRoot
+    || (detailContentText.length > 0 && !/(?:加载中|loading)/i.test(detailContentText));
+  const loadSupplementalSection = async (selector, linkSelector) => {
+    const section = document.querySelector(selector);
+    if (!section) return "";
+    let text = clean(section.innerText || section.textContent || "");
+    if (!/(?:加载中|loading)/i.test(text)) return text;
+    section.scrollIntoView?.({ block: "center" });
+    const link = document.querySelector(linkSelector);
+    link?.scrollIntoView?.({ block: "center" });
+    link?.click?.();
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 12000) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      text = clean(section.innerText || section.textContent || "");
+      if (text && !/(?:加载中|loading)/i.test(text)) break;
+    }
+    return text;
+  };
+  const noticeText = await loadSupplementalSection("#NoticeDetail", '#J_DetailTabMenu a[href="#NoticeDetail"]');
+  const noticeHasFields = /(?:建筑面积|房屋面积|房产证|证载面积)/.test(`${detailContentText}\n${noticeText}`)
+    && /(?:所在楼层|楼层|总层数)/.test(`${detailContentText}\n${noticeText}`);
+  const itemNoticeText = noticeHasFields ? "" : await loadSupplementalSection("#ItemNotice", '#J_DetailTabMenu a[href="#ItemNotice"]');
   const body = document.body?.innerText || "";
   const scriptText = [...document.scripts].map((script) => script.textContent || "").join("\n");
-  const detailText = `${body}\n${scriptText}`;
+  const detailText = `${detailContentText}\n${noticeText}\n${itemNoticeText}\n${body}\n${scriptText}`;
+  const verificationRequired = [...document.querySelectorAll('[class*="captcha"],[id*="captcha"],[class*="slider"],[id*="slider"],[class*="verify"],[id*="verify"]')].some(isVisible)
+    || /验证码|滑块|安全验证|访问验证|人机验证|请完成.{0,8}验证/.test(body);
   const attachments = [];
   const attachmentSeen = new Set();
   for (const anchor of document.querySelectorAll("a[href]")) {
@@ -702,17 +761,29 @@ function extractAlibabaDetailPage() {
   const statusText = detailText.match(/(?:本场|拍卖)?已结束|本场已流拍|本场已撤回|本场已中止|报名截止|预计[^\n]{0,30}结束/gi) || [];
   const locationMatch = body.match(/标的物位置\s*[：:]?\s*([\s\S]{0,180}?)(?:地图标注仅供参考|标的物介绍|房屋用途)/);
   const usageMatch = body.match(/房屋用途及?\s*土地性质\s*[：:]?\s*([\s\S]{0,140}?)(?:钥匙|使用情况|拍卖权利限制情况|建筑面积)/);
-  const buildingArea = extractBuildingArea(detailText);
+  const areaValue = readLabeledValue(["建筑面积", "房屋建筑面积", "房屋面积", "登记建筑面积", "登记面积", "证载建筑面积", "证载面积", "产权证载面积", "产权证建筑面积", "房产证建筑面积", "不动产权证书建筑面积"]);
+  const buildingArea = extractBuildingArea(detailText) || extractBuildingArea(`建筑面积 ${areaValue}平方米`);
   const decorationMatch = detailText.match(/(?:装修及其他介绍|装修情况|装修)\s*[：:\s]+([^\n\r|；;]{1,40})/i);
   const leaseMatch = detailText.match(/(?:租赁情况|租赁状态|是否有租赁|租赁)\s*[：:\s]+([^\n\r|；;]{1,60})/i);
   const floorValue = readLabeledValue(["所在楼层", "所在楼层（层）", "所在楼层(层)", "房屋所在楼层", "所在层", "房屋楼层", "楼层"]);
-  const totalFloorsValue = readLabeledValue(["建筑总层数", "房屋总层数", "总层数", "总楼层", "楼层数"]);
-  const floorMatch = body.match(/(?:位于第|所在楼层|所在层|房屋所在楼层|房屋楼层|楼层)\s*(?:为|是|位于|在|：|:|=)?\s*([^，。；;()（）\n]{1,30}?)\s*层/);
-  const totalFloorMatch = body.match(/(?:建筑总层数|房屋总层数|总层数|总楼层|楼层数|共)\s*(?:为|是|约|共|：|:|=)?\s*(\d+)\s*层?/);
-  const transactionMatch = body.match(/(?:成交价|拍下价|最终成交价|成交金额)\s*[：:]?\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)\s*(?:元)?/);
+  const totalFloorsValue = readLabeledValue(["房屋建筑总楼层", "建筑总层数", "房屋总层数", "总层数", "总楼层", "楼层数"]);
+  const floorMatch = detailText.match(/(?:位于第|所在楼层|所在层|房屋所在楼层|房屋楼层|楼层)\s*(?:为|是|位于|在|：|:|=)?\s*([^，。；;()（）\n]{1,30}?)\s*层/);
+  const totalFloorMatch = detailText.match(/(?:建筑总层数|房屋总层数|总层数|总楼层|楼层数|共)\s*(?:为|是|约|共|：|:|=)?\s*(\d+)\s*层?/);
+  const floorPair = String(floorValue || floorMatch?.[1] || "").match(/^(.+?)\s*[\/／]\s*(\d+)$/);
+  const transactionMatch = body.match(/(?:成交价|拍下价|最终成交价|成交金额|成交价款|当前价|最终价)\s*[：:]?\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)\s*(万|亿|元)?/);
+  const soldPriceMatch = body.match(/(?:成交价|拍下价|最终成交价|成交金额|成交价款)\s*[：:]?\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)\s*(万|亿|元)?/);
   const valuationMatch = body.match(/(?:评估价|评估总价|议价价)\s*[：:]?\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)\s*(?:元)?/);
-  const timeMatch = body.match(/(?:结束时间|成交时间|交易时间)\s*[：:]?\s*([0-9]{4}[\/-][0-9]{1,2}[\/-][0-9]{1,2}(?:\s+[0-9:]{4,8})?)/);
-  const bidMatch = body.match(/(?:竞买记录|应买记录|出价次数|出价记录)\s*[：:]?\s*[（(]?\s*(\d+)\s*(?:次出价)?\s*[）)]?/) || body.match(/(\d+)\s*次出价/);
+  const timeMatch = body.match(/(?:结束时间|成交时间|交易时间)\s*[：:]?\s*([0-9]{4}(?:[\/-][0-9]{1,2}[\/-][0-9]{1,2}|\s*年\s*[0-9]{1,2}\s*月\s*[0-9]{1,2}\s*日?)(?:\s+[0-9:]{4,8})?)/);
+  const bidMatch = [
+    body.match(/(?:竞买记录|应买记录|出价次数|出价记录|竞价记录|竞价次数|应价次数)[^\n]{0,80}?[（(]?\s*(\d+)\s*(?:次出价|次竞价|次应价|次|条)?\s*[）)]?/i),
+    body.match(/(?:共|累计|合计)\s*(\d+)\s*(?:次出价|次竞价|次应价|条出价记录|条竞买记录)/i),
+    body.match(/(\d+)\s*次(?:出价|竞价|应价)/i),
+    detailText.match(/(?:bidCount|bid_count|biddingCount|offerCount)\D{0,20}(\d+)/i),
+  ].find(Boolean) || null;
+  const hasEndedText = /(?:本场|拍卖)?已结束|成交价|竞价结果确认书/.test(detailText);
+  const hasExplicitSoldPrice = Boolean(soldPriceMatch?.[1])
+    || Boolean(transactionMatch?.[1] && /(?:当前价|最终价)/.test(transactionMatch[0]) && hasEndedText);
+  const hasBidEvidence = Number(bidMatch?.[1] || 0) > 0;
   return {
     url: location.href,
     title: clean(heading),
@@ -720,22 +791,28 @@ function extractAlibabaDetailPage() {
     location: clean(locationMatch?.[1] || body.match(/标的物位置\s*[：:]?\s*([^\n]{1,180})/)?.[1] || ""),
     usage: clean(usageMatch?.[1] || body.match(/房屋用途[^\n]{0,80}/)?.[0] || ""),
     buildingArea,
-    floor: normalizeFloorValue(floorValue || floorMatch?.[1] || ""),
-    totalFloors: clean(totalFloorsValue || totalFloorMatch?.[1] || ""),
-    transactionAmount: transactionMatch?.[1] || "",
+    floor: normalizeFloorValue(floorPair?.[1] || floorValue || floorMatch?.[1] || ""),
+    totalFloors: clean(totalFloorsValue || totalFloorMatch?.[1] || floorPair?.[2] || ""),
+    transactionAmount: transactionMatch?.[0] || "",
     valuationAmount: valuationMatch?.[1] || "",
     transactionTime: timeMatch?.[1] || "",
     bidCount: bidMatch?.[1] || "",
     longitude: coordinates?.longitude ?? null,
     latitude: coordinates?.latitude ?? null,
     coordinateSource: coordinates?.coordinateSource || "",
-    hasSoldText: /成交价|竞价结果确认书|竞买记录/.test(body),
+    hasSoldText: hasExplicitSoldPrice
+      || /竞价结果确认书|已成交|成交状态\s*[：:]?\s*(?:成交|已成交)/.test(detailText)
+      || (hasBidEvidence && /(?:已结束|成交时间|结束时间)/.test(detailText)),
+    hasExplicitSoldPrice,
     hasInvalidStatus: statusText.some((value) => /流拍|撤回|中止/.test(value)),
-    hasEndedText: /(?:本场|拍卖)?已结束|成交价|竞价结果确认书/.test(detailText),
+    hasEndedText,
     decoration: clean(decorationMatch?.[1] || ""),
     leaseStatus: clean(leaseMatch?.[1] || ""),
+    detailContentText: detailContentText.slice(0, 12000),
+    detailContentReady,
     pageText: body.slice(0, 12000),
     attachments: attachments.slice(0, 8),
+    verificationRequired,
   };
 }
 
@@ -752,6 +829,15 @@ function directCanonicalUrl(value) {
 function directParseAmount(value) {
   const number = Number(String(value || "").replace(/[^\d.]/g, ""));
   return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function directParseAuctionAmount(value) {
+  const text = String(value || "");
+  const number = directParseAmount(text);
+  if (!number) return null;
+  if (/亿/.test(text)) return number * 100000000;
+  if (/万/.test(text)) return number * 10000;
+  return number;
 }
 
 function directParseCoordinate(value, minimum, maximum) {
@@ -781,20 +867,32 @@ function directNormalizeFloorValue(value) {
     .replace(/[（(][^）)]*[）)]/g, "")
     .replace(/第/g, "")
     .replace(/\s+/g, " ")
+    .replace(/^(?:为|是|位于|在)\s*/, "")
     .trim();
-  if (!normalized || /^(?:总|共|建筑|层数|楼层|总层数|总楼层)$/.test(normalized)) return "";
+  if (!normalized || /^(?:总|共|建筑|层数|楼层|总层数|总楼层|所在|数|全部楼层)$/.test(normalized)) return "";
+  if (/^\s*[\/／]/.test(normalized)) return "";
+  normalized = normalized.replace(/\s*(?:总|共)\s*(?:计)?\s*(?:层数|楼层|层|楼)?\s*$/, "").trim();
+  normalized = normalized.replace(/(地下|地上|负)\s+(?=[\d一二两三四五六七八九十百零])/g, "$1");
   normalized = normalized.replace(/(地下|地上|负)?([一二两三四五六七八九十百零]+)/g, (match, prefix, number) => `${prefix || ""}${directChineseFloorNumber(number)}`);
   if (/^(顶|底|中|高|低)(层)?$/.test(normalized)) return normalized.endsWith("层") ? normalized : `${normalized}层`;
-  return normalized.replace(/[层楼]\s*$/, "").trim();
+  normalized = normalized.replace(/[层楼]\s*$/, "").replace(/\s+/g, "").trim();
+  return /^(?:地上|地下|负)?\d+(?:[至\-—~～](?:地上|地下|负)?\d+)?$/.test(normalized) ? normalized : "";
 }
 
 function directNormalizeTotalFloorValue(value) {
   const original = String(value || "").replace(/[（(][^）)]*[）)]/g, "").replace(/\s+/g, " ").trim();
   if (!original) return "";
   const hasUnit = /[层楼]/.test(original);
-  const numberText = original.replace(/[层楼]/g, "").replace(/^(?:共|约|为|是)\s*/, "").trim();
+  const numberText = original.match(/(?:\d+|[一二两三四五六七八九十百零]+)/)?.[0] || "";
   const number = directChineseFloorNumber(numberText);
-  return /^\d+$/.test(number) ? `${number}${hasUnit ? "层" : ""}` : original;
+  return /^\d+$/.test(number) ? `${number}${hasUnit ? "层" : ""}` : "";
+}
+
+function directFloorWithinTotal(floor, totalFloors) {
+  const total = directParseAmount(totalFloors);
+  if (!total) return true;
+  const values = String(floor || "").match(/\d+/g);
+  return !values || values.every((value) => Number(value) <= total);
 }
 
 function directExtractBuildingAreaFromText(value) {
@@ -803,6 +901,9 @@ function directExtractBuildingAreaFromText(value) {
     .replace(/[，]/g, ",")
     .replace(/[：]/g, ":")
     .replace(/\s+/g, " ")
+    .replace(/建\s*筑\s*面\s*积/g, "建筑面积")
+    .replace(/房\s*屋\s*面\s*积/g, "房屋面积")
+    .replace(/(?:专有|分摊|套内|共有|使用权)建筑面积/g, (match) => match.replace("建筑", ""))
     .trim();
   const patterns = [
     /(?<!项目)(?<!总)(?:房产证|证载|房屋|房产|不动产|建筑物|产权)?建筑面积\s*(?:[（(][^）)]{0,20}[）)])?\s*(?:(?:约|大约)\s*)?(?:为|是|等于|合计|共计)?\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
@@ -810,7 +911,13 @@ function directExtractBuildingAreaFromText(value) {
     /(?<!项目)(?<!总)(?:房产证|证载|房屋|房产|不动产|建筑物|产权)?建筑面积\s*(?:约|大约|合计|共计|为|是|等于)?\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
     /(?<!项目)(?<!总)(?:房产证|证载|房屋|房产|不动产|建筑物|产权)?建筑面积\s*(?:[（(][^）)]{0,20}[）)])?\s*(?:(?:约|大约|合计|共计)\s*)?(?:为|是|等于)?\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?=$|[,。；;])/i,
     /(?:房屋|房产|不动产|建筑物)?(?:建筑|房屋|房产|产权)面积\s*(?:约|大约|合计|共计|为|是|等于)?\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
+    /(?:合计建筑面积|建筑总面积|房屋建筑总面积|标的物建筑面积|证载建筑面积|房产证建筑面积|不动产建筑面积)\s*(?:[:=：]\s*)?(?:[（(][^）)]{0,20}[）)])?\s*(?:约|大约|合计|共计|为|是|等于)?\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
+    /(?:标的物|拍卖标的|房屋|房地产|不动产)\s*面积\s*(?:为|是|[:：])?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
+    /(?:登记建筑面积|登记面积|证载建筑面积|证载面积|产权证载面积|产权证建筑面积|房产证建筑面积|不动产权证书?建筑面积|建筑面积|房屋建筑面积|房屋面积)\s*(?:[（(][^）)]{0,20}[）)])?\s*(?:约|大约|为|是|等于|合计|共计|登记为)?\s*[:=：-]?\s*([\d][\d,\s]*(?:\.\s*\d+)?)(?=\s*(?:平方米|平米|㎡|m²|m2|平方公尺)?(?:\s|$|[,，。；;]))/i,
+    /(?:房屋|房地产|不动产)\s*[，,]\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
+    /(?:^|[；;。\n（(]|\d[、.])\s*面积\s*(?:约|大约|合计|共计|为|是|等于)?\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
     /(?:^|[；;。\n]|\d[、.])\s*面积\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
+    /(?<!总)(?:房屋)?建筑面积\s*[^。；;\n]{0,120}?([\d][\d,，\s]*(?:\.\s*\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
   ];
   for (const pattern of patterns) {
     const match = text.match(pattern);
@@ -825,36 +932,54 @@ function directExtractFloorFieldsFromText(value) {
     .split(/\r?\n/)
     .map((item) => item.replace(/\s+/g, " ").trim())
     .filter(Boolean);
-  const floorLabels = ["所在楼层", "所在楼层（层）", "所在楼层(层)", "房屋所在楼层", "所在层次", "所在层数", "所在层", "房屋楼层", "楼层"];
-  const totalLabels = ["建筑总层数", "房屋总层数", "总层数", "总楼层", "楼层数"];
+  const floorLabels = ["所在楼层（层）", "所在楼层(层)", "房屋所在楼层", "所在楼层", "所在层次", "所在层数", "房屋楼层", "所在层", "楼层"];
+  const totalLabels = ["房屋建筑总楼层", "建筑总层数", "房屋总层数", "总层数", "总楼层", "楼层数"];
   const read = (labels) => {
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index];
-      const label = labels.find((item) => line === item || line.startsWith(`${item}：`) || line.startsWith(`${item}:`) || line.startsWith(`${item}为`) || line.startsWith(`${item}是`));
+      const orderedLabels = [...labels].sort((left, right) => right.length - left.length);
+      const label = orderedLabels.find((item) => line === item || line.startsWith(`${item}：`) || line.startsWith(`${item}:`) || line.startsWith(`${item}为`) || line.startsWith(`${item}是`) || line.startsWith(`${item} `));
       if (!label) continue;
       const inline = line.slice(label.length).replace(/^[\s:：-]*(?:为|是)?\s*/, "").trim();
       if (inline) return inline;
-      if (lines[index + 1] && !labels.includes(lines[index + 1])) return lines[index + 1];
+      if (lines[index + 1] && !orderedLabels.includes(lines[index + 1])) return lines[index + 1];
     }
     return "";
   };
-  const normalizeFloor = directNormalizeFloorValue;
   const text = lines.join(" ");
-  const pair = text.match(/(?:所在楼层|所在层|房屋所在楼层|房屋楼层|楼层)\s*(?:[\/／]\s*(?:建筑)?(?:总层数|总楼层))?\s*[:=：]?\s*([^\/／，,]+?)\s*[\/／]\s*(\d+)\s*层?/);
-  const floorFromSentence = text.match(/(?:所在楼层|所在层次|所在层数|所在层|房屋所在楼层|房屋楼层)\s*(?:为|是|位于|在|[:=：])?\s*([^，,。；;()（）\n]+?)\s*层/);
-  const floorFromBareLabel = text.match(/(?:所在层次|所在层数)\s*(?:为|是|位于|在|[:=：])?\s*(?:第\s*)?(\d+(?:\s*[至\-—~～]\s*\d+)?)(?!\s*层)/);
-  const floorFromPosition = text.match(/(?:位于|处于)[^，,。；;()（）\n]{0,30}?(?:第\s*)?([负地下上第\d一二两三四五六七八九十百零]+(?:\s*[至\-—~～]\s*[负地下上第\d一二两三四五六七八九十百零]+)?)\s*层/);
-  const totalFromSentence = text.match(/(?:建筑物|建筑|房屋)?(?:地上|地下)?总(?:层数|楼层)\s*(?:为|是|约|共|[:=：])?\s*([\d一二两三四五六七八九十百零]+)\s*(层)?/)
+  const floorLabel = "(?:所在楼层（层）|所在楼层\\(层\\)|房屋所在楼层|所在楼层|所在层次|所在层数|房屋楼层|所在层|(?<!总)楼层)";
+  const floorToken = "(?:地上|地下|负)?\\s*(?:第\\s*)?[\\d一二两三四五六七八九十百零]+(?:\\s*[至\\-—~～]\\s*(?:地上|地下|负)?\\s*(?:第\\s*)?[\\d一二两三四五六七八九十百零]+)?";
+  const pair = text.match(new RegExp(`${floorLabel}(?:\\s*[\\/／]\\s*(?:建筑)?(?:总层数|总楼层|共计|共|总))?\\s*(?:为|是|位于|在)?\\s*[:=：]?\\s*(${floorToken})\\s*层?\\s*[\\/／|｜]\\s*(?:(?:建筑)?(?:总层数|总楼层|共计|共)\\s*[:=：]?\\s*)?(${floorToken})\\s*层?`));
+  const floorFromSentence = text.match(new RegExp(`${floorLabel}\\s*(?:为|是|位于|在|[:=：])?\\s*(${floorToken})\\s*层`));
+  const floorFromBareLabel = text.match(new RegExp(`(?:所在层次|所在层数)\\s*(?:为|是|位于|在|[:=：])?\\s*(${floorToken})(?!\\s*层)`));
+  const floorFromContext = text.match(new RegExp(`(?:拍卖对象|估价对象|拍卖标的|标的物|该房屋|该房产|本次拍卖房屋|本次估价对象)\\s*(?:为|是)\\s*(?:第\\s*)?(${floorToken})\\s*层`))
+    || text.match(new RegExp(`(?:拍卖对象|估价对象|拍卖标的|标的物|该房屋|该房产|本次拍卖房屋|本次估价对象)[^。；;()（）\\n]{0,60}?(?:位于|处于)[^。；;()（）\\n]{0,40}?(?:第\\s*)?(${floorToken})\\s*层`))
+    || text.match(new RegExp(`(?:位于|处于)\\s*第\\s*(${floorToken})\\s*层`));
+  const floorFromLocated = text.match(/(?:^|[。；;，,])[^。；;\n]{0,160}?所在\s*(?:为|是|第\s*)?((?:地上|地下|负)?\s*(?:第\s*)?[\d一二两三四五六七八九十百零]+(?:\s*[至\-—~～]\s*(?:地上|地下|负)?\s*(?:第\s*)?[\d一二两三四五六七八九十百零]+)?)\s*层/);
+  const totalFromSentence = text.match(/(?:房屋建筑|建筑物|建筑|房屋)?(?:地上|地下)?总(?:层数|楼层)\s*(?:为|是|约|共|[:=：])?\s*([\d一二两三四五六七八九十百零]+)\s*(层)?/)
     || text.match(/共\s*([\d一二两三四五六七八九十百零]+)\s*(层)?/);
-  const floor = normalizeFloor(pair?.[1] || floorFromSentence?.[1] || floorFromPosition?.[1] || read(floorLabels));
-  const floorFallback = floor || normalizeFloor(floorFromBareLabel?.[1] || "");
-  const totalRaw = pair?.[2] ? pair[2] : (totalFromSentence?.[1] ? `${totalFromSentence[1]}${totalFromSentence[2] || ""}` : read(totalLabels));
+  const orphanTotal = text.match(/(?:楼层|层数)\s*[:：]?\s*[\/／]\s*总(?:楼层|层数)?\s*([\d一二两三四五六七八九十百零]+)/);
+  const floorTotalPairPattern = new RegExp(`${floorLabel}\\s*(?:为|是|位于|在|[:=：])?\\s*(${floorToken})\\s*层?[\\s,，、;；|｜/／]*?(?:共(?:计)?|总(?:层数|楼层)?|全部楼层)\\s*[:=：]?\\s*(${floorToken})\\s*层?`, "gi");
+  const floorTotalPairLoosePattern = new RegExp(`${floorLabel}\\s*(?:为|是|位于|在|[:=：])?\\s*(${floorToken})\\s*层?[\\s\\S]{0,80}?(?:共(?:计)?|总(?:层数|楼层)?|全部楼层)\\s*[:=：]?\\s*(${floorToken})\\s*层?`, "gi");
+  const floorTotalPairs = [];
+  for (const pattern of [floorTotalPairPattern, floorTotalPairLoosePattern]) {
+    for (const match of text.matchAll(pattern)) {
+      const suffix = String(match[0]).slice(String(match[0]).lastIndexOf(String(match[2])) + String(match[2]).length);
+      floorTotalPairs.push({ floor: match[1], totalFloors: match[2], hasUnit: /层\s*$/.test(suffix) });
+    }
+  }
+  const pairedFloorTotal = floorTotalPairs
+    .map((candidate) => ({ floor: directNormalizeFloorValue(candidate.floor), totalFloors: directNormalizeTotalFloorValue(`${candidate.totalFloors}${candidate.hasUnit ? "层" : ""}`) }))
+    .find((candidate) => candidate.floor && candidate.totalFloors && directFloorWithinTotal(candidate.floor, candidate.totalFloors));
+  const floor = directNormalizeFloorValue(pair?.[1] || pairedFloorTotal?.floor || floorFromSentence?.[1] || floorFromLocated?.[1] || floorFromContext?.[1] || floorFromBareLabel?.[1] || read(floorLabels));
+  const floorFallback = floor || directNormalizeFloorValue(read(floorLabels));
+  const totalRaw = pair?.[2] ? pair[2] : (pairedFloorTotal?.totalFloors || (totalFromSentence?.[1] ? `${totalFromSentence[1]}${totalFromSentence[2] || ""}` : orphanTotal?.[1] ? `${orphanTotal[1]}层` : read(totalLabels)));
   const totalFloors = directNormalizeTotalFloorValue(totalRaw);
   return { floor: floorFallback, totalFloors };
 }
 
 function directNormalizeDate(value) {
-  const match = String(value || "").match(/(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  const match = String(value || "").match(/(\d{4})\s*(?:年\s*|[\/-])(\d{1,2})\s*(?:月\s*|[\/-])(\d{1,2})\s*日?(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
   if (!match) return String(value || "").trim();
   return `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
 }
@@ -898,28 +1023,48 @@ function directNormalizeLease(value) {
 
 function directFirstPropertyType(value) {
   const text = String(value || "");
-  if (text.includes("住宅用房") || text.includes("住宅房")) return "住宅用房";
-  if (text.includes("商业房") || text.includes("商业用房")) return "商业房";
+  if (text.includes("住宅用房") || text.includes("住宅房") || text.includes("住宅")) return "住宅用房";
+  if (text.includes("商业房") || text.includes("商业用房") || text.includes("商业")) return "商业房";
   return "";
 }
 
-function directInferFloorFromPropertyText(value) {
-  const match = String(value || "").match(/(?:^|[^\d])(\d{3,4})\s*(?:室|号)(?!\d)/);
-  if (!match) return "";
-  const floor = match[1].slice(0, -2).replace(/^0+/, "");
-  return floor || "0";
-}
-
 function directParseDetail(detail, request) {
-  const transactionAmount = directParseAmount(detail.transactionAmount);
-  const valuationAmount = directParseAmount(detail.valuationAmount);
-  const buildingArea = directParseAmount(detail.buildingArea) || directExtractBuildingAreaFromText(`${detail.buildingArea || ""}\n${detail.pageText || ""}`);
-  const floorFields = directExtractFloorFieldsFromText(detail.pageText);
-  const inferredFloor = directInferFloorFromPropertyText([detail.title, detail.location].filter(Boolean).join(" "));
-  const bidCount = Number.isInteger(Number(detail.bidCount)) ? Number(detail.bidCount) : 0;
-  const finished = detail.hasSoldText === true && detail.hasInvalidStatus !== true
-    && (request.status !== "finished" || detail.hasEndedText === true)
-    && Boolean(transactionAmount) && bidCount > 0;
+  const pageText = [detail.detailContentText, detail.pageText].filter(Boolean).join("\n");
+  const attachmentText = String(detail.attachmentText || "");
+  const pageTransactionMatch = pageText.match(/(?:成交价|拍下价|最终成交价|成交金额|成交价款|当前价|最终价)\s*[：:]?\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)\s*(万|亿|元)?/);
+  const pageSoldPriceMatch = pageText.match(/(?:成交价|拍下价|最终成交价|成交金额|成交价款)\s*[：:]?\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)\s*(万|亿|元)?/);
+  const pageCurrentPriceMatch = pageText.match(/(?:当前价|最终价)\s*[：:]?\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)\s*(万|亿|元)?/);
+  const pageHasEndedText = /(?:本场|拍卖)?已结束|竞价结果确认书/.test(pageText);
+  const pageTimeMatch = pageText.match(/(?:结束时间|成交时间|交易时间)\s*[：:]?\s*([0-9]{4}(?:[\/-][0-9]{1,2}[\/-][0-9]{1,2}|\s*年\s*[0-9]{1,2}\s*月\s*[0-9]{1,2}\s*日?)(?:\s+[0-9:]{4,8})?)/);
+  const pageBidMatch = pageText.match(/(?:竞买记录|应买记录|出价次数|出价记录|竞价记录|竞价次数|应价次数)[^\n]{0,80}?[（(]?\s*(\d+)\s*(?:次出价|次竞价|次应价|次|条)?\s*[）)]?/i)
+    || pageText.match(/(\d+)\s*次(?:出价|竞价|应价)/i);
+  const hasExplicitSoldPrice = detail.hasExplicitSoldPrice === true || Boolean(pageSoldPriceMatch?.[1])
+    || Boolean(pageCurrentPriceMatch?.[1] && pageHasEndedText);
+  const hasEndedText = detail.hasEndedText === true || pageHasEndedText;
+  const hasSoldText = detail.hasSoldText === true || hasExplicitSoldPrice || Boolean(pageBidMatch && hasEndedText);
+  const transactionAmount = directParseAuctionAmount(detail.transactionAmount || pageTransactionMatch?.[0]);
+  const valuationAmount = directParseAuctionAmount(detail.valuationAmount);
+  const pageFields = directExtractFloorFieldsFromText(pageText);
+  const attachmentFields = directExtractFloorFieldsFromText(attachmentText);
+  const pageArea = directExtractBuildingAreaFromText(pageText);
+  const attachmentArea = directExtractBuildingAreaFromText(attachmentText);
+  const rawArea = directParseAmount(detail.buildingArea);
+  const structuredArea = detail.fieldSources?.buildingArea === "structured" ? rawArea : null;
+  const structuredFloor = detail.fieldSources?.floor === "structured" ? directNormalizeFloorValue(detail.floor) : "";
+  const structuredTotal = detail.fieldSources?.totalFloors === "structured" ? directNormalizeTotalFloorValue(detail.totalFloors) : "";
+  const hasTextEvidence = Boolean(pageText.trim() || attachmentText.trim());
+  const buildingArea = structuredArea || attachmentArea || pageArea || (!hasTextEvidence ? rawArea : null);
+  const floorFields = {
+    floor: structuredFloor || attachmentFields.floor || pageFields.floor || (!hasTextEvidence ? directNormalizeFloorValue(detail.floor) : ""),
+    totalFloors: structuredTotal || attachmentFields.totalFloors || pageFields.totalFloors || (!hasTextEvidence ? directNormalizeTotalFloorValue(detail.totalFloors) : ""),
+  };
+  const normalizedFloor = directNormalizeFloorValue(floorFields.floor);
+  const normalizedTotalFloors = directNormalizeTotalFloorValue(floorFields.totalFloors);
+  const bidCount = Number.isInteger(Number(detail.bidCount || pageBidMatch?.[1])) ? Number(detail.bidCount || pageBidMatch?.[1]) : 0;
+  const hasTransactionEvidence = Boolean(transactionAmount) && (hasExplicitSoldPrice || hasSoldText);
+  const finished = hasSoldText && detail.hasInvalidStatus !== true
+    && (request.status !== "finished" || hasEndedText)
+    && hasTransactionEvidence && (bidCount > 0 || hasExplicitSoldPrice);
   const rawLocation = String(detail.location || "").trim();
   const city = directFirstCity(rawLocation) || request.city || "";
   const district = directFirstDistrict(rawLocation, request);
@@ -936,13 +1081,13 @@ function directParseDetail(detail, request) {
     coordinateSource: detail.coordinateSource || "",
     longitude: directParseCoordinate(detail.longitude, 70, 140),
     latitude: directParseCoordinate(detail.latitude, 3, 55),
-    transactionTime: directNormalizeDate(detail.transactionTime),
+    transactionTime: directNormalizeDate(detail.transactionTime || pageTimeMatch?.[1] || ""),
     transactionAmount,
     valuationAmount,
     buildingArea,
     unitPrice: transactionAmount && buildingArea ? Math.round((transactionAmount / buildingArea) * 100) / 100 : null,
-    floor: directNormalizeFloorValue(floorFields.floor || detail.floor || inferredFloor),
-    totalFloors: directParseAmount(directNormalizeTotalFloorValue(floorFields.totalFloors || detail.totalFloors)),
+    floor: directFloorWithinTotal(normalizedFloor, normalizedTotalFloors) ? normalizedFloor : "",
+    totalFloors: directParseAmount(normalizedTotalFloors),
     decoration: String(detail.decoration || "").trim(),
     leaseStatus: directNormalizeLease(detail.leaseStatus),
     platform: "阿里拍卖",
@@ -950,6 +1095,17 @@ function directParseDetail(detail, request) {
     verificationStatus: finished ? "详情核验通过" : "未通过成交核验",
     url: directCanonicalUrl(detail.url),
     valid: finished,
+  };
+}
+
+function directMergeListingEvidence(detail = {}, candidate = {}) {
+  return {
+    ...detail,
+    transactionAmount: detail.transactionAmount || candidate.listedAmount,
+    bidCount: detail.bidCount || String(candidate.listedBidCount || ""),
+    hasExplicitSoldPrice: detail.hasExplicitSoldPrice === true || candidate.listedHasExplicitSoldPrice === true,
+    hasSoldText: detail.hasSoldText === true || (candidate.listedBidCount > 0 && candidate.listedHasEndedText === true),
+    hasEndedText: detail.hasEndedText === true || candidate.listedHasEndedText === true,
   };
 }
 
@@ -965,11 +1121,60 @@ function directMatchesRequest(record, request) {
   return true;
 }
 
+function directSkipReason(detail, record, request) {
+  const pageText = String(detail?.pageText || "");
+  if (!record?.transactionAmount) return "未识别成交价或拍下价";
+  if (detail?.hasInvalidStatus === true) return "页面标记为流拍、撤回或中止";
+  if (request.status === "finished" && !detail?.hasEndedText && !/(?:本场|拍卖)?已结束/.test(pageText)) return "未识别已结束状态";
+  if (!detail?.hasSoldText) return "未识别成交状态";
+  if (!(Number(record?.bidCount || detail?.bidCount || 0) > 0 || detail?.hasExplicitSoldPrice === true)) return "未识别出价次数或明确成交价";
+  const keyword = String(request.keyword || "").trim();
+  const searchable = `${record?.title || ""} ${record?.province || ""} ${record?.city || ""} ${record?.district || ""} ${record?.address || ""}`;
+  if (keyword && !searchable.includes(keyword)) return "不符合关键词范围";
+  const expectedProperty = propertyTypeLabel(request.propertyType);
+  if (expectedProperty && record?.propertyType && record.propertyType !== expectedProperty) return "不符合物业类型范围";
+  const date = String(record?.transactionTime || "").slice(0, 10);
+  if (request.startDate && (!date || date < request.startDate)) return "成交日期早于起始日期";
+  if (request.endDate && (!date || date > request.endDate)) return "成交日期晚于结束日期";
+  return "详情核验条件未满足";
+}
+
 function directPageLooksBlocked(value) {
   const text = `${value?.title || ""} ${value?.pageText || ""} ${value?.url || ""}`;
-  if (/验证码|滑块|安全验证|访问验证|captcha|punish/i.test(text)) return "ALIBABA_VERIFICATION_REQUIRED";
+  if (value?.verificationRequired === true) return "ALIBABA_VERIFICATION_REQUIRED";
+  if (/验证码|滑块|安全验证|访问验证|人机验证|请完成.{0,8}验证|拖动.{0,8}(?:滑块|拼图)|captcha|punish|security\s*check/i.test(text)) return "ALIBABA_VERIFICATION_REQUIRED";
   if (/登录淘宝|请登录|会员登录|扫码登录|登录页面|login\.taobao|\/login(?:[/?]|$)|login_jump/i.test(text)) return "ALIBABA_LOGIN_REQUIRED";
   return "";
+}
+
+function pageWaitState(value, expectedUrl, pageKind = "detail") {
+  const blocked = directPageLooksBlocked(value);
+  if (blocked === "ALIBABA_LOGIN_REQUIRED") return "login";
+  if (blocked === "ALIBABA_VERIFICATION_REQUIRED" || isAlibabaVerificationUrl(value?.url)) return "verification";
+  if (expectedUrl && !alibabaUrlsReferToSamePage(value?.url, expectedUrl)) return "navigation";
+  if (pageKind === "detail" && Object.prototype.hasOwnProperty.call(value || {}, "detailContentReady") && value.detailContentReady !== true) return "detail_loading";
+  return "page_loading";
+}
+
+function verificationWaitMessage(state, pageKind, description, elapsedSeconds) {
+  const pageLabel = pageKind === "detail" ? "详情页" : "列表页";
+  if (state === "verification") return `检测到阿里拍卖验证，请在当前标签页完成滑块验证；完成后会等待原${pageLabel}重新加载，再继续${description}。已等待 ${elapsedSeconds} 秒。`;
+  if (state === "detail_loading") return `当前${pageLabel}没有验证码，正在等待详情内容加载完成后继续${description}。已等待 ${elapsedSeconds} 秒。`;
+  if (state === "navigation") return `正在等待阿里拍卖${pageLabel}返回目标页面后继续${description}。已等待 ${elapsedSeconds} 秒。`;
+  return `正在等待阿里拍卖${pageLabel}和关键字段加载完成后继续${description}。已等待 ${elapsedSeconds} 秒。`;
+}
+
+function isAlibabaVerificationUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    const host = url.hostname.toLowerCase();
+    if (host !== "taobao.com" && !host.endsWith(".taobao.com")) return false;
+    const state = `${url.pathname} ${url.search} ${url.hash}`;
+    return /^(?:sec|login|passport|safe|verify|captcha|err|anti)\./.test(host)
+      || /captcha|verify|validate|punish|security|login|error/i.test(state);
+  } catch {
+    return false;
+  }
 }
 
 function directListPageUrl(sourceUrl, page) {
@@ -1013,26 +1218,14 @@ function statusFilterMatchesRequest(value, status) {
 }
 
 function directCandidateInScope(item, request) {
-  const text = String(item?.text || "");
-  if (request.status === "finished" && /距开始|距开拍|距结束|尚未开始|未开始|即将开始|立即报名|报名中|竞买中|进行中|正在拍卖|竞价中|拍卖中/.test(text)) {
-    return false;
-  }
-  const dates = text.match(/\d{4}[\/-]\d{1,2}[\/-]\d{1,2}/g) || [];
-  if ((request.startDate || request.endDate) && dates.length) {
-    return dates.some((value) => {
-      const date = value.replaceAll("/", "-");
-      return (!request.startDate || date >= request.startDate) && (!request.endDate || date <= request.endDate);
-    });
-  }
+  // 列表卡片的“距结束”和日期可能描述开拍、结束或更新时间，不能替代详情页成交证据。
+  // 交易状态、成交金额和日期统一在详情页解析后判断，避免误杀最终已成交案例。
   return true;
 }
 
 function directPageBeforeRequestedRange(items, request) {
-  if (request.status !== "finished" || !request.startDate) return false;
-  const dates = (Array.isArray(items) ? items : [])
-    .flatMap((item) => String(item?.text || "").match(/\d{4}[\/-]\d{1,2}[\/-]\d{1,2}/g) || [])
-    .map((value) => value.replaceAll("/", "-"));
-  return dates.length > 0 && dates.every((date) => date < request.startDate);
+  // 不能用列表卡片日期推断分页边界；详情页才有可靠成交日期。
+  return false;
 }
 
 function hasDirectCoordinates(item) {
@@ -1449,30 +1642,161 @@ async function getCurrentBrowserTab(chromeRef) {
   return tab;
 }
 
-async function waitForManualVerification(context, tab, extractor, emit, description, control) {
+function alibabaUrlsReferToSamePage(actual, expected) {
+  try {
+    const current = new URL(String(actual || ""));
+    const target = new URL(String(expected || ""));
+    if (current.origin !== target.origin || current.pathname.replace(/\/$/, "") !== target.pathname.replace(/\/$/, "")) return false;
+    for (const [key, value] of target.searchParams.entries()) {
+      if (key === "track_id") continue;
+      if (current.searchParams.getAll(key).includes(value) === false) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function alibabaPageReady(value, expectedUrl, pageKind = "detail") {
+  if (!value || directPageLooksBlocked(value)) return false;
+  if (expectedUrl && !alibabaUrlsReferToSamePage(value.url, expectedUrl)) return false;
+  const pageText = String(value.pageText || "").trim();
+  if (!String(value.url || "").trim()) return false;
+  if (pageKind === "list") return Array.isArray(value.items) && pageText.length >= 20;
+  if (Object.prototype.hasOwnProperty.call(value, "detailContentReady") && value.detailContentReady !== true) return false;
+  const detailIdentity = /阿里拍卖|拍卖标的|标的物|结束时间|成交价|拍下价|当前价|起拍价|本场已结束/.test(pageText);
+  return Boolean(pageText.length >= 24 && detailIdentity);
+}
+
+async function resolveVerificationTab(chromeRef, tab, expectedUrl) {
+  const isAlibabaTab = (candidate) => {
+    try {
+      return /(^|\.)sf\.taobao\.com$/i.test(new URL(candidate?.url || "").hostname);
+    } catch {
+      return false;
+    }
+  };
+  const matchesExpectedOrVerification = (candidate) => candidate?.id && (
+    alibabaUrlsReferToSamePage(candidate.url, expectedUrl)
+    || isAlibabaVerificationUrl(candidate.url)
+  );
+  let activeTabs = [];
+  try {
+    activeTabs = await chromeRef.tabs.query({ active: true, lastFocusedWindow: true }) || [];
+  } catch {
+    activeTabs = [];
+  }
+  const activeMatch = activeTabs.find(matchesExpectedOrVerification);
+  if (activeMatch) return activeMatch;
+  let originalTab = null;
+  if (tab?.id) {
+    try {
+      originalTab = await chromeRef.tabs.get(tab.id);
+      if (matchesExpectedOrVerification(originalTab)) return originalTab;
+    } catch {
+      // The original tab may have been replaced during verification.
+    }
+  }
+  const activeAlibabaTab = activeTabs.find((candidate) => candidate?.id && isAlibabaTab(candidate));
+  if (activeAlibabaTab) return activeAlibabaTab;
+  try {
+    const windowTabs = await chromeRef.tabs.query({ lastFocusedWindow: true }) || [];
+    const windowMatch = windowTabs.find(matchesExpectedOrVerification);
+    if (windowMatch) return windowMatch;
+  } catch {
+    // Fall back to the original tab when tab enumeration is unavailable.
+  }
+  return originalTab || activeTabs.find((candidate) => candidate?.id) || null;
+}
+
+async function restoreAlibabaTargetTab(chromeRef, tab, expectedUrl) {
+  if (!tab?.id || !expectedUrl || alibabaUrlsReferToSamePage(tab.url, expectedUrl)) return tab;
+  try {
+    await chromeRef.tabs.update(tab.id, { active: true, url: expectedUrl });
+    return { ...tab, url: expectedUrl };
+  } catch {
+    return tab;
+  }
+}
+
+async function waitForManualVerification(context, tab, extractor, emit, description, control, options = {}) {
   const startedAt = Date.now();
-  while (Date.now() - startedAt < MANUAL_VERIFICATION_TIMEOUT_MS) {
+  const timeoutMs = Number.isFinite(options.timeoutMs) ? Math.max(1, options.timeoutMs) : MANUAL_VERIFICATION_TIMEOUT_MS;
+  const pollIntervalMs = Number.isFinite(options.pollIntervalMs) ? Math.max(1, options.pollIntervalMs) : 1200;
+  const expectedUrl = String(options.expectedUrl || tab?.url || "");
+  const pageKind = options.pageKind || "detail";
+  let currentTab = tab;
+  let waitState = isAlibabaVerificationUrl(currentTab?.url) ? "verification" : "page_loading";
+  while (Date.now() - startedAt < timeoutMs) {
     await waitForRunResume(control, emit);
     const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
     emit({
-      phase: "verification_required",
+      phase: waitState === "verification" ? "verification_required" : waitState === "detail_loading" ? "loading_detail" : "opening",
       percent: 35,
-      message: `检测到阿里拍卖验证，请在当前标签页完成滑块验证；完成后脚本会自动继续${description}。已等待 ${elapsedSeconds} 秒。`,
+      message: verificationWaitMessage(waitState, pageKind, description, elapsedSeconds),
     });
-    await new Promise((resolve) => window.setTimeout(resolve, 1200));
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    currentTab = await resolveVerificationTab(context.chrome, currentTab, expectedUrl) || currentTab;
+    if (!currentTab?.id) continue;
     try {
-      const current = await executeCurrentTab(context.chrome, tab.id, extractor);
-      if (!directPageLooksBlocked(current)) return current;
-    } catch {
-      // Keep polling while the page is navigating during the manual verification.
+      const current = await executeCurrentTab(context.chrome, currentTab.id, extractor);
+      if (directPageLooksBlocked(current) === "ALIBABA_LOGIN_REQUIRED") throw new Error("ALIBABA_LOGIN_REQUIRED");
+      if (!directPageLooksBlocked(current) && expectedUrl && !alibabaUrlsReferToSamePage(current.url, expectedUrl)) {
+        waitState = "navigation";
+        currentTab = await restoreAlibabaTargetTab(context.chrome, currentTab, expectedUrl);
+        continue;
+      }
+      if (alibabaPageReady(current, expectedUrl, pageKind)) return { value: current, tab: currentTab };
+      waitState = pageWaitState(current, expectedUrl, pageKind);
+    } catch (error) {
+      if (error?.message === "ALIBABA_LOGIN_REQUIRED") throw error;
+      // Keep polling while the original tab is navigating or is replaced during verification.
     }
   }
-  throw new Error("ALIBABA_VERIFICATION_TIMEOUT");
+  const timeout = new Error("ALIBABA_VERIFICATION_TIMEOUT");
+  timeout.code = "ALIBABA_VERIFICATION_TIMEOUT";
+  throw timeout;
+}
+
+async function readAlibabaPageWithManualVerification(context, tab, extractor, emit, description, control, options = {}) {
+  const expectedUrl = String(options.expectedUrl || tab?.url || "");
+  const pageKind = options.pageKind || "detail";
+  const currentTab = await resolveVerificationTab(context.chrome, tab, expectedUrl) || tab;
+  if (/login\.taobao\.com|\/login(?:[/?]|$)/i.test(String(currentTab?.url || ""))) throw new Error("ALIBABA_LOGIN_REQUIRED");
+  if (isAlibabaVerificationUrl(currentTab?.url)) {
+    return waitForManualVerification(context, currentTab, extractor, emit, description, control, { ...options, expectedUrl, pageKind });
+  }
+  let value;
+  try {
+    value = await executeCurrentTab(context.chrome, currentTab.id, extractor);
+  } catch (error) {
+    const latestTab = await resolveVerificationTab(context.chrome, currentTab, expectedUrl);
+    if (!isAlibabaVerificationUrl(latestTab?.url) && !latestTab) throw error;
+    return waitForManualVerification(context, latestTab || currentTab, extractor, emit, description, control, { ...options, expectedUrl, pageKind });
+  }
+  if (directPageLooksBlocked(value) === "ALIBABA_LOGIN_REQUIRED") throw new Error("ALIBABA_LOGIN_REQUIRED");
+  if (!alibabaPageReady(value, expectedUrl, pageKind)) {
+    return waitForManualVerification(context, currentTab, extractor, emit, description, control, { ...options, expectedUrl, pageKind });
+  }
+  return { value, tab: currentTab };
 }
 
 async function runCurrentTabScrape(context, request, emit = () => {}, control = null) {
   const chromeRef = context.chrome;
   let tab = await getCurrentBrowserTab(chromeRef);
+  let historyCandidates = [];
+  if (request.historyPath) {
+    try {
+      const history = await context.sendNativeMessage({ action: "load_alibaba_auction_history", path: request.historyPath }, 30000);
+      if (!history?.ok) throw new Error(history?.reason || "ALIBABA_HISTORY_LOAD_FAILED");
+      historyCandidates = (Array.isArray(history.results) ? history.results : [])
+        .map((item) => ({ url: directCanonicalUrl(item?.url), title: String(item?.title || "").trim() }))
+        .filter((item) => item.url);
+      if (!historyCandidates.length) throw new Error("ALIBABA_HISTORY_ITEMS_EMPTY");
+    } catch (error) {
+      return { ok: false, phase: "failed", errorCode: error?.code || "ALIBABA_HISTORY_LOAD_FAILED", reason: error?.message || String(error), candidates: 0, results: [], security: { credentialsReturned: false } };
+    }
+  }
   const currentListMatchesRequest = listPageMatchesRequest(tab.url, request);
   let listSourceUrl = currentListMatchesRequest ? tab.url : directListPageUrl(request.sourceUrl, 1);
   let firstPage = 1;
@@ -1488,19 +1812,18 @@ async function runCurrentTabScrape(context, request, emit = () => {}, control = 
   const progress = (payload) => emit({ security: { credentialsReturned: false }, ...payload });
   progress({ phase: "opening", percent: 2, message: isAlibabaListPage(tab.url) ? "正在读取当前阿里拍卖筛选结果…" : "正在当前浏览器打开阿里拍卖列表页…", fetched: 0, verified: 0, skipped: 0 });
 
-  for (let page = firstPage; page < firstPage + MAX_DIRECT_PAGES; page += 1) {
+  for (let page = firstPage; page < firstPage + MAX_DIRECT_PAGES && !historyCandidates.length; page += 1) {
     try {
       await waitForRunResume(control, progress);
       if (control) control.percent = Math.min(35, 5 + Math.round(((page - firstPage + 1) / MAX_DIRECT_PAGES) * 30));
       if (page !== firstPage || !listPageMatchesRequest(tab.url, request)) {
         tab = await navigateCurrentTab(chromeRef, tab, directListPageUrl(listSourceUrl, page));
       }
-      let extracted = await executeCurrentTab(chromeRef, tab.id, extractAlibabaListPage);
+      const expectedListUrl = directListPageUrl(listSourceUrl, page);
+      let listRead = await readAlibabaPageWithManualVerification(context, tab, extractAlibabaListPage, progress, "读取列表", control, { expectedUrl: expectedListUrl, pageKind: "list" });
+      tab = listRead.tab;
+      let extracted = listRead.value;
       let blocked = directPageLooksBlocked(extracted);
-      if (blocked === "ALIBABA_VERIFICATION_REQUIRED") {
-        extracted = await waitForManualVerification(context, tab, extractAlibabaListPage, progress, "读取列表", control);
-        blocked = directPageLooksBlocked(extracted);
-      }
       if (blocked) throw new Error(blocked);
       progress({
         phase: "syncing_filters",
@@ -1516,12 +1839,10 @@ async function runCurrentTabScrape(context, request, emit = () => {}, control = 
       const statusSync = settled.statusSync;
       if (statusSync.changed) {
         tab = settled.tab;
-        extracted = await executeCurrentTab(chromeRef, tab.id, extractAlibabaListPage);
+        listRead = await readAlibabaPageWithManualVerification(context, tab, extractAlibabaListPage, progress, "读取同步后的列表", control, { expectedUrl: tab.url, pageKind: "list" });
+        tab = listRead.tab;
+        extracted = listRead.value;
         blocked = directPageLooksBlocked(extracted);
-        if (blocked === "ALIBABA_VERIFICATION_REQUIRED") {
-          extracted = await waitForManualVerification(context, tab, extractAlibabaListPage, progress, "读取同步后的列表", control);
-          blocked = directPageLooksBlocked(extracted);
-        }
         if (blocked) throw new Error(blocked);
       }
       const pageItems = Array.isArray(extracted.items) ? extracted.items : [];
@@ -1535,7 +1856,14 @@ async function runCurrentTabScrape(context, request, emit = () => {}, control = 
           prefiltered += 1;
           continue;
         }
-        candidates.push({ url, title: String(item.text || "").split("\n")[0].trim() });
+        candidates.push({
+          url,
+          title: String(item.text || "").split("\n")[0].trim(),
+          listedAmount: String(item.listedAmount || ""),
+          listedBidCount: Number(item.listedBidCount || 0),
+          listedHasEndedText: item.listedHasEndedText === true,
+          listedHasExplicitSoldPrice: item.listedHasExplicitSoldPrice === true,
+        });
       }
       progress({
         phase: "listing",
@@ -1568,26 +1896,34 @@ async function runCurrentTabScrape(context, request, emit = () => {}, control = 
     }
   }
 
+  if (historyCandidates.length) {
+    candidates.push(...historyCandidates);
+    progress({ phase: "history_loaded", percent: 12, message: `已加载历史清单 ${candidates.length} 条，准备重新读取详情…`, fetched: candidates.length, verified: 0, skipped: 0 });
+  }
+
   if (!candidates.length) {
     return { ok: false, phase: "failed", errorCode: "ALIBABA_LIST_EMPTY", reason: prefiltered ? "当前列表记录均不在所选交易状态或日期范围内。" : "当前浏览器页面未读取到阿里拍卖候选记录。请确认已登录且没有出现验证页。", candidates: 0, results: [], skipped: prefiltered, security: { credentialsReturned: false } };
   }
 
   const results = [];
+  const skippedReasons = [];
   let skipped = prefiltered;
   for (const [index, candidate] of candidates.entries()) {
     try {
       await waitForRunResume(control, progress);
       if (control) control.percent = Math.min(98, 35 + Math.round(((index + 1) / candidates.length) * 63));
       tab = await navigateCurrentTab(chromeRef, tab, candidate.url);
-      let detail = await executeCurrentTab(chromeRef, tab.id, extractAlibabaDetailPage);
+      const detailRead = await readAlibabaPageWithManualVerification(context, tab, extractAlibabaDetailPage, progress, "核验当前详情", control, { expectedUrl: candidate.url, pageKind: "detail" });
+      tab = detailRead.tab;
+      let detail = detailRead.value;
       let blocked = directPageLooksBlocked(detail);
-      if (blocked === "ALIBABA_VERIFICATION_REQUIRED") {
-        detail = await waitForManualVerification(context, tab, extractAlibabaDetailPage, progress, "核验当前详情", control);
-        blocked = directPageLooksBlocked(detail);
-      }
       if (blocked) throw new Error(blocked);
       const detailFloors = directExtractFloorFieldsFromText(detail.pageText);
-      const needsAttachmentFields = !directParseAmount(detail.buildingArea)
+      const hasLowConfidenceFields = detail.fieldSources?.buildingArea !== "structured"
+        || detail.fieldSources?.floor !== "structured"
+        || detail.fieldSources?.totalFloors !== "structured";
+      const needsAttachmentFields = hasLowConfidenceFields
+        || !directParseAmount(detail.buildingArea)
         || !detailFloors.floor
         || !detailFloors.totalFloors;
       if (needsAttachmentFields && Array.isArray(detail.attachments) && detail.attachments.length) {
@@ -1617,13 +1953,31 @@ async function runCurrentTabScrape(context, request, emit = () => {}, control = 
           // Keep the detail-page result when an optional report/OCR read fails.
         }
       }
-      const parsed = directParseDetail(detail, request);
-      if (parsed.valid && directMatchesRequest(parsed, request)) results.push(parsed);
-      else skipped += 1;
+      const detailWithListingEvidence = directMergeListingEvidence(detail, candidate);
+      const parsed = directParseDetail(detailWithListingEvidence, request);
+      const accepted = parsed.valid && directMatchesRequest(parsed, request);
+      if (accepted) results.push(parsed);
+      else {
+        skipped += 1;
+        skippedReasons.push({
+          title: parsed.title || candidate.title,
+          url: candidate.url,
+          reason: directSkipReason(detailWithListingEvidence, parsed, request),
+          diagnostics: {
+            transactionAmount: parsed.transactionAmount || null,
+            transactionTime: parsed.transactionTime || "",
+            bidCount: Number(parsed.bidCount || 0),
+            hasExplicitSoldPrice: detailWithListingEvidence.hasExplicitSoldPrice === true,
+            hasEndedText: detailWithListingEvidence.hasEndedText === true,
+            valid: parsed.valid === true,
+            matched: directMatchesRequest(parsed, request),
+          },
+        });
+      }
       progress({
         phase: "verifying",
         percent: Math.min(98, 35 + Math.round(((index + 1) / candidates.length) * 63)),
-        message: parsed.valid ? `已核验成交案例 ${results.length} 条。` : `已跳过未通过成交核验的记录 ${skipped} 条。`,
+        message: accepted ? `已核验成交案例 ${results.length} 条。` : `已跳过记录 ${skipped} 条：${skippedReasons.at(-1)?.reason || "未通过核验"}。`,
         fetched: candidates.length,
         verified: results.length,
         skipped,
@@ -1631,13 +1985,13 @@ async function runCurrentTabScrape(context, request, emit = () => {}, control = 
       });
     } catch (error) {
       const reason = String(error?.message || error);
-      skipped += 1;
       if (reason === "ALIBABA_SCRAPE_STOPPED") {
         return { ok: false, phase: "stopped", errorCode: reason, reason, stopped: true, candidates: candidates.length, results, skipped, security: { credentialsReturned: false } };
       }
-      if (["ALIBABA_LOGIN_REQUIRED", "ALIBABA_VERIFICATION_REQUIRED"].includes(reason)) {
+      if (["ALIBABA_LOGIN_REQUIRED", "ALIBABA_VERIFICATION_REQUIRED", "ALIBABA_VERIFICATION_TIMEOUT"].includes(reason)) {
         return { ok: false, phase: "failed", errorCode: reason, reason: reason === "ALIBABA_LOGIN_REQUIRED" ? "阿里拍卖页面需要登录，请先在当前浏览器完成登录后重试。" : "阿里拍卖页面出现验证，请在当前浏览器完成验证后重试。", candidates: candidates.length, results, skipped, security: { credentialsReturned: false } };
       }
+      skipped += 1;
       progress({ phase: "verifying", percent: Math.min(98, 35 + Math.round(((index + 1) / candidates.length) * 63)), message: `详情读取失败，已跳过 ${skipped} 条。`, fetched: candidates.length, verified: results.length, skipped, current: candidate.title });
     }
   }
@@ -1666,12 +2020,16 @@ async function runCurrentTabScrape(context, request, emit = () => {}, control = 
       ? "本地结果写入完成，抓取已终止。"
       : results.length
         ? "阿里拍卖成交案例已完成详情核验。"
-        : "候选记录中没有找到满足成交且出价次数大于 0 的案例。",
+        : skippedReasons.length
+          ? `候选记录中没有找到详情页可确认的成交案例。首条跳过原因：${skippedReasons[0].reason}。`
+          : "候选记录中没有找到详情页可确认的成交案例。",
     candidates: candidates.length,
     results: Array.isArray(saved?.results) ? saved.results : results,
     htmlPath: String(saved?.htmlPath || ""),
     mapPath: String(saved?.mapPath || ""),
+    historyPath: String(saved?.historyPath || ""),
     skipped,
+    skippedReasons: skippedReasons.slice(-20),
     geocodeRequested: Number(saved?.geocodeRequested || 0),
     geocodeCacheHits: Number(saved?.geocodeCacheHits || 0),
     geocodeResolved: Number(saved?.geocodeResolved || 0),
@@ -1710,6 +2068,8 @@ export const alibabaAuctionModule = {
     let opening = false;
     let exporting = false;
     let runControl = null;
+    let historyCatalog = [];
+    let historyCanRefresh = false;
     let progressState = { phase: "idle", percent: 0, fetched: 0, verified: 0, skipped: 0, message: "等待开始" };
 
     function storageState() {
@@ -1760,7 +2120,19 @@ export const alibabaAuctionModule = {
       elements.alibabaAuctionOutputDirectory.value = config.outputDirectory;
       elements.alibabaAuctionGenerateMap.checked = Boolean(config.generateMap);
       elements.alibabaAuctionSourceUrl.value = buildSourceUrl(config);
+      elements.alibabaAuctionHistoryDirectory.value = config.historyDirectory || config.outputDirectory || "";
+      elements.alibabaAuctionRefreshHistory.checked = config.historyRefresh !== false;
+      renderHistoryOptions();
+      if (!running) elements.runAlibabaAuctionHistory.disabled = !config.historyPath || !historyCanRefresh;
       renderParameterState();
+    }
+
+    function renderHistoryOptions() {
+      const select = elements?.alibabaAuctionHistorySelect;
+      if (!select) return;
+      const selected = config.historyPath || "";
+      select.innerHTML = `<option value="">请选择历史抓取清单</option>${historyCatalog.map((item) => `<option value="${escapeHtml(item.path)}">${escapeHtml(item.label || item.name || item.path)}</option>`).join("")}`;
+      select.value = historyCatalog.some((item) => item.path === selected) ? selected : "";
     }
 
     function renderRegionOptions() {
@@ -1823,6 +2195,7 @@ export const alibabaAuctionModule = {
         verifying: "正在核验详情",
         generating_results: "正在生成结果页",
         locating_coordinates: "正在定位坐标并生成地图",
+        loading_detail: "正在等待详情加载",
         verification_required: "等待人工验证",
         paused: "已暂停",
         stopped: "已终止",
@@ -1842,13 +2215,33 @@ export const alibabaAuctionModule = {
       }
     }
 
+    function localPathToFileUrl(value) {
+      const normalized = String(value || "").trim().replace(/\\/g, "/");
+      if (!normalized) return "";
+      if (/^file:\/\//i.test(normalized)) return normalized;
+      const encoded = normalized.split("/").map((segment) => encodeURIComponent(segment)).join("/");
+      return normalized.startsWith("/") ? `file://${encoded}` : `file:///${encoded}`;
+    }
+
+    async function openResultOrMapInCurrentBrowserTab(targetPath, label) {
+      const result = await context.sendNativeMessage({
+        action: "open_alibaba_auction_path",
+        path: targetPath,
+        outputDirectory: config.outputDirectory,
+        openInCurrentBrowserTab: true,
+      }, 15000);
+      if (!result?.ok || !result.path) throw new Error(result?.reason || `${label}打开失败`);
+      const url = localPathToFileUrl(result.path);
+      if (!url) throw new Error(`${label}路径无效`);
+      await context.chrome.tabs.create({ url, active: true });
+    }
+
     async function openResultPage() {
       if (!htmlPath) return;
       try {
-        const result = await context.sendNativeMessage({ action: "open_alibaba_auction_path", path: htmlPath, outputDirectory: config.outputDirectory }, 15000);
-        if (!result?.ok) throw new Error(result?.reason || "打开结果页失败");
-        setMessage(elements.alibabaAuctionResultMessage, "已在普通浏览器中打开独立结果页。", "ok");
-        context.setStatus("阿里拍卖结果页已打开", "ok");
+        await openResultOrMapInCurrentBrowserTab(htmlPath, "结果页");
+        setMessage(elements.alibabaAuctionResultMessage, "已在当前浏览器新标签页打开结果页。", "ok");
+        context.setStatus("阿里拍卖结果页已在当前浏览器打开", "ok");
       } catch (error) {
         setMessage(elements.alibabaAuctionResultMessage, `结果页打开失败：${error?.message || String(error)}`, "error");
         context.setStatus("阿里拍卖结果页打开失败", "error");
@@ -1871,10 +2264,9 @@ export const alibabaAuctionModule = {
     async function openMap() {
       if (!mapPath) return;
       try {
-        const result = await context.sendNativeMessage({ action: "open_alibaba_auction_path", path: mapPath, outputDirectory: config.outputDirectory }, 15000);
-        if (!result?.ok) throw new Error(result?.reason || "打开地图失败");
-        setMessage(elements.alibabaAuctionResultMessage, "已在普通浏览器中打开独立地图。", "ok");
-        context.setStatus("阿里拍卖地图已打开", "ok");
+        await openResultOrMapInCurrentBrowserTab(mapPath, "地图");
+        setMessage(elements.alibabaAuctionResultMessage, "已在当前浏览器新标签页打开地图。", "ok");
+        context.setStatus("阿里拍卖地图已在当前浏览器打开", "ok");
       } catch (error) {
         setMessage(elements.alibabaAuctionResultMessage, `地图打开失败：${error?.message || String(error)}`, "error");
         context.setStatus("阿里拍卖地图打开失败", "error");
@@ -1911,7 +2303,7 @@ export const alibabaAuctionModule = {
       }
     }
 
-    function requireAppliedParameters() {
+    function requireAppliedParameters(options = {}) {
       config = readConfig();
       renderParameterState();
       if (!parametersApplied()) {
@@ -1920,7 +2312,13 @@ export const alibabaAuctionModule = {
         context.setStatus("阿里司法拍卖参数尚未应用", "warn");
         return null;
       }
-      return { ...appliedConfig };
+      const request = { ...appliedConfig };
+      if (options.requireOutput !== false && !request.outputDirectory) {
+        setMessage(elements.alibabaAuctionParameterMessage, "请先选择本机输出目录，再开始网络抓取。", "warn");
+        context.setStatus("阿里司法拍卖尚未选择输出目录", "warn");
+        return null;
+      }
+      return request;
     }
 
     async function applyParameters() {
@@ -1945,12 +2343,13 @@ export const alibabaAuctionModule = {
     async function chooseOutputDirectory() {
       try {
         const result = await context.sendNativeMessage({ action: "select_alibaba_auction_output_directory" }, 130000);
-        const selected = result?.paths?.[0] || "";
+        const selected = result?.outputDirectory || result?.path || result?.paths?.[0] || "";
         if (!result?.ok || !selected) {
           if (!result?.cancelled) setMessage(elements.alibabaAuctionParameterMessage, result?.reason || "未选择输出目录", "warn");
           return;
         }
         config.outputDirectory = selected;
+        if (!config.historyDirectory) config.historyDirectory = selected;
         elements.alibabaAuctionOutputDirectory.value = selected;
         renderConfig();
         await context.storage.save(storageState());
@@ -1964,12 +2363,89 @@ export const alibabaAuctionModule = {
       }
     }
 
+    function pathDirectory(value) {
+      const raw = String(value || "");
+      const index = Math.max(raw.lastIndexOf("/"), raw.lastIndexOf("\\"));
+      return index > 0 ? raw.slice(0, index) : raw;
+    }
+
+    async function chooseHistoryDirectory() {
+      try {
+        const result = await context.sendNativeMessage({ action: "select_alibaba_auction_history_directory" }, 130000);
+        const selected = result?.path || result?.paths?.[0] || "";
+        if (!result?.ok || !selected) {
+          if (!result?.cancelled) setMessage(elements.alibabaAuctionResultMessage, result?.reason || "未选择历史数据目录", "warn");
+          return;
+        }
+        config.historyDirectory = selected;
+        config.historyPath = "";
+        historyCatalog = [];
+        historyCanRefresh = false;
+        renderConfig();
+        await context.storage.save(storageState());
+        await loadHistoryCatalog();
+      } catch (error) {
+        setMessage(elements.alibabaAuctionResultMessage, `选择历史目录失败：${error?.message || String(error)}`, "error");
+      }
+    }
+
+    async function loadHistoryCatalog() {
+      const directory = elements.alibabaAuctionHistoryDirectory.value.trim() || config.historyDirectory || config.outputDirectory;
+      if (!directory) {
+        setMessage(elements.alibabaAuctionResultMessage, "请先选择历史数据目录", "warn");
+        return;
+      }
+      try {
+        const result = await context.sendNativeMessage({ action: "list_alibaba_auction_history", directory }, 30000);
+        if (!result?.ok) throw new Error(result?.reason || "ALIBABA_HISTORY_LIST_FAILED");
+        historyCatalog = Array.isArray(result.items) ? result.items : [];
+        config.historyDirectory = directory;
+        const selected = historyCatalog.find((item) => item.path === config.historyPath);
+        historyCanRefresh = Boolean(selected?.canRefresh);
+        renderHistoryOptions();
+        elements.alibabaAuctionHistoryStatus.textContent = historyCatalog.length ? `已找到 ${historyCatalog.length} 份历史数据，可选择后加载。` : "当前目录未找到历史清单或 Excel 结果。";
+        elements.alibabaAuctionHistoryStatus.dataset.kind = historyCatalog.length ? "ok" : "warn";
+        await context.storage.save(storageState());
+      } catch (error) {
+        historyCatalog = [];
+        renderHistoryOptions();
+        elements.alibabaAuctionHistoryStatus.textContent = `历史清单加载失败：${error?.message || String(error)}`;
+        elements.alibabaAuctionHistoryStatus.dataset.kind = "error";
+      }
+    }
+
+    async function loadHistorySelection() {
+      const historyPath = elements.alibabaAuctionHistorySelect.value.trim();
+      if (!historyPath) {
+        setMessage(elements.alibabaAuctionResultMessage, "请先选择历史抓取清单", "warn");
+        return;
+      }
+      try {
+        const result = await context.sendNativeMessage({ action: "load_alibaba_auction_history", path: historyPath }, 30000);
+        if (!result?.ok) throw new Error(result?.reason || "ALIBABA_HISTORY_LOAD_FAILED");
+        results = Array.isArray(result.results) ? result.results : [];
+        htmlPath = String(result.htmlPath || "").trim();
+        excelPath = String(result.excelPath || "").trim();
+        mapPath = String(result.mapPath || "").trim();
+        historyCanRefresh = result.canRefresh === true;
+        config = normalizeConfig({ ...config, ...(result.request || {}), outputDirectory: result.outputDirectory || config.outputDirectory, historyDirectory: pathDirectory(historyPath), historyPath, historyRefresh: historyCanRefresh && elements.alibabaAuctionRefreshHistory.checked });
+        appliedConfig = { ...config };
+        renderConfig();
+        setResultButtons(result);
+        renderProgress({ phase: "completed", percent: 100, fetched: result.recordCount || results.length, verified: results.length, skipped: 0, message: `已加载历史数据：${results.length} 条` });
+        setMessage(elements.alibabaAuctionResultMessage, "已加载历史结果；当前操作不会访问网络。需要更新详情时，请在历史数据区勾选并点击“重新抓取历史详情”。", "ok");
+        await context.storage.save(storageState());
+      } catch (error) {
+        setMessage(elements.alibabaAuctionResultMessage, `历史数据加载失败：${error?.message || String(error)}`, "error");
+      }
+    }
+
     async function openSource() {
       if (opening || running) return;
       opening = true;
       elements.openAlibabaAuctionSource.disabled = true;
       try {
-        const requestConfig = requireAppliedParameters();
+        const requestConfig = requireAppliedParameters({ requireOutput: true });
         if (!requestConfig) return;
         let tab = await getCurrentBrowserTab(context.chrome);
         tab = await navigateCurrentTab(context.chrome, tab, buildSourceUrl(requestConfig));
@@ -1989,7 +2465,7 @@ export const alibabaAuctionModule = {
 
     async function syncStatusOnCurrentPage() {
       try {
-        const requestConfig = requireAppliedParameters();
+        const requestConfig = requireAppliedParameters({ requireOutput: true });
         if (!requestConfig) return { ok: false, errorCode: "ALIBABA_PARAMETERS_NOT_APPLIED", reason: "参数有改动，需重新应用。" };
         let tab = await getCurrentBrowserTab(context.chrome);
         if (!isAlibabaListPage(tab.url)) return { ok: false, skipped: true };
@@ -2004,10 +2480,23 @@ export const alibabaAuctionModule = {
       }
     }
 
-    async function runScrape() {
+    async function runScrape(mode = "network") {
       if (running) return;
-      const requestConfig = requireAppliedParameters();
+      const requestConfig = mode === "history" ? normalizeConfig(config) : requireAppliedParameters();
       if (!requestConfig) return;
+      if (!requestConfig.outputDirectory) {
+        setMessage(elements.alibabaAuctionResultMessage, "请先选择本机输出目录，再开始抓取。", "warn");
+        context.setStatus("阿里司法拍卖尚未选择输出目录", "warn");
+        return;
+      }
+      if (mode === "history" && !requestConfig.historyPath) {
+        setMessage(elements.alibabaAuctionResultMessage, "请先加载一份历史抓取清单。", "warn");
+        return;
+      }
+      if (mode === "history" && !elements.alibabaAuctionRefreshHistory.checked) {
+        setMessage(elements.alibabaAuctionResultMessage, "请勾选“允许访问网络重新读取历史详情”后再执行。", "warn");
+        return;
+      }
       running = true;
       runControl = { paused: false, percent: 0, resumeResolvers: [] };
       renderProgress({ phase: "opening", percent: 0, fetched: 0, verified: 0, skipped: 0, message: "正在准备抓取…" });
@@ -2018,12 +2507,13 @@ export const alibabaAuctionModule = {
       elements.pauseAlibabaAuction.textContent = "暂停抓取";
       elements.clearAlibabaAuctionResults.disabled = true;
       renderResults();
-      setMessage(elements.alibabaAuctionResultMessage, "脚本正在通过浏览器读取列表并逐条核验详情；无需 AI 介入。", "warn");
-      context.setStatus("阿里拍卖脚本正在运行", "busy");
+      setMessage(elements.alibabaAuctionResultMessage, mode === "history" ? "正在按历史清单逐条重新读取详情；不会重新读取列表。" : "脚本正在通过浏览器读取列表并逐条核验详情；无需 AI 介入。", "warn");
+      context.setStatus(mode === "history" ? "阿里拍卖历史详情正在重抓" : "阿里拍卖脚本正在运行", "busy");
       try {
         const result = await runCurrentTabScrape(context, {
           ...requestConfig,
           sourceUrl: buildSourceUrl(requestConfig),
+          historyRefresh: mode === "history",
         }, (payload) => {
           renderProgress(payload);
           if (["generating_results", "locating_coordinates"].includes(payload.phase)) {
@@ -2063,15 +2553,21 @@ export const alibabaAuctionModule = {
         results = Array.isArray(result.results) ? result.results : [];
         htmlPath = String(result.htmlPath || "").trim();
         mapPath = String(result.mapPath || "").trim();
+        if (result.historyPath) {
+          config.historyPath = String(result.historyPath).trim();
+          config.historyDirectory = pathDirectory(config.historyPath);
+          historyCanRefresh = true;
+        }
         excelPath = "";
         renderProgress({ phase: "completed", percent: 100, fetched: result.candidates || 0, verified: results.length, skipped: result.skipped || 0, message: "抓取完成，结果页正在打开…" });
         await context.storage.save(storageState());
+        renderConfig();
         renderResults();
         elements.alibabaAuctionResultStatus.textContent = `已完成详情核验：${results.length} 条有效成交案例`;
         const coordinateSummary = requestConfig.generateMap && (result.geocodeRequested || result.geocodeCacheHits || result.geocodeResolved || result.geocodeFailed || result.geocodeTimedOut)
           ? `坐标查询 ${result.geocodeRequested || 0} 次，缓存命中 ${result.geocodeCacheHits || 0} 条，定位 ${result.geocodeResolved || 0} 条。`
           : "";
-        setMessage(elements.alibabaAuctionResultMessage, `抓取完成：页面记录 ${result.candidates || 0} 条，核验通过 ${results.length} 条，跳过 ${result.skipped || 0} 条。${coordinateSummary}`, "ok");
+        setMessage(elements.alibabaAuctionResultMessage, `${mode === "history" ? "历史详情重新抓取完成" : "抓取完成"}：页面记录 ${result.candidates || 0} 条，核验通过 ${results.length} 条，跳过 ${result.skipped || 0} 条。${coordinateSummary}`, "ok");
         await openResultPage();
         context.setStatus(`阿里拍卖抓取完成：${results.length} 条有效案例`, "ok");
       } catch (error) {
@@ -2162,7 +2658,21 @@ export const alibabaAuctionModule = {
         context.scope.on(elements.openAlibabaAuctionExcel, "click", openExcel);
         context.scope.on(elements.openAlibabaAuctionMap, "click", openMap);
         context.scope.on(elements.chooseAlibabaAuctionOutput, "click", chooseOutputDirectory);
-        context.scope.on(elements.runAlibabaAuction, "click", runScrape);
+        context.scope.on(elements.chooseAlibabaAuctionHistoryDirectory, "click", chooseHistoryDirectory);
+        context.scope.on(elements.loadAlibabaAuctionHistoryCatalog, "click", loadHistoryCatalog);
+        context.scope.on(elements.loadAlibabaAuctionHistory, "click", loadHistorySelection);
+        context.scope.on(elements.runAlibabaAuction, "click", () => runScrape("network"));
+        context.scope.on(elements.runAlibabaAuctionHistory, "click", () => runScrape("history"));
+        context.scope.on(elements.alibabaAuctionHistorySelect, "change", () => {
+          config.historyPath = elements.alibabaAuctionHistorySelect.value.trim();
+          historyCanRefresh = Boolean(historyCatalog.find((item) => item.path === config.historyPath)?.canRefresh);
+          renderConfig();
+        });
+        context.scope.on(elements.alibabaAuctionRefreshHistory, "change", async () => {
+          config.historyRefresh = elements.alibabaAuctionRefreshHistory.checked;
+          await context.storage.save(storageState());
+          renderConfig();
+        });
         context.scope.on(elements.pauseAlibabaAuction, "click", togglePause);
         context.scope.on(elements.stopAlibabaAuction, "click", stopScrape);
         context.scope.on(elements.saveAlibabaAuctionParams, "click", applyParameters);
@@ -2208,6 +2718,7 @@ export const alibabaAuctionModule = {
         renderConfig();
         renderResults();
         renderProgress();
+        if (config.historyDirectory || config.outputDirectory) void loadHistoryCatalog();
       },
       activate() {
         renderConfig();
@@ -2229,11 +2740,18 @@ export {
   resultGenerationProgress,
   directExtractBuildingAreaFromText,
   directExtractFloorFieldsFromText,
+  directMergeListingEvidence,
   directParseDetail,
+  directSkipReason,
+  alibabaPageReady,
+  alibabaUrlsReferToSamePage,
+  readAlibabaPageWithManualVerification,
+  waitForManualVerification,
   listPageMatchesRequest,
   statusFilterLabels,
   statusFilterMatchesRequest,
   isAlibabaListPage,
+  isAlibabaVerificationUrl,
   normalizeConfig,
   parameterSnapshotMatches,
   propertyTypeLabel,

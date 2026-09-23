@@ -155,6 +155,68 @@ function loadRuntimeConfig() {
 }
 
 const runtimeConfig = loadRuntimeConfig();
+const MAP_CONFIG_PATH = process.env.TIANYUAN_MAP_CONFIG_PATH
+  || path.join(path.dirname(processLauncher.runtimeDirectory()), "map-config.json");
+
+function readMapConfig() {
+  try {
+    const payload = JSON.parse(fs.readFileSync(MAP_CONFIG_PATH, "utf8"));
+    return payload && typeof payload === "object" ? payload : {};
+  } catch {
+    return {};
+  }
+}
+
+function mapSecretMask(value) {
+  const secret = String(value || "");
+  return secret ? `${"•".repeat(Math.max(4, secret.length - 4))}${secret.slice(-4)}` : "";
+}
+
+function mapConfigSummary() {
+  const stored = readMapConfig();
+  const amap = stored.amap && typeof stored.amap === "object"
+    ? stored.amap
+    : {};
+  return {
+    ok: true,
+    action: "get_map_config",
+    configured: Boolean(amap.enabled && amap.webKey),
+    enabled: amap.enabled === true,
+    webKeyMasked: mapSecretMask(amap.webKey),
+    securityJsCodeConfigured: Boolean(amap.securityJsCode),
+    path: MAP_CONFIG_PATH,
+    security: { credentialsReturned: false },
+  };
+}
+
+function saveMapConfig(message = {}) {
+  const input = message.config?.amap && typeof message.config.amap === "object"
+    ? message.config.amap
+    : {};
+  const enabled = input.enabled === true;
+  const storedPayload = readMapConfig();
+  const stored = storedPayload.amap && typeof storedPayload.amap === "object" ? storedPayload.amap : {};
+  const preserveExisting = input.preserveExisting === true;
+  const webKey = String(input.webKey || (preserveExisting ? stored.webKey : "")).trim().slice(0, 256);
+  const securityJsCode = String(input.securityJsCode || (preserveExisting ? stored.securityJsCode : "")).trim().slice(0, 256);
+  if (enabled && !webKey) throw new Error("MAP_CONFIG_AMAP_KEY_REQUIRED");
+  const payload = {
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    amap: { enabled, webKey, securityJsCode },
+  };
+  fs.mkdirSync(path.dirname(MAP_CONFIG_PATH), { recursive: true, mode: 0o700 });
+  const temporaryPath = `${MAP_CONFIG_PATH}.${process.pid}.tmp`;
+  fs.writeFileSync(temporaryPath, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
+  fs.renameSync(temporaryPath, MAP_CONFIG_PATH);
+  return { ...mapConfigSummary(), action: "save_map_config" };
+}
+
+function clearMapConfig() {
+  try { fs.rmSync(MAP_CONFIG_PATH, { force: true }); } catch {}
+  return { ...mapConfigSummary(), action: "clear_map_config", configured: false, enabled: false };
+}
+
 const workbenchUpdater = updateInstallerFactory.createWorkbenchUpdater({
   updateChecker,
   platformAdapter,
@@ -1790,14 +1852,63 @@ async function chooseDirectory(prompt) {
   return await platformAdapter.chooseDirectory(prompt);
 }
 
-async function chooseExportDirectory() {
-  const result = await chooseDirectory("选择天源表格导出目录");
-  const selectedPath = result.paths?.[0] || "";
-  return {
-    ...result,
-    action: "export_directory_selected",
-    path: selectedPath ? selectedPath.replace(/[\\/]+$/, "") || path.parse(selectedPath).root : "",
-  };
+function selectedDirectoryPath(result) {
+  return String(result?.outputDirectory || result?.path || result?.paths?.[0] || "").trim();
+}
+
+async function chooseManagedOutputDirectory(prompt, directoryName, action, failureReason) {
+  const result = await chooseDirectory(prompt);
+  const rawParentPath = selectedDirectoryPath(result);
+  if (!result?.ok || !rawParentPath) {
+    return {
+      ...result,
+      action,
+      path: "",
+      paths: [],
+      security: { credentialsReturned: false },
+    };
+  }
+  try {
+    const parentPath = validateExportDirectory(rawParentPath);
+    const folderName = String(directoryName || "").trim();
+    if (!folderName || folderName === "." || folderName === ".." || path.basename(folderName) !== folderName) {
+      throw new Error("EXPORT_DIRECTORY_NAME_INVALID");
+    }
+    const outputPath = path.basename(parentPath) === folderName ? parentPath : path.join(parentPath, folderName);
+    const alreadyExists = fs.existsSync(outputPath);
+    fs.mkdirSync(outputPath, { recursive: true, mode: 0o700 });
+    const selectedPath = fs.realpathSync(outputPath);
+    return {
+      ...result,
+      ok: true,
+      action,
+      path: selectedPath,
+      paths: [selectedPath],
+      outputDirectory: selectedPath,
+      parentPath,
+      directoryName: folderName,
+      createdDirectory: !alreadyExists,
+      security: { credentialsReturned: false },
+    };
+  } catch {
+    return {
+      ok: false,
+      action,
+      path: "",
+      paths: [],
+      reason: failureReason,
+      security: { credentialsReturned: false },
+    };
+  }
+}
+
+async function chooseExportDirectory(message = {}) {
+  return await chooseManagedOutputDirectory(
+    "选择天源表格导出上级目录",
+    message.directoryName || "天源表格导出",
+    "export_directory_selected",
+    "EXPORT_DIRECTORY_CREATE_FAILED",
+  );
 }
 
 async function chooseWorkbookFiles() {
@@ -1879,146 +1990,160 @@ function listBatchUploadDirectory(input = {}) {
   };
 }
 
-async function choosePrintOutputDirectory() {
-  const result = await chooseDirectory("选择处理后文件的存放位置");
-  return {
-    ...result,
-    action: "print_output_directory_selected",
-  };
+async function choosePrintOutputDirectory(message = {}) {
+  return await chooseManagedOutputDirectory(
+    "选择处理后文件的上级目录",
+    message.directoryName || "表格处理结果",
+    "print_output_directory_selected",
+    "PRINT_OUTPUT_DIRECTORY_CREATE_FAILED",
+  );
 }
 
 async function chooseTableFormatOutputDirectory() {
-  const result = await chooseDirectory("选择表格设置处理后文件的存放位置");
-  return {
-    ...result,
-    action: "table_format_output_directory_selected",
-  };
+  return await chooseManagedOutputDirectory(
+    "选择表格设置处理后文件的上级目录",
+    "表格格式设置",
+    "table_format_output_directory_selected",
+    "TABLE_FORMAT_OUTPUT_DIRECTORY_CREATE_FAILED",
+  );
 }
 
 async function chooseLandPublicityOutputDirectory() {
-  const result = await chooseDirectory("选择浙江土地成交公示输出目录");
-  const rawParentPath = result.paths?.[0] || "";
-  if (!result.ok || !rawParentPath) {
-    return {
-      ...result,
-      action: "land_publicity_output_directory_selected",
-      path: "",
-      paths: [],
-      security: { credentialsReturned: false },
-    };
+  return await chooseManagedOutputDirectory(
+    "选择浙江土地成交公示上级目录",
+    "浙江土地成交公示",
+    "land_publicity_output_directory_selected",
+    "LAND_OUTPUT_DIRECTORY_CREATE_FAILED",
+  );
+}
+
+function landHistoryDirectoryReadback(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw.includes("\0") || !path.isAbsolute(raw)) throw new Error("LAND_HISTORY_DIRECTORY_INVALID");
+  const resolved = fs.realpathSync(raw);
+  if (!fs.statSync(resolved).isDirectory()) throw new Error("LAND_HISTORY_DIRECTORY_NOT_FOUND");
+  return resolved;
+}
+
+function landHistoryPathReadback(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw.includes("\0") || !path.isAbsolute(raw)) throw new Error("LAND_HISTORY_PATH_INVALID");
+  const resolved = fs.realpathSync(raw);
+  if (![".json", ".xlsx"].includes(path.extname(resolved).toLowerCase())) throw new Error("LAND_HISTORY_PATH_TYPE_NOT_ALLOWED");
+  if (!fs.statSync(resolved).isFile()) throw new Error("LAND_HISTORY_PATH_NOT_FOUND");
+  return resolved;
+}
+
+function landHistoryOutputPath(filePath, name) {
+  const candidate = path.join(path.dirname(filePath), String(name || ""));
+  if (!fs.existsSync(candidate)) return "";
+  const resolved = fs.realpathSync(candidate);
+  if (path.dirname(resolved) !== path.dirname(filePath)) return "";
+  return fs.statSync(resolved).isFile() ? resolved : "";
+}
+
+function listLandPublicityHistory(message = {}) {
+  const root = landHistoryDirectoryReadback(message.directory);
+  const files = fs.readdirSync(root, { withFileTypes: true });
+  const manifestNames = new Set(files.filter((entry) => entry.isFile() && entry.name.endsWith("_history.json")).map((entry) => entry.name.replace(/_history\.json$/, "")));
+  const items = [];
+  for (const entry of files) {
+    if (!entry.isFile()) continue;
+    const fullPath = path.join(root, entry.name);
+    if (entry.name.endsWith("_history.json")) {
+      try {
+        const payload = JSON.parse(fs.readFileSync(fullPath, "utf8"));
+        if (payload?.type !== "zj-land-publicity-history") continue;
+        const outputs = payload.outputs || {};
+        items.push({
+          path: fs.realpathSync(fullPath),
+          name: entry.name,
+          label: `${payload.request?.district || "全省"} · ${payload.generatedAt || "历史抓取"} · ${payload.summary?.written ?? payload.items?.length ?? 0} 条`,
+          generatedAt: payload.generatedAt || "",
+          recordCount: Number(payload.summary?.written ?? payload.items?.length ?? 0),
+          fetchedCount: Number(payload.summary?.fetched ?? payload.items?.length ?? 0),
+          filteredCount: Number(payload.summary?.filtered ?? payload.items?.length ?? 0),
+          writtenCount: Number(payload.summary?.written ?? payload.items?.length ?? 0),
+          canRefresh: Array.isArray(payload.items) && payload.items.some((item) => item?.record?.sourceId),
+          htmlPath: landHistoryOutputPath(fullPath, outputs.html || entry.name.replace(/_history\.json$/, ".html")),
+          excelPath: landHistoryOutputPath(fullPath, outputs.excel || entry.name.replace(/_history\.json$/, ".xlsx")),
+          mapPath: landHistoryOutputPath(fullPath, outputs.map || entry.name.replace(/_history\.json$/, "_map.html")),
+        });
+      } catch {
+        // Ignore unrelated or incomplete JSON files.
+      }
+      continue;
+    }
+    if (entry.name.endsWith(".xlsx") && entry.name.startsWith("浙江土地成交公示_") && !manifestNames.has(entry.name.replace(/\.xlsx$/, ""))) {
+      const base = entry.name.replace(/\.xlsx$/, "");
+      items.push({
+        path: fs.realpathSync(fullPath),
+        name: entry.name,
+        label: `${base} · 旧 Excel 结果（可加载）`,
+        generatedAt: "",
+        recordCount: 0,
+        fetchedCount: 0,
+        filteredCount: 0,
+        writtenCount: 0,
+        canRefresh: true,
+        htmlPath: landHistoryOutputPath(fullPath, `${base}.html`),
+        excelPath: fs.realpathSync(fullPath),
+        mapPath: landHistoryOutputPath(fullPath, `${base}_map.html`),
+      });
+    }
   }
-  try {
-    const parentPath = validateExportDirectory(rawParentPath);
-    const outputPath = path.join(parentPath, "浙江土地成交公示");
-    const directoryName = path.basename(outputPath);
-    const alreadyExists = fs.existsSync(outputPath);
-    fs.mkdirSync(outputPath, { recursive: true, mode: 0o700 });
-    const selectedPath = fs.realpathSync(outputPath);
-    return {
-      ...result,
-      ok: true,
-      action: "land_publicity_output_directory_selected",
-      path: selectedPath,
-      paths: [selectedPath],
-      parentPath,
-      directoryName,
-      createdDirectory: !alreadyExists,
-      security: { credentialsReturned: false },
-    };
-  } catch {
-    return {
-      ok: false,
-      action: "land_publicity_output_directory_selected",
-      path: "",
-      paths: [],
-      reason: "LAND_OUTPUT_DIRECTORY_CREATE_FAILED",
-      security: { credentialsReturned: false },
-    };
+  items.sort((left, right) => String(right.generatedAt || right.name).localeCompare(String(left.generatedAt || left.name), "zh-CN"));
+  return { ok: true, action: "list_land_publicity_history", directory: root, items: items.slice(0, 200), security: { credentialsReturned: false } };
+}
+
+function loadLandPublicityHistory(message = {}) {
+  const historyPath = landHistoryPathReadback(message.path);
+  const directory = path.dirname(historyPath);
+  let payload = {};
+  if (path.extname(historyPath).toLowerCase() === ".json") {
+    try { payload = JSON.parse(fs.readFileSync(historyPath, "utf8")); } catch { throw new Error("LAND_HISTORY_READ_FAILED"); }
+    if (payload?.type !== "zj-land-publicity-history") throw new Error("LAND_HISTORY_FORMAT_INVALID");
   }
+  const base = path.basename(historyPath).replace(/_history\.json$/, "").replace(/\.xlsx$/, "");
+  const outputs = payload.outputs || {};
+  const excelPath = landHistoryOutputPath(historyPath, outputs.excel || `${base}.xlsx`);
+  const htmlPath = landHistoryOutputPath(historyPath, outputs.html || `${base}.html`);
+  const mapPath = landHistoryOutputPath(historyPath, outputs.map || `${base}_map.html`);
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  return {
+    ok: true,
+    action: "load_land_publicity_history",
+    path: historyPath,
+    outputDirectory: directory,
+    request: payload.request || {},
+    recordCount: Number(payload.summary?.written ?? items.length ?? 0),
+    fetchedCount: Number(payload.summary?.fetched ?? items.length ?? 0),
+    filteredCount: Number(payload.summary?.filtered ?? items.length ?? 0),
+    writtenCount: Number(payload.summary?.written ?? items.length ?? 0),
+    canRefresh: path.extname(historyPath).toLowerCase() === ".xlsx" || Boolean(items.some((item) => item?.record?.sourceId)),
+    excelPath,
+    htmlPath,
+    mapPath,
+    security: { credentialsReturned: false },
+  };
 }
 
 async function chooseAlibabaAuctionOutputDirectory() {
-  const result = await chooseDirectory("选择阿里司法拍卖输出目录");
-  const rawParentPath = result.paths?.[0] || "";
-  if (!result.ok || !rawParentPath) {
-    return {
-      ...result,
-      action: "alibaba_auction_output_directory_selected",
-      path: "",
-      paths: [],
-      security: { credentialsReturned: false },
-    };
-  }
-  try {
-    const parentPath = validateExportDirectory(rawParentPath);
-    const outputPath = path.join(parentPath, "阿里司法拍卖");
-    const directoryName = path.basename(outputPath);
-    const alreadyExists = fs.existsSync(outputPath);
-    fs.mkdirSync(outputPath, { recursive: true, mode: 0o700 });
-    const selectedPath = fs.realpathSync(outputPath);
-    return {
-      ...result,
-      ok: true,
-      action: "alibaba_auction_output_directory_selected",
-      path: selectedPath,
-      paths: [selectedPath],
-      parentPath,
-      directoryName,
-      createdDirectory: !alreadyExists,
-      security: { credentialsReturned: false },
-    };
-  } catch {
-    return {
-      ok: false,
-      action: "alibaba_auction_output_directory_selected",
-      path: "",
-      paths: [],
-      reason: "ALIBABA_OUTPUT_DIRECTORY_CREATE_FAILED",
-      security: { credentialsReturned: false },
-    };
-  }
+  return await chooseManagedOutputDirectory(
+    "选择阿里司法拍卖上级目录",
+    "阿里司法拍卖",
+    "alibaba_auction_output_directory_selected",
+    "ALIBABA_OUTPUT_DIRECTORY_CREATE_FAILED",
+  );
 }
 
 async function chooseAnjukePropertyOutputDirectory() {
-  const result = await chooseDirectory("选择安居客物业案例输出目录");
-  const rawParentPath = result.paths?.[0] || "";
-  if (!result.ok || !rawParentPath) {
-    return {
-      ...result,
-      action: "anjuke_property_output_directory_selected",
-      path: "",
-      paths: [],
-      security: { credentialsReturned: false },
-    };
-  }
-  try {
-    const parentPath = validateExportDirectory(rawParentPath);
-    const outputPath = path.join(parentPath, "安居客物业案例");
-    const directoryName = path.basename(outputPath);
-    const alreadyExists = fs.existsSync(outputPath);
-    fs.mkdirSync(outputPath, { recursive: true, mode: 0o700 });
-    const selectedPath = fs.realpathSync(outputPath);
-    return {
-      ...result,
-      ok: true,
-      action: "anjuke_property_output_directory_selected",
-      path: selectedPath,
-      paths: [selectedPath],
-      parentPath,
-      directoryName,
-      createdDirectory: !alreadyExists,
-      security: { credentialsReturned: false },
-    };
-  } catch {
-    return {
-      ok: false,
-      action: "anjuke_property_output_directory_selected",
-      path: "",
-      paths: [],
-      reason: "ANJUKE_OUTPUT_DIRECTORY_CREATE_FAILED",
-      security: { credentialsReturned: false },
-    };
-  }
+  return await chooseManagedOutputDirectory(
+    "选择安居客物业案例上级目录",
+    "安居客物业案例",
+    "anjuke_property_output_directory_selected",
+    "ANJUKE_OUTPUT_DIRECTORY_CREATE_FAILED",
+  );
 }
 
 function isWorkbookPath(value) {
@@ -2846,8 +2971,11 @@ function normalizeLandPublicityRequest(input) {
     districtExact: request.districtExact === true,
     provinceWide: request.provinceWide === true,
     generateMap: request.generateMap === true,
+    historyPath: String(request.historyPath || "").trim(),
+    historyRefresh: request.historyRefresh !== false,
     outputDirectory,
   };
+  if (normalized.historyPath) normalized.historyPath = landHistoryPathReadback(normalized.historyPath);
   for (const field of arrays) {
     if (request[field] !== undefined && !Array.isArray(request[field])) throw new Error(`LAND_${field.toUpperCase()}_MUST_BE_ARRAY`);
     normalized[field] = Array.isArray(request[field])
@@ -2919,7 +3047,7 @@ function runLandPublicity(message, emit) {
     const complete = (payload) => {
       if (settled) return;
       try {
-        const outputPaths = [payload.excelPath, payload.htmlPath, payload.coordsPath, payload.pointsJsPath, payload.mapPath]
+        const outputPaths = [payload.excelPath, payload.htmlPath, payload.coordsPath, payload.pointsJsPath, payload.mapPath, payload.historyPath]
           .filter(Boolean)
           .map((value) => landOutputPathReadback(value, request.outputDirectory));
         const result = {
@@ -2953,7 +3081,7 @@ function runLandPublicity(message, emit) {
     const launch = processLauncher.commandLaunchSpec(PYTHON_BIN, args);
     const child = spawn(launch.command, launch.args, {
       cwd: path.dirname(LAND_PUBLICITY_SCRIPT),
-      env: { ...process.env, ...launch.env, PYTHONUNBUFFERED: "1" },
+      env: { ...process.env, ...launch.env, PYTHONUNBUFFERED: "1", TIANYUAN_MAP_CONFIG_PATH: MAP_CONFIG_PATH },
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
@@ -3215,7 +3343,7 @@ function exportProgressFromLine(line, state) {
   return state.percent;
 }
 
-function cliExportFailure(logLines) {
+function cliExportFailure(logLines, { cliMode = false } = {}) {
   const text = logLines.map((item) => String(item?.text || "")).join("\n");
   if (/本地登录凭证已过期|请先运行\s*tycpv login|(?:登录|授权).*(?:过期|失效)/i.test(text)) {
     return {
@@ -3225,8 +3353,10 @@ function cliExportFailure(logLines) {
   }
   if (/unauthorized|invalid token|MCP token|VALUATION_MCP_TOKEN|MCP_HTTP_401|HTTP\s+401/i.test(text)) {
     return {
-      reason: "MCP_TOKEN_REQUIRED",
-      userMessage: "MCP token 未配置或已失效。请在“连接配置”中由使用者本人重新配置 MCP token，再重新导出。",
+      reason: cliMode ? "TYCPV_AUTH_REQUIRED" : "MCP_TOKEN_REQUIRED",
+      userMessage: cliMode
+        ? "天源 CLI 授权凭证已失效。请在“连接配置”中重新授权 CLI，再重新导出。"
+        : "MCP token 未配置或已失效。请在“连接配置”中由使用者本人重新配置 MCP token，再重新导出。",
     };
   }
   if (/forbidden|权限不足|无权访问/i.test(text)) {
@@ -3276,78 +3406,121 @@ async function runDirectCliExport(message, emit) {
   const companyIds = parseCompanyIds(message.companyIds);
   if (!companyIds.length) throw new Error("companyIds_REQUIRED");
   const outDir = validateExportDirectory(message.outDir);
-  const engine = await loadDirectCliExportEngine();
   const type = message.exportType === "asset_declare_table" ? "declare" : "detail";
   let requestCount = 0;
 
-  emit({
-    ok: true,
-    event: "progress",
-    phase: "starting",
-    percent: 5,
-    message: `准备导出${exportConfig.label}`,
-    outDir,
-  });
-  await ensureInitialized();
-  emit({
-    ok: true,
-    event: "progress",
-    phase: "running",
-    percent: 10,
-    message: "已连接 MCP，正在读取导出数据",
-    outDir,
-  });
-
-  const api = new NativeDetailTableExportApi((method, requestPath) => {
-    requestCount += 1;
-    const percent = Math.min(94, 10 + requestCount * 3);
+  const originalConsole = {
+    log: console.log,
+    error: console.error,
+    warn: console.warn,
+    info: console.info,
+    debug: console.debug,
+  };
+  const captureEngineLog = (stream, args) => {
+    const text = args.map((value) => {
+      if (typeof value === "string") return value;
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return String(value);
+      }
+    }).join(" ").trim();
+    if (!text) return;
     emit({
       ok: true,
       event: "progress",
       phase: "running",
-      percent,
-      message: `正在读取导出数据：${method} ${requestPath}`,
+      percent: Math.min(94, 10 + requestCount * 3),
+      message: `导出引擎：${text}`,
+      stream,
       outDir,
     });
-  });
-  const exporter = new engine.Exporter(api, {
-    projectId: Number(projectId),
-    companyIds: companyIds.map(Number),
-    types: [type],
-    outDir,
-    limit: 5000,
-    templatePaths: {
-      detail: engine.detailTemplatePath,
-      declare: engine.declareTemplatePath,
-    },
-    workspaceRoot: engine.root,
-  });
-  const outputFiles = await exporter.run();
-  emit({
-    ok: true,
-    event: "progress",
-    phase: "completed",
-    percent: 100,
-    message: `导出完成，共生成 ${outputFiles.length} 个文件`,
-    outDir,
-  });
-  return {
-    ok: true,
-    event: "complete",
-    phase: "completed",
-    percent: 100,
-    exportType: message.exportType,
-    label: exportConfig.label,
-    projectId,
-    companyIds,
-    outDir,
-    outputFiles,
-    security: { credentialsReturned: false, tokenUsed: true },
   };
+  console.log = (...args) => captureEngineLog("stdout", args);
+  console.error = (...args) => captureEngineLog("stderr", args);
+  console.warn = (...args) => captureEngineLog("stderr", args);
+  console.info = (...args) => captureEngineLog("stdout", args);
+  console.debug = (...args) => captureEngineLog("stdout", args);
+
+  try {
+    const engine = await loadDirectCliExportEngine();
+
+    emit({
+      ok: true,
+      event: "progress",
+      phase: "starting",
+      percent: 5,
+      message: `准备导出${exportConfig.label}`,
+      outDir,
+    });
+    await ensureInitialized();
+    emit({
+      ok: true,
+      event: "progress",
+      phase: "running",
+      percent: 10,
+      message: "已连接 MCP，正在读取导出数据",
+      outDir,
+    });
+
+    const api = new NativeDetailTableExportApi((method, requestPath) => {
+      requestCount += 1;
+      const percent = Math.min(94, 10 + requestCount * 3);
+      emit({
+        ok: true,
+        event: "progress",
+        phase: "running",
+        percent,
+        message: `正在读取导出数据：${method} ${requestPath}`,
+        outDir,
+      });
+    });
+    const exporter = new engine.Exporter(api, {
+      projectId: Number(projectId),
+      companyIds: companyIds.map(Number),
+      types: [type],
+      outDir,
+      limit: 5000,
+      templatePaths: {
+        detail: engine.detailTemplatePath,
+        declare: engine.declareTemplatePath,
+      },
+      workspaceRoot: engine.root,
+    });
+    const outputFiles = await exporter.run();
+    emit({
+      ok: true,
+      event: "progress",
+      phase: "completed",
+      percent: 100,
+      message: `导出完成，共生成 ${outputFiles.length} 个文件`,
+      outDir,
+    });
+    return {
+      ok: true,
+      event: "complete",
+      phase: "completed",
+      percent: 100,
+      exportType: message.exportType,
+      label: exportConfig.label,
+      projectId,
+      companyIds,
+      outDir,
+      outputFiles,
+      security: { credentialsReturned: false, tokenUsed: true },
+    };
+  } finally {
+    console.log = originalConsole.log;
+    console.error = originalConsole.error;
+    console.warn = originalConsole.warn;
+    console.info = originalConsole.info;
+    console.debug = originalConsole.debug;
+  }
 }
 
 function runCliExport(message, emit) {
-  if (getToken() && directCliExportEnginePaths()) {
+  const preferCli = message?.preferCli === true;
+  if (!preferCli && getToken() && directCliExportEnginePaths()) {
     return runDirectCliExport(message, emit).catch((error) => ({
       ...(() => {
         const failure = cliExportFailure([{ text: error?.message || String(error) }]);
@@ -3455,7 +3628,7 @@ function runCliExport(message, emit) {
     child.on("close", (code, signal) => {
       if (completed) return;
       const ok = code === 0;
-      const failure = ok ? null : cliExportFailure(logLines);
+      const failure = ok ? null : cliExportFailure(logLines, { cliMode: true });
       complete({
         ok,
         event: "complete",
@@ -3488,6 +3661,372 @@ function runCliExport(message, emit) {
     resolve(payload);
   }
   });
+}
+
+function uniqueWorkflowTarget(directory, sourcePath) {
+  const extension = path.extname(sourcePath);
+  const stem = path.basename(sourcePath, extension);
+  let target = path.join(directory, `${stem}-整理后${extension}`);
+  let index = 2;
+  while (fs.existsSync(target)) {
+    target = path.join(directory, `${stem}-整理后 (${index})${extension}`);
+    index += 1;
+  }
+  return target;
+}
+
+function normalizeWorkflowExportFiles(values, outputDirectory) {
+  const files = [];
+  const seen = new Set();
+  for (const value of Array.isArray(values) ? values : []) {
+    const raw = String(value || "").trim();
+    if (!raw) continue;
+    const candidate = path.isAbsolute(raw) ? raw : path.join(outputDirectory, raw);
+    const resolved = fs.realpathSync(candidate);
+    if (!isWorkbookPath(resolved) || !fs.statSync(resolved).isFile()) continue;
+    if (!seen.has(resolved)) {
+      seen.add(resolved);
+      files.push(resolved);
+    }
+  }
+  return files;
+}
+
+async function processDetailWorkflowFile({ sourcePath, finalPath, restoreFormulas, applyFormat, emit }) {
+  const extension = path.extname(sourcePath);
+  const stagePath = path.join(
+    path.dirname(finalPath),
+    `.${path.basename(sourcePath, extension)}.tianyuan-workflow-${randomUUID()}${extension}`,
+  );
+  const stageResults = [];
+  let reportTempPath = null;
+  const forward = (stage, message, extra = {}) => emit({
+    ok: true,
+    event: "progress",
+    phase: "workflow_processing",
+    sourcePath,
+    outputPath: finalPath,
+    stage,
+    message,
+    ...extra,
+  });
+
+  fs.copyFileSync(sourcePath, stagePath);
+  try {
+    if (restoreFormulas) {
+      forward("restore_formulas", `正在恢复 ${path.basename(sourcePath)} 的公式`);
+      const scriptResult = await runPythonLinkRestoreScript(stagePath, (text, stream) => forward(
+        "restore_formulas",
+        text,
+        { stream },
+      ));
+      const generatedPath = path.join(
+        path.dirname(stagePath),
+        `${path.basename(stagePath, extension)}_链接恢复${extension}`,
+      );
+      if (!fs.existsSync(generatedPath)) throw new Error("LINK_RESTORE_OUTPUT_NOT_FOUND");
+      reportTempPath = path.join(
+        path.dirname(stagePath),
+        `${path.basename(stagePath, extension)}_链接恢复对比报告.xlsx`,
+      );
+      fs.renameSync(generatedPath, stagePath);
+      await verifyWorkbookArchive(stagePath);
+      stageResults.push({ stage: "restore_formulas", ok: true, logLines: scriptResult.logLines });
+    }
+
+    if (applyFormat) {
+      forward("apply_format", `正在设置 ${path.basename(sourcePath)} 的格式`);
+      const scriptResult = await runPythonPrintScript({
+        scriptPath: PRINT_FORMAT_SCRIPTS.detail,
+        workbookPath: stagePath,
+        onLine: (text, stream) => forward("apply_format", text, { stream }),
+      });
+      await verifyWorkbookArchive(stagePath);
+      stageResults.push({ stage: "apply_format", ok: true, logLines: scriptResult.logLines });
+    }
+
+    await verifyWorkbookArchive(stagePath);
+    replaceProcessedFile(stagePath, finalPath);
+    let reportPath = null;
+    if (reportTempPath && fs.existsSync(reportTempPath)) {
+      reportPath = path.join(
+        path.dirname(finalPath),
+        `${path.basename(finalPath, extension)}_链接恢复对比报告.xlsx`,
+      );
+      replaceProcessedFile(reportTempPath, reportPath);
+    }
+    return {
+      ok: true,
+      sourcePath,
+      outputPath: finalPath,
+      reportPath,
+      stages: stageResults,
+      archiveVerified: true,
+    };
+  } catch (error) {
+    for (const candidate of [stagePath, reportTempPath]) {
+      if (candidate && fs.existsSync(candidate)) fs.unlinkSync(candidate);
+    }
+    return {
+      ok: false,
+      sourcePath,
+      outputPath: finalPath,
+      stages: stageResults,
+      reason: error?.message || String(error),
+      exitCode: error?.exitCode ?? null,
+      logLines: error?.logLines || [],
+    };
+  }
+}
+
+async function runDetailTableWorkflow(message, emit) {
+  const mode = String(message?.mode || "");
+  const restoreFormulas = message?.restoreFormulas === true;
+  const applyFormat = message?.applyFormat === true;
+  const results = [];
+  let outputMode = String(message?.outputMode || "overwrite");
+  let outputDir = "";
+  try {
+    if (!["after_export", "manual_files"].includes(mode)) throw new Error("DETAIL_WORKFLOW_MODE_INVALID");
+    if (!restoreFormulas && !applyFormat) throw new Error("DETAIL_WORKFLOW_NO_STEPS");
+    if (!PRINT_OUTPUT_MODES.has(outputMode)) throw new Error("DETAIL_WORKFLOW_OUTPUT_MODE_INVALID");
+    let sourceFiles = [];
+    if (mode === "after_export") {
+      const exportDirectory = validateExportDirectory(message.outDir);
+      const exportPayload = await runCliExport({
+        action: "run_cli_export",
+        exportType: "asset_detail_table",
+        preferCli: message?.preferCli !== false,
+        projectId: message.projectId,
+        companyIds: message.companyIds,
+        outDir: exportDirectory,
+      }, (payload) => {
+        if (payload?.event === "complete") return;
+        emit({ ...payload, stage: "export" });
+      });
+      if (!exportPayload?.ok) {
+        const failed = {
+          ok: false,
+          event: "complete",
+          phase: "failed",
+          action: "run_detail_table_workflow",
+          stage: "export",
+          reason: exportPayload?.reason || "TYCPV_EXPORT_FAILED",
+          userMessage: exportPayload?.userMessage || "",
+          export: exportPayload,
+          results,
+          security: { credentialsReturned: false },
+        };
+        emit(failed);
+        return failed;
+      }
+      sourceFiles = normalizeWorkflowExportFiles(exportPayload.outputFiles, exportDirectory);
+      outputMode = "overwrite";
+      if (!sourceFiles.length) throw new Error("EXPORT_OUTPUT_FILES_NOT_FOUND");
+    } else {
+      sourceFiles = collectWorkbookFiles(message.inputPaths);
+      outputDir = outputMode === "new_directory" ? validateExportDirectory(message.outputDir) : "";
+    }
+
+    emit({
+      ok: true,
+      event: "progress",
+      phase: "workflow_ready",
+      stage: mode === "after_export" ? "export_verified" : "input_verified",
+      percent: mode === "after_export" ? 35 : 5,
+      total: sourceFiles.length,
+      message: `已确认 ${sourceFiles.length} 个工作簿，开始整理`,
+    });
+
+    for (let index = 0; index < sourceFiles.length; index += 1) {
+      const sourcePath = sourceFiles[index];
+      const destinationDirectory = outputMode === "new_directory" ? outputDir : path.dirname(sourcePath);
+      const finalPath = outputMode === "overwrite" ? sourcePath : uniqueWorkflowTarget(destinationDirectory, sourcePath);
+      const result = await processDetailWorkflowFile({
+        sourcePath,
+        finalPath,
+        restoreFormulas,
+        applyFormat,
+        emit: (payload) => emit({
+          ...payload,
+          current: index + 1,
+          total: sourceFiles.length,
+          percent: Math.min(99, 35 + Math.round((index + 1) / sourceFiles.length * 64)),
+        }),
+      });
+      results.push(result);
+      emit({
+        ok: result.ok,
+        event: "progress",
+        phase: result.ok ? "file_verified" : "file_failed",
+        current: index + 1,
+        total: sourceFiles.length,
+        percent: Math.min(99, 35 + Math.round((index + 1) / sourceFiles.length * 64)),
+        sourcePath,
+        outputPath: finalPath,
+        results,
+        message: result.ok ? `已完成并校验 ${path.basename(finalPath)}` : `${path.basename(sourcePath)} 处理失败：${result.reason}`,
+      });
+    }
+
+    const successCount = results.filter((item) => item.ok).length;
+    const payload = {
+      ok: successCount === results.length && results.length > 0,
+      event: "complete",
+      phase: successCount === results.length && results.length > 0 ? "completed" : "completed_with_errors",
+      percent: 100,
+      action: "run_detail_table_workflow",
+      mode,
+      outputMode,
+      outputDir: outputDir || null,
+      total: results.length,
+      successCount,
+      failedCount: results.length - successCount,
+      results,
+      reason: successCount === results.length && results.length > 0 ? null : "DETAIL_WORKFLOW_PARTIAL_FAILURE",
+      security: { credentialsReturned: false },
+    };
+    emit(payload);
+    return payload;
+  } catch (error) {
+    const payload = {
+      ok: false,
+      event: "complete",
+      phase: "failed",
+      percent: 0,
+      action: "run_detail_table_workflow",
+      mode,
+      outputMode,
+      outputDir: outputDir || null,
+      reason: error?.message || String(error),
+      results,
+      security: { credentialsReturned: false },
+    };
+    emit(payload);
+    return payload;
+  }
+}
+
+async function runDeclarationTableWorkflow(message, emit) {
+  const mode = String(message?.mode || "");
+  let outputMode = String(message?.outputMode || "overwrite");
+  let outputDir = "";
+  let sourceFiles = [];
+  let exportPayload = null;
+  try {
+    if (!["after_export", "manual_files"].includes(mode)) throw new Error("DECLARATION_WORKFLOW_MODE_INVALID");
+    if (!PRINT_OUTPUT_MODES.has(outputMode)) throw new Error("DECLARATION_WORKFLOW_OUTPUT_MODE_INVALID");
+
+    if (mode === "after_export") {
+      const exportDirectory = validateExportDirectory(message.outDir);
+      exportPayload = await runCliExport({
+        action: "run_cli_export",
+        exportType: "asset_declare_table",
+        preferCli: message?.preferCli !== false,
+        projectId: message.projectId,
+        companyIds: message.companyIds,
+        outDir: exportDirectory,
+      }, (payload) => {
+        if (payload?.event === "complete") return;
+        emit({ ...payload, action: "run_declaration_table_workflow", stage: "export" });
+      });
+      if (!exportPayload?.ok) {
+        const failed = {
+          ok: false,
+          event: "complete",
+          phase: "failed",
+          action: "run_declaration_table_workflow",
+          mode,
+          stage: "export",
+          reason: exportPayload?.reason || "TYCPV_EXPORT_FAILED",
+          userMessage: exportPayload?.userMessage || "",
+          export: exportPayload,
+          security: { credentialsReturned: false },
+        };
+        emit(failed);
+        return failed;
+      }
+      sourceFiles = normalizeWorkflowExportFiles(exportPayload.outputFiles, exportDirectory);
+      outputMode = "overwrite";
+      if (!sourceFiles.length) throw new Error("DECLARATION_EXPORT_OUTPUT_FILES_NOT_FOUND");
+    } else {
+      sourceFiles = collectWorkbookFiles(message.inputPaths);
+      outputDir = outputMode === "new_directory" ? validateExportDirectory(message.outputDir) : "";
+    }
+
+    emit({
+      ok: true,
+      event: "progress",
+      phase: "workflow_ready",
+      action: "run_declaration_table_workflow",
+      stage: mode === "after_export" ? "export_verified" : "input_verified",
+      percent: mode === "after_export" ? 35 : 5,
+      total: sourceFiles.length,
+      message: `已确认 ${sourceFiles.length} 个申报表，开始设置打印格式`,
+    });
+
+    let formatPayload = null;
+    await runPrintFormat({
+      action: "run_print_format",
+      formatType: "declaration",
+      inputPaths: sourceFiles,
+      outputMode,
+      outputDir,
+    }, (payload) => {
+      if (payload?.event === "complete") {
+        formatPayload = payload;
+        return;
+      }
+      const rawPercent = Math.max(0, Math.min(100, Number(payload?.percent) || 0));
+      const base = mode === "after_export" ? 35 : 5;
+      const span = mode === "after_export" ? 64 : 94;
+      emit({
+        ...payload,
+        action: "run_declaration_table_workflow",
+        stage: "apply_format",
+        percent: Math.min(99, base + Math.round(rawPercent / 100 * span)),
+      });
+    });
+
+    if (!formatPayload) throw new Error("DECLARATION_FORMAT_RESULT_MISSING");
+    const results = Array.isArray(formatPayload.results) ? formatPayload.results : [];
+    const successCount = results.filter((item) => item.ok).length;
+    const ok = formatPayload.ok === true && results.length > 0 && successCount === results.length;
+    const payload = {
+      ok,
+      event: "complete",
+      phase: ok ? "completed" : "completed_with_errors",
+      percent: 100,
+      action: "run_declaration_table_workflow",
+      mode,
+      outputMode,
+      outputDir: outputDir || null,
+      total: results.length,
+      successCount,
+      failedCount: results.length - successCount,
+      results,
+      export: exportPayload,
+      reason: ok ? null : "DECLARATION_WORKFLOW_PARTIAL_FAILURE",
+      security: { credentialsReturned: false },
+    };
+    emit(payload);
+    return payload;
+  } catch (error) {
+    const payload = {
+      ok: false,
+      event: "complete",
+      phase: "failed",
+      percent: 0,
+      action: "run_declaration_table_workflow",
+      mode,
+      outputMode,
+      outputDir: outputDir || null,
+      reason: error?.message || String(error),
+      security: { credentialsReturned: false },
+    };
+    emit(payload);
+    return payload;
+  }
 }
 
 function parseSseOrJson(text) {
@@ -3825,15 +4364,18 @@ async function health({ probe = false } = {}) {
   };
 }
 
-async function handle(message) {
-  if (typeof message?.mcpToken === "string" && message.mcpToken.trim()) {
-    const nextToken = message.mcpToken.trim();
-    if (nextToken !== runtimeToken) {
-      runtimeToken = nextToken;
-      sessionId = null;
-      initialized = false;
-    }
+function applyRuntimeToken(message) {
+  if (typeof message?.mcpToken !== "string" || !message.mcpToken.trim()) return;
+  const nextToken = message.mcpToken.trim();
+  if (nextToken !== runtimeToken) {
+    runtimeToken = nextToken;
+    sessionId = null;
+    initialized = false;
   }
+}
+
+async function handle(message) {
+  applyRuntimeToken(message);
 
   const depreciationAction = String(message?.action || "");
   const depreciationNamespace = message?.namespace === "depreciation-capex-forecast"
@@ -3860,6 +4402,7 @@ async function handle(message) {
       currentVersion: message.currentVersion,
       currentBuildNumber: message.currentBuildNumber,
       currentRuntimeBuildId: message.currentRuntimeBuildId,
+      currentRuntimeBuildKind: message.currentRuntimeBuildKind,
       platform: process.platform,
       architecture: process.arch,
     });
@@ -3869,6 +4412,7 @@ async function handle(message) {
       currentVersion: message.currentVersion,
       currentBuildNumber: message.currentBuildNumber,
       currentRuntimeBuildId: message.currentRuntimeBuildId,
+      currentRuntimeBuildKind: message.currentRuntimeBuildKind,
     });
   }
   if (message?.action === "test_workbench_update") {
@@ -3876,6 +4420,7 @@ async function handle(message) {
       currentVersion: message.currentVersion,
       currentBuildNumber: message.currentBuildNumber,
       currentRuntimeBuildId: message.currentRuntimeBuildId,
+      currentRuntimeBuildKind: message.currentRuntimeBuildKind,
     });
   }
   if (message?.action === "get_workbench_update_status") {
@@ -3887,8 +4432,17 @@ async function handle(message) {
   if (message?.action === "cli_login_status") {
     return await getCliLoginStatus(String(message.sessionId || ""));
   }
+  if (message?.action === "get_map_config") {
+    return mapConfigSummary();
+  }
+  if (message?.action === "save_map_config") {
+    return saveMapConfig(message);
+  }
+  if (message?.action === "clear_map_config") {
+    return clearMapConfig();
+  }
   if (message?.action === "select_export_directory") {
-    return await chooseExportDirectory();
+    return await chooseExportDirectory(message);
   }
   if (message?.action === "select_print_workbook_files") {
     return await chooseWorkbookFiles();
@@ -3906,10 +4460,19 @@ async function handle(message) {
     return listBatchUploadDirectory(message);
   }
   if (message?.action === "select_print_output_directory") {
-    return await choosePrintOutputDirectory();
+    return await choosePrintOutputDirectory(message);
   }
   if (message?.action === "list_land_publicity_regions") {
     return await listLandPublicityRegions();
+  }
+  if (message?.action === "select_land_publicity_history_directory") {
+    return await chooseDirectory("选择浙江土地成交公示历史数据目录");
+  }
+  if (message?.action === "list_land_publicity_history") {
+    return listLandPublicityHistory(message);
+  }
+  if (message?.action === "load_land_publicity_history") {
+    return loadLandPublicityHistory(message);
   }
   if (message?.action === "select_table_format_output_directory") {
     return await chooseTableFormatOutputDirectory();
@@ -3919,6 +4482,21 @@ async function handle(message) {
   }
   if (message?.action === "select_alibaba_auction_output_directory") {
     return await chooseAlibabaAuctionOutputDirectory();
+  }
+  if (message?.action === "select_alibaba_auction_history_directory") {
+    const result = await chooseDirectory("选择阿里司法拍卖历史数据目录");
+    return {
+      ...result,
+      action: "alibaba_auction_history_directory_selected",
+      path: selectedDirectoryPath(result),
+      security: { credentialsReturned: false },
+    };
+  }
+  if (message?.action === "list_alibaba_auction_history") {
+    return alibabaAuction.listHistory(message.directory);
+  }
+  if (message?.action === "load_alibaba_auction_history") {
+    return alibabaAuction.loadHistory(message.path);
   }
   if (message?.action === "select_anjuke_property_output_directory") {
     return await chooseAnjukePropertyOutputDirectory();
@@ -3962,6 +4540,7 @@ async function handle(message) {
       ? await alibabaAuction.writeResultArtifacts(results, request, { candidates, skipped })
       : {
         htmlPath: "",
+        historyPath: "",
         mapPath: "",
         coordsPath: "",
         pointsJsPath: "",
@@ -4002,6 +4581,9 @@ async function handle(message) {
   }
   if (message?.action === "open_alibaba_auction_path") {
     const resolved = alibabaAuction.validateResultPath(message.path, message.outputDirectory || alibabaAuction.RESULT_ROOT);
+    if (message.openInCurrentBrowserTab === true) {
+      return { ok: true, opened: false, action: "open_alibaba_auction_path", path: resolved, browserTab: true, security: { credentialsReturned: false } };
+    }
     const opened = await platformAdapter.openPath(resolved);
     return {
       ...opened,
@@ -4029,18 +4611,22 @@ async function handle(message) {
   }
   if (message?.action === "select_file_archive_conversation_directory") {
     const appType = message.appType === "wecom" ? "wecom" : "wechat";
-    const selected = await platformAdapter.chooseDirectory("选择所选会话的导出目录");
-    const outputDirectory = selected.paths?.[0] || "";
-    if (!selected.ok || !outputDirectory) {
-      return { ...selected, action: "file_archive_conversation_directory_selected", security: { credentialsReturned: false } };
-    }
+    const selected = await chooseManagedOutputDirectory(
+      "选择所选会话导出目录的上级目录",
+      "微信文件归档",
+      "file_archive_conversation_directory_selected",
+      "FILE_ARCHIVE_CONVERSATION_OUTPUT_DIRECTORY_CREATE_FAILED",
+    );
+    const outputDirectory = selected.outputDirectory || selected.path || "";
+    if (!selected.ok || !outputDirectory) return selected;
     const conversationIds = Array.isArray(message.conversationIds)
       ? message.conversationIds.map((value) => String(value || "").trim()).filter(Boolean)
       : [];
-    return fileArchive.saveConversationBindings({
+    const saved = fileArchive.saveConversationBindings({
       appType,
       bindings: conversationIds.map((conversationId) => ({ conversationId, outputDirectory })),
     });
+    return { ...saved, action: selected.action, path: outputDirectory, outputDirectory, directoryName: selected.directoryName, createdDirectory: selected.createdDirectory, security: { credentialsReturned: false } };
   }
   if (message?.action === "save_file_archive_conversation_bindings") {
     return fileArchive.saveConversationBindings({
@@ -4166,8 +4752,15 @@ if (process.argv.includes("--connector-bridge")) {
   fileArchive.runDaemon();
 } else {
   readMessages((message) => {
+    applyRuntimeToken(message);
     if (message?.action === "run_cli_export") {
       return runCliExport(message, writeMessage);
+    }
+    if (message?.action === "run_detail_table_workflow") {
+      return runDetailTableWorkflow(message, writeMessage);
+    }
+    if (message?.action === "run_declaration_table_workflow") {
+      return runDeclarationTableWorkflow(message, writeMessage);
     }
     if (message?.action === "run_print_format") {
       return runPrintFormat(message, writeMessage);

@@ -21,6 +21,31 @@ except ImportError:
     PYMUPDF_AVAILABLE = False
 
 
+def load_map_config():
+    """读取本机地图配置，不读取凭据或项目目录中的配置。"""
+    configured_path = str(os.environ.get("TIANYUAN_MAP_CONFIG_PATH", "")).strip()
+    candidates = [Path(configured_path)] if configured_path else []
+    candidates.append(Path(os.environ.get("TIANYUAN_WORKBENCH_RUNTIME_ROOT", "")) / "map-config.json") if os.environ.get("TIANYUAN_WORKBENCH_RUNTIME_ROOT") else None
+    candidates.append(Path(os.environ.get("LOCALAPPDATA", "")) / "TianyuanWorkbench" / "map-config.json") if os.environ.get("LOCALAPPDATA") else None
+    candidates.append(Path.home() / ".tianyuan-workbench" / "map-config.json")
+    for config_path in candidates:
+        try:
+            if not config_path.is_file():
+                continue
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+            amap = payload.get("amap") if isinstance(payload, dict) else {}
+            if not isinstance(amap, dict):
+                amap = {}
+            web_key = str(amap.get("webKey") or amap.get("key") or "").strip()
+            return {
+                "amapEnabled": amap.get("enabled") is True and bool(web_key),
+                "amapWebKey": web_key if amap.get("enabled") is True else "",
+            }
+        except (OSError, json.JSONDecodeError):
+            continue
+    return {"amapEnabled": False, "amapWebKey": ""}
+
+
 def fetch_attachment_list(source_id):
     """获取地块的附件列表（出让公告、宗地界址图等）
 
@@ -244,6 +269,9 @@ def _build_basic_map_assets(rows, output_path):
     .panel .sub {{ color: #555; font-size: 12px; }}
     .popup-title {{ font-weight: 700; margin-bottom: 6px; }}
     .popup-meta {{ font-size: 12px; color: #444; line-height: 1.4; }}
+    .tile-status {{ position: fixed; z-index: 1100; right: 12px; bottom: 12px; max-width: min(360px, calc(100vw - 24px)); padding: 6px 9px; border-radius: 7px; background: rgba(255,255,255,.94); color: #475569; box-shadow: 0 3px 12px rgba(15,23,42,.14); font-size: 11px; }}
+    .tile-status[data-kind="ok"] {{ display: none; }}
+    .tile-status[data-kind="error"] {{ color: #b91c1c; }}
     a {{ color: #0a58ca; text-decoration: none; }}
   </style>
 </head>
@@ -258,13 +286,34 @@ def _build_basic_map_assets(rows, output_path):
   <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
   <script src="./{Path(points_js).name}"></script>
   <script>
+    const MAP_CONFIG = {json.dumps(load_map_config(), ensure_ascii=False)};
     const map = L.map('map', {{ preferCanvas: true }}).setView([29.2, 120.2], 8);
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{{z}}/{{y}}/{{x}}', {{
-      maxZoom: 19,
-      attribution: '&copy; Esri, Maxar, Earthstar Geographics'
-    }}).addTo(map);
+    const tileStatus = document.createElement('div'); tileStatus.className = 'tile-status'; tileStatus.textContent = '正在加载地图底图…'; document.body.appendChild(tileStatus);
+    const amapWebKey = String(MAP_CONFIG.amapWebKey || '').trim();
+    const tileProviders = [
+      {{ name: 'ArcGIS', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{{z}}/{{y}}/{{x}}', attribution: '&copy; Esri, Maxar, Earthstar Geographics' }},
+      {{ name: 'OpenStreetMap', url: 'https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', attribution: '&copy; OpenStreetMap contributors', subdomains: 'abc' }},
+      {{ name: amapWebKey ? '高德地图（API）' : '高德地图（公开瓦片）', url: `https://webrd0{{s}}.is.autonavi.com/appmaptile?style=7&x={{x}}&y={{y}}&z={{z}}&lang=zh_cn&size=1&scale=1${{amapWebKey ? `&key=${{encodeURIComponent(amapWebKey)}}` : ''}}`, attribution: '&copy; 高德地图', subdomains: '1234' }},
+    ];
+    let tileLayer = null; let tileErrorCount = 0; let tileFallbackStarted = false; let tileLoadTimer = null;
+    function installTileProvider(index) {{
+      if (tileLoadTimer) {{ window.clearTimeout(tileLoadTimer); tileLoadTimer = null; }}
+      const provider = tileProviders[index]; if (!provider) {{ tileStatus.textContent = '底图暂时不可用，但点位数据仍可使用。请回到工作台“地图基础配置”入口配置官方 API 后重新生成地图。'; tileStatus.dataset.kind = 'error'; return; }}
+      tileErrorCount = 0; tileFallbackStarted = false; if (tileLayer) map.removeLayer(tileLayer);
+      tileStatus.hidden = false;
+      tileLayer = L.tileLayer(provider.url, {{ maxZoom: 19, attribution: provider.attribution, subdomains: provider.subdomains || undefined, updateWhenIdle: true, keepBuffer: 2 }});
+      let providerLoaded = false;
+      const fallback = () => {{ if (providerLoaded || tileFallbackStarted) return; tileFallbackStarted = true; tileStatus.hidden = false; tileStatus.textContent = `${{provider.name}}底图加载超时或失败，正在切换备用地图…`; installTileProvider(index + 1); }};
+      tileLayer.on('tileload', () => {{ providerLoaded = true; if (tileLoadTimer) {{ window.clearTimeout(tileLoadTimer); tileLoadTimer = null; }} tileStatus.textContent = `底图：${{provider.name}}`; tileStatus.dataset.kind = 'ok'; tileStatus.hidden = true; }});
+      tileLayer.on('tileerror', () => {{ tileErrorCount += 1; if (tileErrorCount >= 4) fallback(); }});
+      tileLayer.addTo(map);
+      tileLoadTimer = window.setTimeout(fallback, 8000);
+    }}
+    installTileProvider(0);
 
-    const cluster = L.markerClusterGroup({{ disableClusteringAtZoom: 16 }});
+    const cluster = typeof L.markerClusterGroup === 'function'
+      ? L.markerClusterGroup({{ disableClusteringAtZoom: 16 }})
+      : L.layerGroup();
     const bounds = [];
 
     function esc(s) {{
@@ -448,6 +497,7 @@ def build_map_assets(rows, output_path):
     payload = {
         'stats': {'总记录': len(rows), '已定位': located_count, '未定位': len(unlocated), '唯一位置': len(unique_locations)},
         'displayStats': {'展示点位': len(points), '定位记录': located_count},
+        'mapConfig': load_map_config(),
         'legend': color_rules,
         'points': points,
         'unlocated': unlocated,
@@ -483,6 +533,9 @@ def build_map_assets(rows, output_path):
     .map-tool:hover, .map-tool.active { border-color: #2563eb; background: #eff6ff; }
     .map-tool:disabled { opacity: .5; cursor: default; }
     .map-tool-status { margin-top: 5px; color: #64748b; font-size: 10px; line-height: 1.35; }
+    .tile-status { position: fixed; z-index: 1100; right: 12px; bottom: 12px; max-width: min(360px, calc(100vw - 24px)); padding: 6px 9px; border-radius: 7px; background: rgba(255,255,255,.94); color: #475569; box-shadow: 0 3px 12px rgba(15,23,42,.14); font-size: 11px; }
+    .tile-status[data-kind="ok"] { display: none; }
+    .tile-status[data-kind="error"] { color: #b91c1c; }
     .reference-marker-list { display: flex; flex-direction: column; gap: 3px; max-height: 130px; overflow-y: auto; margin-top: 6px; }
     .reference-marker-row { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 10px; color: #334155; }
     .reference-marker-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
@@ -573,8 +626,31 @@ def build_map_assets(rows, output_path):
     const DATA = __DATA__;
     const map = L.map('map', { zoomControl: false }).setView([DATA.center.lat, DATA.center.lon], 8);
     L.control.zoom({ position: 'bottomright' }).addTo(map);
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: '&copy; Esri, Maxar, Earthstar Geographics' }).addTo(map);
-    const cluster = L.markerClusterGroup({ disableClusteringAtZoom: 15, spiderfyOnMaxZoom: true, showCoverageOnHover: false, maxClusterRadius: 48 });
+    const tileStatus = document.createElement('div'); tileStatus.className = 'tile-status'; tileStatus.textContent = '正在加载地图底图…'; document.body.appendChild(tileStatus);
+    const amapWebKey = String(DATA.mapConfig?.amapWebKey || '').trim();
+    const tileProviders = [
+      { name: 'ArcGIS', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', attribution: '&copy; Esri, Maxar, Earthstar Geographics' },
+      { name: 'OpenStreetMap', url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: '&copy; OpenStreetMap contributors', subdomains: 'abc' },
+      { name: amapWebKey ? '高德地图（API）' : '高德地图（公开瓦片）', url: `https://webrd0{s}.is.autonavi.com/appmaptile?style=7&x={x}&y={y}&z={z}&lang=zh_cn&size=1&scale=1${amapWebKey ? `&key=${encodeURIComponent(amapWebKey)}` : ''}`, attribution: '&copy; 高德地图', subdomains: '1234' },
+    ];
+    let tileLayer = null; let tileProviderIndex = -1; let tileErrorCount = 0; let tileFallbackStarted = false; let tileLoadTimer = null;
+    function installTileProvider(index) {
+      if (tileLoadTimer) { window.clearTimeout(tileLoadTimer); tileLoadTimer = null; }
+      const provider = tileProviders[index]; if (!provider) { tileStatus.textContent = '底图暂时不可用，但点位数据仍可使用。请回到工作台“地图基础配置”入口配置官方 API 后重新生成地图。'; tileStatus.dataset.kind = 'error'; return; }
+      tileProviderIndex = index; tileErrorCount = 0; tileFallbackStarted = false; if (tileLayer) map.removeLayer(tileLayer);
+      tileStatus.hidden = false;
+      tileLayer = L.tileLayer(provider.url, { maxZoom: 19, attribution: provider.attribution, subdomains: provider.subdomains || undefined, updateWhenIdle: true, keepBuffer: 2 });
+      let providerLoaded = false;
+      const fallback = () => { if (providerLoaded || tileFallbackStarted) return; tileFallbackStarted = true; tileStatus.hidden = false; tileStatus.textContent = `${provider.name}底图加载超时或失败，正在切换备用地图…`; installTileProvider(index + 1); };
+      tileLayer.on('tileload', () => { providerLoaded = true; if (tileLoadTimer) { window.clearTimeout(tileLoadTimer); tileLoadTimer = null; } tileStatus.textContent = `底图：${provider.name}`; tileStatus.dataset.kind = 'ok'; tileStatus.hidden = true; });
+      tileLayer.on('tileerror', () => { tileErrorCount += 1; if (tileErrorCount >= 4) fallback(); });
+      tileLayer.addTo(map);
+      tileLoadTimer = window.setTimeout(fallback, 8000);
+    }
+    installTileProvider(0);
+    const cluster = typeof L.markerClusterGroup === 'function'
+      ? L.markerClusterGroup({ disableClusteringAtZoom: 15, spiderfyOnMaxZoom: true, showCoverageOnHover: false, maxClusterRadius: 48 })
+      : L.layerGroup();
     const bounds = [], markerRecords = [], pointMarkers = [];
     function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
     function safeHref(value) { const url = String(value || '').trim(); return /^https?:\/\//i.test(url) ? escapeHtml(url) : ''; }

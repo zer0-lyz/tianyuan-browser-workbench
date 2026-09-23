@@ -12,6 +12,8 @@ node scripts/install-local-runtime.mjs
 
 The script copies runtime files locally, registers the Chrome Native Messaging host, validates Python plus `openpyxl`/`et_xmlfile` for print-format tools, registers the local Codex Agent source, and prints `extensionPath`.
 
+The existing “Export detail table” entry now provides the combined detail-table workflow. It can export selected companies and then restore formulas and apply the detail-table print format, or manually process selected `.xlsx`/`.xlsm` files and folders. The workflow reports each stage and only replaces a target after the complete per-file pipeline passes archive validation.
+
 It also writes `runtime-compat.json` next to the Native Helper and verifies that the installed extension version and browser identity contract match the Bridge runtime.
 
 ## Updates

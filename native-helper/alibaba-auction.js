@@ -18,6 +18,21 @@ const RESULT_EXCEL_NAME = "latest.xlsx";
 const RESULT_COORDS_NAME = "latest_coords.json";
 const RESULT_POINTS_NAME = "latest_points.js";
 const RESULT_MAP_NAME = "latest_map.html";
+const RESULT_HISTORY_NAME = "latest_history.json";
+const MAP_ASSET_RELATIVE_PATHS = Object.freeze([
+  "leaflet.js",
+  "leaflet.css",
+  "leaflet.markercluster.js",
+  "MarkerCluster.css",
+  "MarkerCluster.Default.css",
+  "images/layers.png",
+  "images/layers-2x.png",
+  "images/marker-icon.png",
+  "images/marker-icon-2x.png",
+  "images/marker-shadow.png",
+]);
+const MAP_ASSET_SOURCE_DIRECTORY = path.join(__dirname, "map-assets");
+const DEFAULT_MAP_CONFIG_PATH = path.join(os.homedir(), ".tianyuan-workbench", "map-config.json");
 const GEOCODE_CACHE_VERSION = 1;
 const DEFAULT_GEOCODE_CACHE_PATH = path.join(
   os.homedir(),
@@ -31,6 +46,7 @@ const GEOCODE_MIN_INTERVAL_MS = 300;
 const AMAP_GEOCODE_ENDPOINT = "https://www.amap.com/service/poiTips";
 const NOMINATIM_GEOCODE_ENDPOINT = "https://nominatim.openstreetmap.org/search";
 const SAFE_MAX_PAGES = 50;
+const MANUAL_VERIFICATION_TIMEOUT_MS = 5 * 60 * 1000;
 const MAX_ATTACHMENT_COUNT = 3;
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const MAX_BROWSER_ATTACHMENT_BYTES = 20 * 1024 * 1024;
@@ -258,15 +274,27 @@ finally:
 
 const LIST_EXTRACT_SCRIPT = String.raw`(() => {
   const clean = (value) => String(value || "").replace(/\\s+/g, " ").trim();
+  const isVisible = (element) => {
+    if (!element) return false;
+    for (let current = element; current; current = current.parentElement) {
+      if (current.hasAttribute?.("hidden") || current.getAttribute?.("aria-hidden") === "true") return false;
+      const style = window.getComputedStyle(current);
+      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
+    }
+    const rect = element.getBoundingClientRect?.();
+    return rect ? rect.width > 0 && rect.height > 0 : element.getClientRects?.().length > 0;
+  };
   const items = [];
   const seen = new Set();
-  for (const anchor of document.querySelectorAll('a[href*="/sf_item/"]')) {
+  for (const anchor of [...document.querySelectorAll('a[href*="/sf_item/"]')].filter(isVisible)) {
     const href = anchor.href || "";
     if (!href || seen.has(href)) continue;
     const text = clean(anchor.innerText || anchor.textContent || "");
     if (!text) continue;
     seen.add(href);
-    items.push({ href, text });
+    const listedAmount = text.match(/(?:成交价|拍下价|最终成交价|成交金额|当前价|最终价)\s*[：:]?\s*[¥￥]?\s*[\d,]+(?:\.\d+)?\s*(?:万|亿|元)?/i)?.[0] || "";
+    const listedBidCount = Number(text.match(/(\d+)\s*次出价/i)?.[1] || 0);
+    items.push({ href, text, listedAmount, listedBidCount, listedHasEndedText: /已结束/.test(text), listedHasExplicitSoldPrice: /(?:成交价|拍下价|最终成交价|成交金额)/.test(text) });
   }
   const body = document.body?.innerText || "";
   const totalMatch = body.match(/共找到\\s*([\\d,]+)\\s*条/);
@@ -276,11 +304,23 @@ const LIST_EXTRACT_SCRIPT = String.raw`(() => {
     total: totalMatch ? totalMatch[1] : "",
     items,
     pageText: clean(body.slice(0, 1200)),
+    verificationRequired: [...document.querySelectorAll('[class*="captcha"],[id*="captcha"],[class*="slider"],[id*="slider"],[class*="verify"],[id*="verify"]')].some(isVisible)
+      || /验证码|滑块|安全验证|访问验证|人机验证|请完成.{0,8}验证/.test(body),
   };
 })()`;
 
-const DETAIL_EXTRACT_SCRIPT = String.raw`(() => {
+const DETAIL_EXTRACT_SCRIPT = String.raw`(async () => {
   const clean = (value) => String(value || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+  const isVisible = (element) => {
+    if (!element) return false;
+    for (let current = element; current; current = current.parentElement) {
+      if (current.hasAttribute?.("hidden") || current.getAttribute?.("aria-hidden") === "true") return false;
+      const style = window.getComputedStyle(current);
+      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
+    }
+    const rect = element.getBoundingClientRect?.();
+    return rect ? rect.width > 0 && rect.height > 0 : element.getClientRects?.().length > 0;
+  };
   const coordinate = (value, minimum, maximum) => {
     const number = Number(String(value || "").replace(/,/g, "").trim());
     return Number.isFinite(number) && number >= minimum && number <= maximum ? number : null;
@@ -306,14 +346,20 @@ const DETAIL_EXTRACT_SCRIPT = String.raw`(() => {
     return null;
   };
   const extractBuildingArea = (value) => {
-    const text = clean(value).replace(/[，]/g, ",").replace(/[：]/g, ":");
+    const text = clean(value)
+      .replace(/[，]/g, ",")
+      .replace(/[：]/g, ":")
+      .replace(/(?:专有|分摊|套内|共有|使用权)建筑面积/g, (match) => match.replace("建筑", ""));
     const patterns = [
       /(?<!项目)(?<!总)(?:房产证|证载|房屋|房产|不动产|建筑物|产权)?建筑面积\s*(?:[（(][^）)]{0,20}[）)])?\s*(?:(?:约|大约)\s*)?(?:为|是|等于|合计|共计)?\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
       /(?<!项目)(?<!总)(?:房产证|证载|房屋|房产|不动产|建筑物|产权)?建筑面积\s*[（(]\s*(?:平方米|平米|㎡|m²|m2|平方公尺)\s*[）)]\s*(?:(?:约|大约)\s*)?(?:为|是|等于|合计|共计)?\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)/i,
       /(?<!项目)(?<!总)(?:房产证|证载|房屋|房产|不动产|建筑物|产权)?建筑面积\s*(?:约|大约|合计|共计|为|是|等于)?\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
       /(?<!项目)(?<!总)(?:房产证|证载|房屋|房产|不动产|建筑物|产权)?建筑面积\s*(?:[（(][^）)]{0,20}[）)])?\s*(?:(?:约|大约|合计|共计)\s*)?(?:为|是|等于)?\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?=$|[,。；;])/i,
       /(?:房屋|房产|不动产|建筑物)?(?:建筑|房屋|房产|产权)面积\s*(?:约|大约|合计|共计|为|是|等于)?\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
-      /(?:^|[；;。\n]|\d[、.])\s*面积\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
+      /(?:合计建筑面积|建筑总面积|房屋建筑总面积|标的物建筑面积|证载建筑面积|房产证建筑面积|不动产建筑面积)\s*(?:[:=：]\s*)?(?:[（(][^）)]{0,20}[）)])?\s*(?:约|大约|合计|共计|为|是|等于)?\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
+      /(?:标的物|拍卖标的|房屋|房地产|不动产)\s*面积\s*(?:为|是|[:：])?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
+      /(?:房屋|房地产|不动产)\s*[，,]\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
+      /(?:^|[；;。\n（(]|\d[、.])\s*面积\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
     ];
     for (const pattern of patterns) {
       const match = text.match(pattern);
@@ -342,9 +388,34 @@ const DETAIL_EXTRACT_SCRIPT = String.raw`(() => {
       if (coordinates) break;
     }
   }
+  const detailRoot = document.querySelector("#J_desc") || document.querySelector("#J_ItemDetailContent");
+  const detailContentText = clean(detailRoot?.innerText || detailRoot?.textContent || "");
+  const detailContentReady = !detailRoot
+    || (detailContentText.length > 0 && !/(?:加载中|loading)/i.test(detailContentText));
+  const loadSupplementalSection = async (selector, linkSelector) => {
+    const section = document.querySelector(selector);
+    if (!section) return "";
+    let text = clean(section.innerText || section.textContent || "");
+    if (!/(?:加载中|loading)/i.test(text)) return text;
+    section.scrollIntoView?.({ block: "center" });
+    const link = document.querySelector(linkSelector);
+    link?.scrollIntoView?.({ block: "center" });
+    link?.click?.();
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 12000) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      text = clean(section.innerText || section.textContent || "");
+      if (text && !/(?:加载中|loading)/i.test(text)) break;
+    }
+    return text;
+  };
+  const noticeText = await loadSupplementalSection("#NoticeDetail", '#J_DetailTabMenu a[href="#NoticeDetail"]');
+  const noticeHasFields = /(?:建筑面积|房屋面积|房产证|证载面积)/.test(detailContentText + "\n" + noticeText)
+    && /(?:所在楼层|楼层|总层数)/.test(detailContentText + "\n" + noticeText);
+  const itemNoticeText = noticeHasFields ? "" : await loadSupplementalSection("#ItemNotice", '#J_DetailTabMenu a[href="#ItemNotice"]');
   const body = document.body?.innerText || "";
   const scriptText = [...document.scripts].map((script) => script.textContent || "").join("\n");
-  const detailText = body + "\n" + scriptText;
+  const detailText = detailContentText + "\n" + noticeText + "\n" + itemNoticeText + "\n" + body + "\n" + scriptText;
   const attachments = [];
   const attachmentSeen = new Set();
   for (const anchor of document.querySelectorAll("a[href]")) {
@@ -356,8 +427,11 @@ const DETAIL_EXTRACT_SCRIPT = String.raw`(() => {
     attachments.push({ name: name.slice(0, 120), href });
   }
   const normalizeFloorValue = (value) => {
-    let normalized = clean(value).replace(/[（(][^）)]*[）)]/g, "").replace(/第/g, "").trim();
-    if (!normalized || /^(?:总|共|建筑|层数|楼层|总层数|总楼层)$/.test(normalized)) return "";
+    let normalized = clean(value).replace(/[（(][^）)]*[）)]/g, "").replace(/第/g, "").replace(/^(?:为|是|位于|在)\s*/, "").trim();
+    if (!normalized || /^(?:总|共|建筑|层数|楼层|总层数|总楼层|所在|数|全部楼层)$/.test(normalized)) return "";
+    if (/^\s*[\/／]/.test(normalized)) return "";
+    normalized = normalized.replace(/\s*(?:总|共)\s*(?:计)?\s*(?:层数|楼层|层|楼)?\s*$/, "").trim();
+    normalized = normalized.replace(/(地下|地上|负)\s+(?=[\d一二两三四五六七八九十百零])/g, "$1");
     const digits = { 零: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
     const toNumber = (text) => {
       if (/^\d+$/.test(text)) return text;
@@ -372,7 +446,8 @@ const DETAIL_EXTRACT_SCRIPT = String.raw`(() => {
     };
     normalized = normalized.replace(/(地下|地上|负)?([一二两三四五六七八九十百零]+)/g, (match, prefix, number) => (prefix || "") + toNumber(number));
     if (/^(顶|底|中|高|低)(层)?$/.test(normalized)) return normalized.endsWith("层") ? normalized : normalized + "层";
-    return normalized.replace(/[层楼]\s*$/, "").trim();
+    normalized = normalized.replace(/[层楼]\s*$/, "").replace(/\s+/g, "").trim();
+    return /^(?:地上|地下|负)?\d+(?:[至\-—~～](?:地上|地下|负)?\d+)?$/.test(normalized) ? normalized : "";
   };
   const readLabeledValue = (labels) => {
     const wanted = labels.map((label) => String(label));
@@ -385,6 +460,7 @@ const DETAIL_EXTRACT_SCRIPT = String.raw`(() => {
     };
     const valueFromNode = (node) => valueFromText(node?.innerText || node?.textContent || "");
     for (const node of document.querySelectorAll("th,td,dt,dd,label,span,div,p")) {
+      if (!isVisible(node)) continue;
       const text = clean(node.innerText || node.textContent || "");
       if (!text || text.length > 120) continue;
       const inline = valueFromText(text);
@@ -400,6 +476,7 @@ const DETAIL_EXTRACT_SCRIPT = String.raw`(() => {
         ...(node.parentElement ? [...node.parentElement.children].slice([...node.parentElement.children].indexOf(node) + 1) : []),
       ];
       for (const candidate of candidates) {
+        if (!candidate || !isVisible(candidate)) continue;
         const value = valueFromNode(candidate);
         if (value && !wanted.includes(value)) return value;
       }
@@ -417,19 +494,46 @@ const DETAIL_EXTRACT_SCRIPT = String.raw`(() => {
   const statusText = detailText.match(/(?:本场|拍卖)?已结束|本场已流拍|本场已撤回|本场已中止|报名截止|预计[^\n]{0,30}结束/gi) || [];
   const locationMatch = body.match(/标的物位置\s*([\s\S]{0,180}?)地图标注仅供参考/);
   const usageMatch = body.match(/房屋用途及\s*土地性质\s*([\s\S]{0,140}?)(?:钥匙|使用情况|拍卖权利限制情况)/);
-  const buildingArea = extractBuildingArea(detailText);
+  const areaValue = readLabeledValue(["建筑面积", "房屋建筑面积", "房屋面积", "登记建筑面积", "登记面积", "证载建筑面积", "证载面积", "产权证载面积", "产权证建筑面积", "房产证建筑面积", "不动产权证书建筑面积"]);
+  const buildingArea = extractBuildingArea(detailText) || extractBuildingArea("建筑面积 " + areaValue + "平方米");
   const decorationMatch = detailText.match(/(?:装修及其他介绍|装修情况|装修)\s*[：:\s]+([^\n\r|；;]{1,40})/i);
   const leaseMatch = detailText.match(/(?:租赁情况|租赁状态|是否有租赁|租赁)\s*[：:\s]+([^\n\r|；;]{1,60})/i);
   const floorValue = readLabeledValue(["所在楼层", "所在楼层（层）", "所在楼层(层)", "房屋所在楼层", "所在层次", "所在层数", "所在层", "房屋楼层", "楼层"]);
-  const totalFloorsValue = readLabeledValue(["建筑总层数", "房屋总层数", "总层数", "总楼层", "楼层数"]);
-  const floorMatch = body.match(/(?:所在楼层|所在层次|所在层数|所在层|房屋所在楼层|房屋楼层)\s*(?:为|是|位于|在|：|:|=)?\s*([^，。；;()（）\n]{1,30}?)\s*层/)
-    || body.match(/(?:位于|处于)[^，,。；;()（）\n]{0,30}?(?:第\s*)?([负地下上第\d一二两三四五六七八九十百零]+(?:\s*[至\-—~～]\s*[负地下上第\d一二两三四五六七八九十百零]+)?)\s*层/);
-  const totalFloorMatch = body.match(/(?:建筑物|建筑|房屋)?(?:地上|地下)?总(?:层数|楼层)\s*(?:为|是|约|共|：|:|=)?\s*([\d一二两三四五六七八九十百零]+)\s*(层)?/)
-    || body.match(/共\s*([\d一二两三四五六七八九十百零]+)\s*(层)?/);
-  const transactionMatch = body.match(/成交价\s*[：:]?\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)\s*元/);
+  const totalFloorsValue = readLabeledValue(["房屋建筑总楼层", "建筑总层数", "房屋总层数", "总层数", "总楼层", "楼层数"]);
+  const structuredFloorPair = clean(floorValue).match(/((?:地上|地下|负)?(?:第)?[\d一二两三四五六七八九十百零]+(?:\s*[至\-—~～]\s*(?:地上|地下|负)?(?:第)?[\d一二两三四五六七八九十百零]+)?)\s*层?\s*(?:[,，、;；|｜／/]\s*)?(?:共(?:计)?|总(?:层数|楼层)?|全部楼层)\s*[:：]?\s*((?:地上|地下|负)?(?:第)?[\d一二两三四五六七八九十百零]+)\s*层?/);
+  const structuredFloor = normalizeFloorValue(structuredFloorPair?.[1] || floorValue);
+  const structuredTotalFloors = clean(structuredFloorPair?.[2] || totalFloorsValue);
+  const floorBody = detailText.replace(/(地上|地下|负)\s+(?=[\d一二两三四五六七八九十百零])/g, "$1").replace(/第\s+(?=[\d一二两三四五六七八九十百零])/g, "第");
+  const floorPair = floorBody.match(/(?:所在楼层（层）|所在楼层\(层\)|房屋所在楼层|所在楼层|所在层次|所在层数|房屋楼层|所在层|(?<!总)楼层)\s*(?:[\/／]\s*(?:建筑)?(?:总层数|总楼层|共计|共|总))?\s*(?:为|是|位于|在)?\s*[:=：]?\s*((?:地上|地下|负)?(?:第)?[\d一二两三四五六七八九十百零]+(?:\s*[至\-—~～]\s*(?:地上|地下|负)?(?:第)?[\d一二两三四五六七八九十百零]+)?)\s*层?\s*[\/／|｜]\s*(?:(?:建筑)?(?:总层数|总楼层|共计|共)\s*[:=：]?\s*)?((?:地上|地下|负)?(?:第)?[\d一二两三四五六七八九十百零]+(?:\s*[至\-—~～]\s*(?:地上|地下|负)?(?:第)?[\d一二两三四五六七八九十百零]+)?)\s*层?/);
+  const floorMatch = floorPair
+    || floorBody.match(/(?:所在楼层（层）|所在楼层\(层\)|房屋所在楼层|所在楼层|所在层次|所在层数|房屋楼层|所在层|(?<!总)楼层)\s*(?:为|是|位于|在|[:=：])?\s*((?:地上|地下|负)?(?:第)?[\d一二两三四五六七八九十百零]+(?:\s*[至\-—~～]\s*(?:地上|地下|负)?(?:第)?[\d一二两三四五六七八九十百零]+)?)\s*层/)
+    || floorBody.match(/(?:拍卖对象|估价对象|拍卖标的|标的物|该房屋|该房产|本次拍卖房屋|本次估价对象)\s*(?:为|是)\s*(?:第\s*)?((?:地上|地下|负)?(?:第)?[\d一二两三四五六七八九十百零]+(?:\s*[至\-—~～]\s*(?:地上|地下|负)?(?:第)?[\d一二两三四五六七八九十百零]+)?)\s*层/)
+    || floorBody.match(/(?:拍卖对象|估价对象|拍卖标的|标的物|该房屋|该房产|本次拍卖房屋|本次估价对象)[^。；;()（）\n]{0,60}?(?:位于|处于)[^。；;()（）\n]{0,40}?(?:第\s*)?((?:地上|地下|负)?(?:第)?[\d一二两三四五六七八九十百零]+(?:\s*[至\-—~～]\s*(?:地上|地下|负)?(?:第)?[\d一二两三四五六七八九十百零]+)?)\s*层/)
+    || floorBody.match(/(?:位于|处于)\s*第\s*((?:地上|地下|负)?(?:第)?[\d一二两三四五六七八九十百零]+(?:\s*[至\-—~～]\s*(?:地上|地下|负)?(?:第)?[\d一二两三四五六七八九十百零]+)?)\s*层/);
+  const floorFromLocated = floorBody.match(/(?:^|[。；;，,])[^。；;\n]{0,160}?所在\s*(?:为|是|第\s*)?((?:地上|地下|负)?\s*(?:第\s*)?[\d一二两三四五六七八九十百零]+(?:\s*[至\-—~～]\s*(?:地上|地下|负)?\s*(?:第\s*)?[\d一二两三四五六七八九十百零]+)?)\s*层/);
+  const totalFloorMatch = floorPair
+    ? [floorPair[0], floorPair[2]]
+    : detailText.match(/(?:房屋建筑|建筑物|建筑|房屋)?(?:地上|地下)?总(?:层数|楼层)\s*(?:为|是|约|共|：|:|=)?\s*([\d一二两三四五六七八九十百零]+)\s*(层)?/)
+    || detailText.match(/共\s*([\d一二两三四五六七八九十百零]+)\s*(层)?/);
+  const fieldSources = {
+    buildingArea: buildingArea ? (areaValue ? "structured" : "page") : "",
+    floor: structuredFloor ? "structured" : (floorMatch || floorFromLocated ? "page" : ""),
+    totalFloors: structuredTotalFloors ? "structured" : (totalFloorMatch ? "page" : ""),
+  };
+  const transactionMatch = body.match(/(?:成交价|拍下价|最终成交价|成交金额|成交价款|当前价|最终价)\s*[：:]?\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)\s*(万|亿|元)?/);
+  const soldPriceMatch = body.match(/(?:成交价|拍下价|最终成交价|成交金额|成交价款)\s*[：:]?\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)\s*(万|亿|元)?/);
   const valuationMatch = body.match(/评估价\s*[：:]?\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)\s*元?/);
-  const timeMatch = body.match(/结束时间\s*([0-9]{4}[\/-][0-9]{1,2}[\/-][0-9]{1,2}\s+[0-9:]{4,8})/);
-  const bidMatch = body.match(/竞买记录\s*[（(]\s*(\d+)\s*[）)]/);
+  const timeMatch = body.match(/(?:结束时间|成交时间|交易时间)\s*[：:]?\s*([0-9]{4}(?:[\/-][0-9]{1,2}[\/-][0-9]{1,2}|\s*年\s*[0-9]{1,2}\s*月\s*[0-9]{1,2}\s*日?)(?:\s+[0-9:]{4,8})?)/);
+  const bidMatch = [
+    body.match(/(?:竞买记录|应买记录|出价次数|出价记录|竞价记录|竞价次数|应价次数)[^\n]{0,80}?[（(]?\s*(\d+)\s*(?:次出价|次竞价|次应价|次|条)?\s*[）)]?/i),
+    body.match(/(?:共|累计|合计)\s*(\d+)\s*(?:次出价|次竞价|次应价|条出价记录|条竞买记录)/i),
+    body.match(/(\d+)\s*次(?:出价|竞价|应价)/i),
+    detailText.match(/(?:bidCount|bid_count|biddingCount|offerCount)\D{0,20}(\d+)/i),
+  ].find(Boolean) || null;
+  const hasEndedText = /(?:本场|拍卖)?已结束|成交价|竞价结果确认书/.test(detailText);
+  const hasExplicitSoldPrice = Boolean(soldPriceMatch?.[1])
+    || Boolean(transactionMatch?.[1] && /(?:当前价|最终价)/.test(transactionMatch[0]) && hasEndedText);
+  const hasBidEvidence = Number(bidMatch?.[1] || 0) > 0;
   return {
     url: location.href,
     title: clean(heading),
@@ -437,27 +541,59 @@ const DETAIL_EXTRACT_SCRIPT = String.raw`(() => {
     location: clean(locationMatch?.[1] || ""),
     usage: clean(usageMatch?.[1] || ""),
     buildingArea,
-    floor: normalizeFloorValue(floorValue || floorMatch?.[1] || ""),
-    totalFloors: clean(totalFloorsValue || totalFloorMatch?.[1] || ""),
+    floor: structuredFloor || normalizeFloorValue(floorMatch?.[1] || floorFromLocated?.[1] || ""),
+    totalFloors: clean(structuredTotalFloors || totalFloorMatch?.[1] || ""),
+    fieldSources,
     pageText: body.slice(0, 12000),
     attachments: attachments.slice(0, 8),
-    transactionAmount: transactionMatch?.[1] || "",
+    transactionAmount: transactionMatch?.[0] || "",
     valuationAmount: valuationMatch?.[1] || "",
     transactionTime: timeMatch?.[1] || "",
     bidCount: bidMatch?.[1] || "",
     longitude: coordinates?.longitude ?? null,
     latitude: coordinates?.latitude ?? null,
     coordinateSource: coordinates?.coordinateSource || "",
-    hasSoldText: /成交价|竞价结果确认书|竞买记录/.test(body),
+    hasSoldText: hasExplicitSoldPrice
+      || /竞价结果确认书|已成交|成交状态\s*[：:]?\s*(?:成交|已成交)/.test(detailText)
+      || (hasBidEvidence && /(?:已结束|成交时间|结束时间)/.test(detailText)),
+    hasExplicitSoldPrice,
     hasInvalidStatus: statusText.some((value) => /流拍|撤回|中止/.test(value)),
-    hasEndedText: /(?:本场|拍卖)?已结束|成交价|竞价结果确认书/.test(detailText),
+    hasEndedText,
     decoration: clean(decorationMatch?.[1] || ""),
     leaseStatus: clean(leaseMatch?.[1] || ""),
+    detailContentText: detailContentText.slice(0, 12000),
+    detailContentReady,
+    verificationRequired: [...document.querySelectorAll('[class*="captcha"],[id*="captcha"],[class*="slider"],[id*="slider"],[class*="verify"],[id*="verify"]')].some(isVisible)
+      || /验证码|滑块|安全验证|访问验证|人机验证|请完成.{0,8}验证/.test(body),
   };
 })()`;
 
 function security() {
   return { credentialsReturned: false };
+}
+
+function loadMapConfig() {
+  const candidates = [
+    String(process.env.TIANYUAN_MAP_CONFIG_PATH || "").trim(),
+    process.platform === "win32" && process.env.LOCALAPPDATA
+      ? path.join(process.env.LOCALAPPDATA, "TianyuanWorkbench", "map-config.json")
+      : "",
+    DEFAULT_MAP_CONFIG_PATH,
+  ].filter(Boolean);
+  for (const configPath of candidates) {
+    try {
+      const payload = JSON.parse(fs.readFileSync(configPath, "utf8"));
+      const amap = payload?.amap && typeof payload.amap === "object" ? payload.amap : {};
+      const webKey = String(amap.webKey || amap.key || "").trim();
+      return {
+        amapEnabled: amap.enabled === true && Boolean(webKey),
+        amapWebKey: amap.enabled === true ? webKey : "",
+      };
+    } catch {
+      // Continue to the next local configuration candidate.
+    }
+  }
+  return { amapEnabled: false, amapWebKey: "" };
 }
 
 function boundedInteger(value, fallback, minimum, maximum) {
@@ -496,6 +632,8 @@ function normalizeRequest(input = {}) {
     district: String(source.district || "").trim().slice(0, 40),
     outputDirectory,
     generateMap: source.generateMap !== false,
+    historyPath: String(source.historyPath || "").trim(),
+    historyRefresh: source.historyRefresh !== false,
   };
 }
 
@@ -684,6 +822,28 @@ function ocrBinaryCandidates(kind) {
   ]);
 }
 
+function pdfTextBinaryCandidates() {
+  return commandCandidates([
+    process.env.TIANYUAN_PDFTOTEXT_BIN,
+    process.env.PDFTOTEXT_BIN,
+    process.platform === "win32" ? path.join(process.env.ProgramFiles || "", "poppler", "Library", "bin", "pdftotext.exe") : "",
+    process.platform === "win32" ? path.join(process.env.LOCALAPPDATA || "", "Programs", "poppler", "Library", "bin", "pdftotext.exe") : "",
+    "/opt/homebrew/bin/pdftotext",
+    "/usr/local/bin/pdftotext",
+    "pdftotext",
+  ]);
+}
+
+async function extractPdfTextWithPdftotext(pdfPath) {
+  const result = await runFirstAvailableCommand(pdfTextBinaryCandidates(), [
+    "-layout",
+    "-enc", "UTF-8",
+    pdfPath,
+    "-",
+  ], { timeout: ATTACHMENT_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 });
+  return String(result.stdout || "").slice(0, OCR_MAX_TEXT_LENGTH);
+}
+
 async function extractPdfTextWithTesseract(pdfPath, tempDirectory) {
   const pageDirectory = path.join(tempDirectory, "ocr-pages");
   fs.mkdirSync(pageDirectory, { recursive: true, mode: 0o700 });
@@ -750,14 +910,18 @@ async function extractPdfText(buffer) {
     fs.writeFileSync(pdfPath, buffer, { mode: 0o600 });
     let text = "";
     try {
-      const result = await runCommand(PYTHON_BIN, ["-c", PDF_TEXT_SCRIPT, pdfPath], {
-        timeout: ATTACHMENT_TIMEOUT_MS,
-        maxBuffer: 2 * 1024 * 1024,
-      });
-      const payload = parseJsonOutput(result.stdout);
-      text = payload?.ok === true ? String(payload.text || "") : "";
+      text = await extractPdfTextWithPdftotext(pdfPath);
     } catch {
-      // OCR below can still recover image-only PDFs when the Python text layer is unavailable.
+      try {
+        const result = await runCommand(PYTHON_BIN, ["-c", PDF_TEXT_SCRIPT, pdfPath], {
+          timeout: ATTACHMENT_TIMEOUT_MS,
+          maxBuffer: 2 * 1024 * 1024,
+        });
+        const payload = parseJsonOutput(result.stdout);
+        text = payload?.ok === true ? String(payload.text || "") : "";
+      } catch {
+        // OCR below can still recover image-only PDFs when the text layer is unavailable.
+      }
     }
     const textFloors = extractFloorFieldsFromText(text);
     const needsOcr = !text.trim()
@@ -815,16 +979,39 @@ async function downloadAttachmentWithBrowser(session, href, restoreUrl, target =
   }
 }
 
+async function downloadAttachmentForContext(href, context = {}) {
+  if (String(context.session || "").trim()) {
+    let lastError;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const buffer = await downloadAttachmentWithBrowser(
+          context.session,
+          href,
+          context.restoreUrl,
+          context.target,
+        );
+        return { buffer, source: "browser-session" };
+      } catch (error) {
+        lastError = error;
+        if (attempt === 0) {
+          await runOpenCli(["browser", context.session, "wait", "time", "1"], { timeout: 10000 }).catch(() => {});
+        }
+      }
+    }
+    throw lastError || new Error("ALIBABA_BROWSER_ATTACHMENT_REQUEST_FAILED");
+  }
+  return { buffer: await downloadAttachment(href), source: "direct" };
+}
+
 async function enrichDetailFromAttachments(detail = {}, context = {}) {
   const attachments = Array.isArray(detail.attachments) ? detail.attachments : [];
   if (!attachments.length) return detail;
   const currentText = String(detail.pageText || "");
-  const currentArea = parseAmount(detail.buildingArea) || extractBuildingAreaFromText(currentText);
-  const currentFloors = extractFloorFieldsFromText(currentText);
-  if (currentArea && currentFloors.floor && currentFloors.totalFloors) return detail;
-
   let combinedText = currentText;
+  let attachmentText = "";
   let attachmentCount = 0;
+  const attachmentErrors = [];
+  const attachmentSources = [];
   const orderedAttachments = [...attachments]
     .sort((left, right) => {
       const score = (item) => {
@@ -840,37 +1027,56 @@ async function enrichDetailFromAttachments(detail = {}, context = {}) {
     const href = String(attachment?.href || "").trim();
     if (!href || !/download_attach\.do|\.pdf(?:$|[?#])/i.test(href) || !isAllowedAttachmentUrl(href)) continue;
     try {
-      let buffer;
-      try {
-        buffer = await downloadAttachment(href);
-      } catch {
-        buffer = await downloadAttachmentWithBrowser(context.session, href, context.restoreUrl, context.target);
-      }
+      const downloaded = await downloadAttachmentForContext(href, context);
+      const buffer = downloaded.buffer;
       const text = await extractPdfText(buffer);
-      if (!text.trim()) continue;
+      if (!text.trim()) {
+        attachmentErrors.push({
+          name: String(attachment?.name || "PDF").slice(0, 80),
+          code: "ALIBABA_ATTACHMENT_TEXT_EMPTY",
+        });
+        continue;
+      }
       combinedText += `\n\n附件 ${String(attachment?.name || "PDF").slice(0, 80)}\n${text}`;
+      attachmentText += `\n\n${text}`;
       attachmentCount += 1;
-      const area = parseAmount(detail.buildingArea) || extractBuildingAreaFromText(combinedText);
-      const floors = extractFloorFieldsFromText(combinedText);
-      if (area && !detail.buildingArea) detail.buildingArea = String(area);
-      if (floors.floor && !detail.floor) detail.floor = floors.floor;
-      if (floors.totalFloors && !detail.totalFloors) detail.totalFloors = floors.totalFloors;
-      if (area && floors.floor && floors.totalFloors) break;
+      attachmentSources.push({
+        name: String(attachment?.name || "PDF").slice(0, 80),
+        source: downloaded.source,
+        bytes: buffer.length,
+      });
     } catch {
-      // A missing or unreadable attachment must not discard an otherwise valid detail page.
+      attachmentErrors.push({
+        name: String(attachment?.name || "PDF").slice(0, 80),
+        code: "ALIBABA_ATTACHMENT_READ_FAILED",
+      });
     }
   }
-  return attachmentCount ? { ...detail, pageText: combinedText, attachmentCount } : detail;
+  if (!attachmentCount) return { ...detail, attachmentErrors, attachmentSources };
+  const enriched = {
+    ...detail,
+    pageText: combinedText,
+    attachmentText,
+    attachmentCount,
+    attachmentErrors,
+    attachmentSources,
+  };
+  const fields = selectDetailFields(enriched);
+  return {
+    ...enriched,
+    buildingArea: fields.buildingArea ?? detail.buildingArea ?? "",
+    floor: fields.floor || (detail.fieldSources?.floor === "structured" ? detail.floor : ""),
+    totalFloors: fields.totalFloors || (detail.fieldSources?.totalFloors === "structured" ? detail.totalFloors : ""),
+  };
 }
 
 async function enrichDetailFromAttachmentBuffers(detail = {}, attachmentBuffers = []) {
   const currentText = String(detail.pageText || "");
-  const currentArea = parseAmount(detail.buildingArea) || extractBuildingAreaFromText(currentText);
-  const currentFloors = extractFloorFieldsFromText(currentText);
-  if (currentArea && currentFloors.floor && currentFloors.totalFloors) return detail;
-
   let combinedText = currentText;
+  let attachmentText = "";
   let attachmentCount = 0;
+  const attachmentErrors = [];
+  const attachmentSources = [];
   for (const attachment of (Array.isArray(attachmentBuffers) ? attachmentBuffers : []).slice(0, MAX_ATTACHMENT_COUNT)) {
     const base64 = String(attachment?.base64 || "").trim();
     if (!base64) continue;
@@ -878,20 +1084,44 @@ async function enrichDetailFromAttachmentBuffers(detail = {}, attachmentBuffers 
       const buffer = Buffer.from(base64, "base64");
       if (buffer.length <= 0 || buffer.length > MAX_ATTACHMENT_BYTES || buffer.subarray(0, 4).toString("ascii") !== "%PDF") continue;
       const text = await extractPdfText(buffer);
-      if (!text.trim()) continue;
+      if (!text.trim()) {
+        attachmentErrors.push({
+          name: String(attachment?.name || "PDF").slice(0, 80),
+          code: "ALIBABA_ATTACHMENT_TEXT_EMPTY",
+        });
+        continue;
+      }
       combinedText += `\n\n附件 ${String(attachment?.name || "PDF").slice(0, 80)}\n${text}`;
+      attachmentText += `\n\n${text}`;
       attachmentCount += 1;
-      const area = parseAmount(detail.buildingArea) || extractBuildingAreaFromText(combinedText);
-      const floors = extractFloorFieldsFromText(combinedText);
-      if (area && !detail.buildingArea) detail.buildingArea = String(area);
-      if (floors.floor && !detail.floor) detail.floor = floors.floor;
-      if (floors.totalFloors && !detail.totalFloors) detail.totalFloors = floors.totalFloors;
-      if (area && floors.floor && floors.totalFloors) break;
+      attachmentSources.push({
+        name: String(attachment?.name || "PDF").slice(0, 80),
+        source: "provided-buffer",
+        bytes: buffer.length,
+      });
     } catch {
-      // An unreadable attachment must not discard the valid detail-page fields.
+      attachmentErrors.push({
+        name: String(attachment?.name || "PDF").slice(0, 80),
+        code: "ALIBABA_ATTACHMENT_READ_FAILED",
+      });
     }
   }
-  return attachmentCount ? { ...detail, pageText: combinedText, attachmentCount } : detail;
+  if (!attachmentCount) return { ...detail, attachmentErrors, attachmentSources };
+  const enriched = {
+    ...detail,
+    pageText: combinedText,
+    attachmentText,
+    attachmentCount,
+    attachmentErrors,
+    attachmentSources,
+  };
+  const fields = selectDetailFields(enriched);
+  return {
+    ...enriched,
+    buildingArea: fields.buildingArea ?? detail.buildingArea ?? "",
+    floor: fields.floor || (detail.fieldSources?.floor === "structured" ? detail.floor : ""),
+    totalFloors: fields.totalFloors || (detail.fieldSources?.totalFloors === "structured" ? detail.totalFloors : ""),
+  };
 }
 
 async function runOpenCli(args, options = {}) {
@@ -976,6 +1206,83 @@ function browserUrlsMatch(actual, expected) {
   }
 }
 
+function isAlibabaVerificationUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    const state = `${url.hostname} ${url.pathname} ${url.search} ${url.hash}`;
+    return /(?:^|\.)taobao\.com/i.test(url.hostname)
+      && /(?:^|[./_-])(captcha|verify|validate|punish|security|login|error)(?:[./?_-]|$)/i.test(state);
+  } catch {
+    return false;
+  }
+}
+
+function alibabaUrlsReferToSamePage(actual, expected) {
+  try {
+    const current = new URL(String(actual || ""));
+    const target = new URL(String(expected || ""));
+    if (current.origin !== target.origin || current.pathname.replace(/\/$/, "") !== target.pathname.replace(/\/$/, "")) return false;
+    for (const [key, value] of target.searchParams.entries()) {
+      if (key === "track_id") continue;
+      if (!current.searchParams.getAll(key).includes(value)) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function browserPageReady(value, expectedUrl, pageKind = "detail") {
+  if (!value || pageLooksBlocked(value)) return false;
+  if (expectedUrl && !alibabaUrlsReferToSamePage(value.url, expectedUrl)) return false;
+  const pageText = String(value.pageText || "").trim();
+  if (!String(value.url || "").trim()) return false;
+  if (pageKind === "list") return Array.isArray(value.items) && pageText.length >= 20;
+  if (Object.prototype.hasOwnProperty.call(value, "detailContentReady") && value.detailContentReady !== true) return false;
+  return Boolean(pageText.length >= 24
+    && /阿里拍卖|拍卖标的|标的物|结束时间|成交价|拍下价|当前价|起拍价|本场已结束/.test(pageText));
+}
+
+async function evaluateBrowserPage(session, target, script) {
+  const targetArgs = browserTargetArgs(target);
+  return parseJsonOutput((await runOpenCli([
+    "browser", session, "eval", script, ...targetArgs,
+  ], { timeout: 30000 })).stdout);
+}
+
+async function readBrowserPageWithManualVerification(session, page, script, expectedUrl, pageKind, emit = () => {}, description = "读取页面", options = {}) {
+  const timeoutMs = Number.isFinite(options.timeoutMs) ? Math.max(1, options.timeoutMs) : MANUAL_VERIFICATION_TIMEOUT_MS;
+  const startedAt = Date.now();
+  const initialTargetArgs = page ? browserTargetArgs(page.target) : [];
+  let target = String(page?.target || "").trim();
+  let waitState = isAlibabaVerificationUrl(page?.url) ? "verification" : "page_loading";
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const value = await evaluateBrowserPage(session, target, script);
+      const blocked = pageLooksBlocked(value);
+      if (blocked === "ALIBABA_LOGIN_REQUIRED") {
+        const error = new Error(blocked);
+        error.code = blocked;
+        throw error;
+      }
+      if (browserPageReady(value, expectedUrl, pageKind)) return { value, target };
+      waitState = pageWaitState(value, expectedUrl, pageKind);
+    } catch (error) {
+      if (error?.code === "ALIBABA_LOGIN_REQUIRED") throw error;
+      // Keep polling while the verification page redirects or the browser target is replaced.
+    }
+    emit({
+      phase: waitState === "verification" ? "verification_required" : waitState === "detail_loading" ? "loading_detail" : "opening",
+      percent: 35,
+      message: verificationWaitMessage(waitState, pageKind, description, Math.floor((Date.now() - startedAt) / 1000)),
+    });
+    await runOpenCli(["browser", session, "wait", "time", "1", ...(target ? browserTargetArgs(target) : initialTargetArgs)], { timeout: 10000 }).catch(() => {});
+  }
+  const timeout = new Error("ALIBABA_VERIFICATION_TIMEOUT");
+  timeout.code = "ALIBABA_VERIFICATION_TIMEOUT";
+  throw timeout;
+}
+
 async function openBrowserPage(session, url, options = {}) {
   const expectedUrl = canonicalUrl(url);
   const requestedTarget = String(options.target || "").trim();
@@ -992,7 +1299,9 @@ async function openBrowserPage(session, url, options = {}) {
       const location = parseJsonOutput((await runOpenCli([
         "browser", session, "eval", BROWSER_LOCATION_SCRIPT, ...targetArgs,
       ], { timeout: 30000 })).stdout);
-      if (browserUrlsMatch(location.url, expectedUrl)) return { target, url: canonicalUrl(location.url) };
+      if (browserUrlsMatch(location.url, expectedUrl) || options.allowVerification) {
+        return { target, url: canonicalUrl(location.url), verificationRequired: isAlibabaVerificationUrl(location.url) };
+      }
       lastError = new Error("ALIBABA_BROWSER_TARGET_MISMATCH");
     } catch (error) {
       lastError = error;
@@ -1015,8 +1324,20 @@ function canonicalUrl(value) {
 }
 
 function parseAmount(value) {
-  const number = Number(String(value || "").replace(/[^\d.]/g, ""));
+  const normalized = String(value || "")
+    .replace(/(\d)\s*\.\s*(?=\d)/g, "$1.")
+    .replace(/(\d)\s+(?=\d)/g, "$1");
+  const number = Number(normalized.replace(/[^\d.]/g, ""));
   return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function parseAuctionAmount(value) {
+  const text = String(value || "");
+  const number = parseAmount(text);
+  if (!number) return null;
+  if (/亿/.test(text)) return number * 100000000;
+  if (/万/.test(text)) return number * 10000;
+  return number;
 }
 
 function chineseFloorNumber(value) {
@@ -1041,28 +1362,32 @@ function normalizeFloorValue(value) {
     .replace(/[（(][^）)]*[）)]/g, "")
     .replace(/第/g, "")
     .replace(/\s+/g, " ")
+    .replace(/^(?:为|是|位于|在)\s*/, "")
     .trim();
-  if (!normalized || /^(?:总|共|建筑|层数|楼层|总层数|总楼层)$/.test(normalized)) return "";
+  if (!normalized || /^(?:总|共|建筑|层数|楼层|总层数|总楼层|所在|数|全部楼层)$/.test(normalized)) return "";
+  if (/^\s*[\/／]/.test(normalized)) return "";
+  normalized = normalized.replace(/\s*(?:总|共)\s*(?:计)?\s*(?:层数|楼层|层|楼)?\s*$/, "").trim();
+  normalized = normalized.replace(/(地下|地上|负)\s+(?=[\d一二两三四五六七八九十百零])/g, "$1");
   normalized = normalized.replace(/(地下|地上|负)?([一二两三四五六七八九十百零]+)/g, (match, prefix, number) => `${prefix || ""}${chineseFloorNumber(number)}`);
   if (/^(顶|底|中|高|低)(层)?$/.test(normalized)) return normalized.endsWith("层") ? normalized : `${normalized}层`;
-  return normalized.replace(/[层楼]\s*$/, "").trim();
+  normalized = normalized.replace(/[层楼]\s*$/, "").replace(/\s+/g, "").trim();
+  return /^(?:地上|地下|负)?\d+(?:[至\-—~～](?:地上|地下|负)?\d+)?$/.test(normalized) ? normalized : "";
 }
 
 function normalizeTotalFloorValue(value) {
   const original = String(value || "").replace(/[（(][^）)]*[）)]/g, "").replace(/\s+/g, " ").trim();
   if (!original) return "";
-  const hasUnit = /[层楼]/.test(original);
-  const numberText = original.replace(/[层楼]/g, "").replace(/^(?:共|约|为|是)\s*/, "").trim();
-  const number = chineseFloorNumber(numberText);
-  return /^\d+$/.test(number) ? `${number}${hasUnit ? "层" : ""}` : original;
+  const numberMatch = original.match(/(?:\d+|[一二两三四五六七八九十百零]+)/);
+  if (!numberMatch) return "";
+  const number = chineseFloorNumber(numberMatch[0]);
+  return /^\d+$/.test(number) ? `${number}${/[层楼]/.test(original) ? "层" : ""}` : "";
 }
 
-function inferFloorFromPropertyText(value) {
-  const text = String(value || "");
-  const match = text.match(/(?:^|[^\d])(\d{3,4})\s*(?:室|号)(?!\d)/);
-  if (!match) return "";
-  const floor = match[1].slice(0, -2).replace(/^0+/, "");
-  return floor ? floor : "0";
+function floorWithinTotal(floor, totalFloors) {
+  const total = parseAmount(totalFloors);
+  if (!total) return true;
+  const values = String(floor || "").match(/\d+/g);
+  return !values || values.every((value) => Number(value) <= total);
 }
 
 function extractBuildingAreaFromText(value) {
@@ -1070,7 +1395,11 @@ function extractBuildingAreaFromText(value) {
     .replace(/\u00a0/g, " ")
     .replace(/[，]/g, ",")
     .replace(/[：]/g, ":")
+    .replace(/(\d)\s*\.\s*(\d)/g, "$1.$2")
+    .replace(/建\s*筑\s*面\s*积/g, "建筑面积")
+    .replace(/房\s*屋\s*面\s*积/g, "房屋面积")
     .replace(/\s+/g, " ")
+    .replace(/(?:专有|分摊|套内|共有|使用权)建筑面积/g, (match) => match.replace("建筑", ""))
     .trim();
   const patterns = [
     /(?<!项目)(?<!总)(?:房产证|证载|房屋|房产|不动产|建筑物|产权)?建筑面积\s*(?:[（(][^）)]{0,20}[）)])?\s*(?:(?:约|大约)\s*)?(?:为|是|等于|合计|共计)?\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
@@ -1078,7 +1407,12 @@ function extractBuildingAreaFromText(value) {
     /(?<!项目)(?<!总)(?:房产证|证载|房屋|房产|不动产|建筑物|产权)?建筑面积\s*(?:约|大约|合计|共计|为|是|等于)?\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
     /(?<!项目)(?<!总)(?:房产证|证载|房屋|房产|不动产|建筑物|产权)?建筑面积\s*(?:[（(][^）)]{0,20}[）)])?\s*(?:(?:约|大约|合计|共计)\s*)?(?:为|是|等于)?\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?=$|[,。；;])/i,
     /(?:房屋|房产|不动产|建筑物)?(?:建筑|房屋|房产|产权)面积\s*(?:约|大约|合计|共计|为|是|等于)?\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
-    /(?:^|[；;。\n]|\d[、.])\s*面积\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
+    /(?:合计建筑面积|建筑总面积|房屋建筑总面积|标的物建筑面积|证载建筑面积|房产证建筑面积|不动产建筑面积)\s*(?:[:=：]\s*)?(?:[（(][^）)]{0,20}[）)])?\s*(?:约|大约|合计|共计|为|是|等于)?\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
+    /(?:标的物|拍卖标的|房屋|房地产|不动产)\s*面积\s*(?:为|是|[:：])?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
+    /(?:登记建筑面积|登记面积|证载建筑面积|证载面积|产权证载面积|产权证建筑面积|房产证建筑面积|不动产权证书?建筑面积|建筑面积|房屋建筑面积|房屋面积)\s*(?:[（(][^）)]{0,20}[）)])?\s*(?:约|大约|为|是|等于|合计|共计|登记为)?\s*[:=：-]?\s*([\d][\d,\s]*(?:\.\s*\d+)?)(?=\s*(?:平方米|平米|㎡|m²|m2|平方公尺)?(?:\s|$|[,，。；;]))/i,
+    /(?:房屋|房地产|不动产)\s*[，,]\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
+    /(?:^|[；;。\n（(]|\d[、.])\s*面积\s*(?:约|大约|合计|共计|为|是|等于)?\s*[:=\-]?\s*([\d][\d,，\s]*(?:\.\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
+    /(?<!总)(?:房屋)?建筑面积\s*[^。；;\n]{0,120}?([\d][\d,，\s]*(?:\.\s*\d+)?)\s*(?:平方米|平米|㎡|m²|m2|平方公尺)/i,
   ];
   for (const pattern of patterns) {
     const match = text.match(pattern);
@@ -1093,30 +1427,56 @@ function extractFloorFieldsFromText(value) {
     .split(/\r?\n/)
     .map((item) => item.replace(/\s+/g, " ").trim())
     .filter(Boolean);
-  const floorLabels = ["所在楼层", "所在楼层（层）", "所在楼层(层)", "房屋所在楼层", "所在层次", "所在层数", "所在层", "房屋楼层", "楼层"];
-  const totalLabels = ["建筑总层数", "房屋总层数", "总层数", "总楼层", "楼层数"];
+  const floorLabels = ["所在楼层（层）", "所在楼层(层)", "房屋所在楼层", "所在楼层", "所在层次", "所在层数", "房屋楼层", "所在层", "楼层"];
+  const totalLabels = ["房屋建筑总楼层", "建筑总层数", "房屋总层数", "总层数", "总楼层", "楼层数"];
   const read = (labels) => {
+    const orderedLabels = [...labels].sort((left, right) => right.length - left.length);
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index];
-      const label = labels.find((item) => line === item || line.startsWith(`${item}：`) || line.startsWith(`${item}:`) || line.startsWith(`${item}为`) || line.startsWith(`${item}是`));
+      const label = orderedLabels.find((item) => line === item || line.startsWith(`${item}：`) || line.startsWith(`${item}:`) || line.startsWith(`${item}为`) || line.startsWith(`${item}是`) || line.startsWith(`${item} `));
       if (!label) continue;
       const inline = line.slice(label.length).replace(/^[\s:：-]*(?:为|是)?\s*/, "").trim();
-      if (inline) return inline;
-      if (lines[index + 1] && !labels.includes(lines[index + 1])) return lines[index + 1];
+      const inlineValue = inline.split(/[|｜]/, 1)[0].trim();
+      if (inlineValue) return inlineValue;
+      if (lines[index + 1] && !orderedLabels.includes(lines[index + 1])) return lines[index + 1];
     }
     return "";
   };
-  const normalizeFloor = normalizeFloorValue;
   const text = lines.join(" ");
-  const pair = text.match(/(?:所在楼层|所在层|房屋所在楼层|房屋楼层|楼层)\s*(?:[\/／]\s*(?:建筑)?(?:总层数|总楼层))?\s*[:=：]?\s*([^\/／，,]+?)\s*[\/／]\s*(\d+)\s*层?/);
-  const floorFromSentence = text.match(/(?:所在楼层|所在层次|所在层数|所在层|房屋所在楼层|房屋楼层)\s*(?:为|是|位于|在|[:=：])?\s*([^，,。；;()（）\n]+?)\s*层/);
-  const floorFromBareLabel = text.match(/(?:所在层次|所在层数)\s*(?:为|是|位于|在|[:=：])?\s*(?:第\s*)?(\d+(?:\s*[至\-—~～]\s*\d+)?)(?!\s*层)/);
-  const floorFromPosition = text.match(/(?:位于|处于)[^，,。；;()（）\n]{0,30}?(?:第\s*)?([负地下上第\d一二两三四五六七八九十百零]+(?:\s*[至\-—~～]\s*[负地下上第\d一二两三四五六七八九十百零]+)?)\s*层/);
-  const totalFromSentence = text.match(/(?:建筑物|建筑|房屋)?(?:地上|地下)?总(?:层数|楼层)\s*(?:为|是|约|共|[:=：])?\s*([\d一二两三四五六七八九十百零]+)\s*(层)?/)
+  const floorLabel = "(?:所在楼层（层）|所在楼层\\(层\\)|房屋所在楼层|所在楼层|所在层次|所在层数|房屋楼层|所在层|(?<!总)楼层)";
+  const floorToken = "(?:地上|地下|负)?\\s*(?:第\\s*)?[\\d一二两三四五六七八九十百零]+(?:\\s*[至\\-—~～]\\s*(?:地上|地下|负)?\\s*(?:第\\s*)?[\\d一二两三四五六七八九十百零]+)?";
+  const pair = text.match(new RegExp(`${floorLabel}(?:\\s*[\\/／]\\s*(?:建筑)?(?:总层数|总楼层|共计|共|总))?\\s*(?:为|是|位于|在)?\\s*[:=：]?\\s*(${floorToken})\\s*层?\\s*[\\/／|｜]\\s*(?:(?:建筑)?(?:总层数|总楼层|共计|共)\\s*[:=：]?\\s*)?(${floorToken})\\s*层?`));
+  const floorFromSentence = text.match(new RegExp(`${floorLabel}\\s*(?:为|是|位于|在|[:=：])?\\s*(${floorToken})\\s*层`));
+  const floorFromBareLabel = text.match(new RegExp(`(?:所在层次|所在层数)\\s*(?:为|是|位于|在|[:=：])?\\s*(${floorToken})(?!\\s*层)`));
+  const floorFromContext = text.match(new RegExp(`(?:拍卖对象|估价对象|拍卖标的|标的物|该房屋|该房产|本次拍卖房屋|本次估价对象)\\s*(?:为|是)\\s*(?:第\\s*)?(${floorToken})\\s*层`))
+    || text.match(new RegExp(`(?:拍卖对象|估价对象|拍卖标的|标的物|该房屋|该房产|本次拍卖房屋|本次估价对象)[^。；;()（）\\n]{0,60}?(?:位于|处于)[^。；;()（）\\n]{0,40}?(?:第\\s*)?(${floorToken})\\s*层`))
+    || text.match(new RegExp(`(?:位于|处于)\\s*第\\s*(${floorToken})\\s*层`));
+  const floorFromLocated = text.match(/(?:^|[。；;，,])[^。；;\n]{0,160}?所在\s*(?:为|是|第\s*)?((?:地上|地下|负)?\s*(?:第\s*)?[\d一二两三四五六七八九十百零]+(?:\s*[至\-—~～]\s*(?:地上|地下|负)?\s*(?:第\s*)?[\d一二两三四五六七八九十百零]+)?)\s*层/);
+  const totalFromSentence = text.match(/(?:房屋建筑|建筑物|建筑|房屋)?(?:地上|地下)?总(?:层数|楼层)\s*(?:为|是|约|共|[:=：])?\s*(?:地上|地下|负)?\s*([\d一二两三四五六七八九十百零]+)\s*(层)?/)
     || text.match(/共\s*([\d一二两三四五六七八九十百零]+)\s*(层)?/);
-  const floor = normalizeFloor(pair?.[1] || floorFromSentence?.[1] || floorFromPosition?.[1] || read(floorLabels));
-  const floorFallback = floor || normalizeFloor(floorFromBareLabel?.[1] || "");
-  const totalRaw = pair?.[2] ? pair[2] : (totalFromSentence?.[1] ? `${totalFromSentence[1]}${totalFromSentence[2] || ""}` : read(totalLabels));
+  const totalFromParenthetical = text.match(/[（(]\s*(?:共|总层数|总楼层)\s*([\d一二两三四五六七八九十百零]+)\s*层?\s*[）)]/);
+  const orphanTotal = text.match(/(?:楼层|层数)\s*[:：]?\s*[\/／]\s*总(?:楼层|层数)?\s*([\d一二两三四五六七八九十百零]+)/);
+  const floorTotalPairPattern = new RegExp(`${floorLabel}\\s*(?:为|是|位于|在|[:=：])?\\s*(${floorToken})\\s*层?[\\s,，、;；|｜/／]*?(?:共(?:计)?|总(?:层数|楼层)?|全部楼层)\\s*[:=：]?\\s*(${floorToken})\\s*层?`, "gi");
+  const floorTotalPairLoosePattern = new RegExp(`${floorLabel}\\s*(?:为|是|位于|在|[:=：])?\\s*(${floorToken})\\s*层?[\\s\\S]{0,80}?(?:共(?:计)?|总(?:层数|楼层)?|全部楼层)\\s*[:=：]?\\s*(${floorToken})\\s*层?`, "gi");
+  const floorTotalPairs = [];
+  for (const pattern of [floorTotalPairPattern, floorTotalPairLoosePattern]) {
+    for (const match of text.matchAll(pattern)) {
+      const suffix = String(match[0]).slice(String(match[0]).lastIndexOf(String(match[2])) + String(match[2]).length);
+      floorTotalPairs.push({ floor: match[1], totalFloors: match[2], hasUnit: /层\s*$/.test(suffix) });
+    }
+  }
+  const pairedFloorTotal = floorTotalPairs
+    .map((candidate) => ({ floor: normalizeFloorValue(candidate.floor), totalFloors: normalizeTotalFloorValue(`${candidate.totalFloors}${candidate.hasUnit ? "层" : ""}`) }))
+    .find((candidate) => candidate.floor && candidate.totalFloors && floorWithinTotal(candidate.floor, candidate.totalFloors));
+  const floor = normalizeFloorValue(pair?.[1] || pairedFloorTotal?.floor || floorFromSentence?.[1] || floorFromLocated?.[1] || floorFromContext?.[1] || floorFromBareLabel?.[1] || read(floorLabels));
+  const floorFallback = floor || normalizeFloorValue(read(floorLabels));
+  let totalRaw = "";
+  if (pair?.[2]) totalRaw = pair[2];
+  else if (pairedFloorTotal?.totalFloors) totalRaw = pairedFloorTotal.totalFloors;
+  else if (totalFromSentence?.[1]) totalRaw = `${totalFromSentence[1]}${totalFromSentence[2] || ""}`;
+  else if (totalFromParenthetical?.[1]) totalRaw = `${totalFromParenthetical[1]}层`;
+  else if (orphanTotal?.[1]) totalRaw = `${orphanTotal[1]}层`;
+  else totalRaw = read(totalLabels);
   const totalFloors = normalizeTotalFloorValue(totalRaw);
   return { floor: floorFallback, totalFloors };
 }
@@ -1127,7 +1487,7 @@ function parseCoordinate(value, minimum, maximum) {
 }
 
 function normalizeDate(value) {
-  const match = String(value || "").match(/(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  const match = String(value || "").match(/(\d{4})\s*(?:年\s*|[\/-])(\d{1,2})\s*(?:月\s*|[\/-])(\d{1,2})\s*日?(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
   if (!match) return String(value || "").trim();
   return `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
 }
@@ -1166,28 +1526,71 @@ function normalizeLease(value) {
   return text;
 }
 
+function selectDetailFields(detail = {}) {
+  const pageText = [detail.detailContentText, detail.pageText].filter(Boolean).join("\n");
+  const attachmentText = String(detail.attachmentText || "");
+  const pageArea = extractBuildingAreaFromText(pageText);
+  const attachmentArea = extractBuildingAreaFromText(attachmentText);
+  const pageFloors = extractFloorFieldsFromText(pageText);
+  const attachmentFloors = extractFloorFieldsFromText(attachmentText);
+  const rawArea = parseAmount(detail.buildingArea);
+  const rawFloor = normalizeFloorValue(detail.floor);
+  const rawTotal = normalizeTotalFloorValue(detail.totalFloors);
+  const fieldSources = detail.fieldSources || {};
+  const hasTextEvidence = Boolean(pageText.trim() || attachmentText.trim());
+  const structuredFloor = fieldSources.floor === "structured" && rawFloor && !/[\/／|｜]/.test(rawFloor) && !/(?:总|共)/.test(rawFloor);
+  const structuredTotal = fieldSources.totalFloors === "structured" && parseAmount(rawTotal);
+  const structuredArea = fieldSources.buildingArea === "structured" && rawArea;
+  const buildingArea = structuredArea ? rawArea : (attachmentArea || pageArea || (!hasTextEvidence ? rawArea : null));
+  const floor = structuredFloor
+    ? rawFloor
+    : attachmentFloors.floor || pageFloors.floor || (!hasTextEvidence ? rawFloor : "");
+  const totalFloors = structuredTotal
+    ? rawTotal
+    : attachmentFloors.totalFloors || pageFloors.totalFloors || (!hasTextEvidence ? rawTotal : "");
+  return {
+    buildingArea,
+    floor: floorWithinTotal(floor, totalFloors) ? floor : "",
+    totalFloors,
+  };
+}
+
 function firstPropertyType(value) {
   const text = String(value || "");
-  if (text.includes("住宅用房") || text.includes("住宅房")) return "住宅用房";
-  if (text.includes("商业房") || text.includes("商业用房")) return "商业房";
+  if (text.includes("住宅用房") || text.includes("住宅房") || text.includes("住宅")) return "住宅用房";
+  if (text.includes("商业房") || text.includes("商业用房") || text.includes("商业")) return "商业房";
   return "";
 }
 
 function parseDetail(detail, request) {
-  const transactionAmount = parseAmount(detail.transactionAmount);
+  const pageText = [detail.detailContentText, detail.pageText].filter(Boolean).join("\n");
+  const pageTransactionMatch = pageText.match(/(?:成交价|拍下价|最终成交价|成交金额|成交价款|当前价|最终价)\s*[：:]?\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)\s*(万|亿|元)?/);
+  const pageSoldPriceMatch = pageText.match(/(?:成交价|拍下价|最终成交价|成交金额|成交价款)\s*[：:]?\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)\s*(万|亿|元)?/);
+  const pageCurrentPriceMatch = pageText.match(/(?:当前价|最终价)\s*[：:]?\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)\s*(万|亿|元)?/);
+  const pageHasEndedText = /(?:本场|拍卖)?已结束|竞价结果确认书/.test(pageText);
+  const pageTimeMatch = pageText.match(/(?:结束时间|成交时间|交易时间)\s*[：:]?\s*([0-9]{4}(?:[\/-][0-9]{1,2}[\/-][0-9]{1,2}|\s*年\s*[0-9]{1,2}\s*月\s*[0-9]{1,2}\s*日?)(?:\s+[0-9:]{4,8})?)/);
+  const pageBidMatch = pageText.match(/(?:竞买记录|应买记录|出价次数|出价记录|竞价记录|竞价次数|应价次数)[^\n]{0,80}?[（(]?\s*(\d+)\s*(?:次出价|次竞价|次应价|次|条)?\s*[）)]?/i)
+    || pageText.match(/(\d+)\s*次(?:出价|竞价|应价)/i);
+  const hasExplicitSoldPrice = detail.hasExplicitSoldPrice === true || Boolean(pageSoldPriceMatch?.[1])
+    || Boolean(pageCurrentPriceMatch?.[1] && pageHasEndedText);
+  const hasEndedText = detail.hasEndedText === true || pageHasEndedText;
+  const hasSoldText = detail.hasSoldText === true || hasExplicitSoldPrice || Boolean(pageBidMatch && hasEndedText);
+  const transactionAmount = parseAuctionAmount(detail.transactionAmount || pageTransactionMatch?.[0]);
   const valuationAmount = parseAmount(detail.valuationAmount);
-  const buildingArea = parseAmount(detail.buildingArea) || extractBuildingAreaFromText(`${detail.buildingArea || ""}\n${detail.pageText || ""}`);
-  const floorFields = extractFloorFieldsFromText(detail.pageText);
-  const inferredFloor = inferFloorFromPropertyText([detail.title, detail.location].filter(Boolean).join(" "));
-  const bidCount = boundedInteger(detail.bidCount, 0, 0, 1000000);
-  const finished = detail.hasSoldText === true && detail.hasInvalidStatus !== true
-    && (request.status !== "finished" || detail.hasEndedText === true)
-    && Boolean(transactionAmount) && bidCount > 0;
+  const fields = selectDetailFields(detail);
+  const buildingArea = fields.buildingArea;
+  const floor = normalizeFloorValue(fields.floor);
+  const totalFloorsText = normalizeTotalFloorValue(fields.totalFloors);
+  const totalFloors = parseAmount(totalFloorsText);
+  const bidCount = boundedInteger(detail.bidCount || pageBidMatch?.[1], 0, 0, 1000000);
+  const finished = hasSoldText && detail.hasInvalidStatus !== true
+    && (request.status !== "finished" || hasEndedText)
+    && Boolean(transactionAmount) && (bidCount > 0 || hasExplicitSoldPrice);
   const rawLocation = String(detail.location || "").trim();
   const city = firstCity(rawLocation) || String(request.city || "").trim();
   const district = firstDistrict(rawLocation, request);
   const location = stripLocationPrefixes(rawLocation, [request.province, city, district]);
-  const propertyType = firstPropertyType(detail.usage) || request.propertyType;
+  const propertyType = firstPropertyType(detail.usage) || PROPERTY_LABELS[request.propertyType] || String(request.propertyType || "");
   return {
     title: String(detail.title || "").trim(),
     province: String(request.province || "浙江省").trim(),
@@ -1201,13 +1604,13 @@ function parseDetail(detail, request) {
     coordinatePrecision: detail.coordinateSource ? "exact" : "",
     longitude: parseCoordinate(detail.longitude, 70, 140),
     latitude: parseCoordinate(detail.latitude, 3, 55),
-    transactionTime: normalizeDate(detail.transactionTime),
+    transactionTime: normalizeDate(detail.transactionTime || pageTimeMatch?.[1] || ""),
     transactionAmount,
     valuationAmount,
     buildingArea,
     unitPrice: transactionAmount && buildingArea ? Math.round((transactionAmount / buildingArea) * 100) / 100 : null,
-    floor: normalizeFloorValue(floorFields.floor || detail.floor || inferredFloor),
-    totalFloors: parseAmount(normalizeTotalFloorValue(floorFields.totalFloors || detail.totalFloors)),
+    floor: floorWithinTotal(floor, totalFloorsText) ? floor : "",
+    totalFloors,
     decoration: String(detail.decoration || "").trim(),
     leaseStatus: normalizeLease(detail.leaseStatus),
     platform: "阿里拍卖",
@@ -1230,27 +1633,30 @@ function matchesRequest(record, request) {
   return true;
 }
 
+function skipReason(detail, record, request) {
+  const pageText = String(detail?.pageText || "");
+  if (!record?.transactionAmount) return "未识别成交价或拍下价";
+  if (detail?.hasInvalidStatus === true) return "页面标记为流拍、撤回或中止";
+  if (request.status === "finished" && !detail?.hasEndedText && !/(?:本场|拍卖)?已结束/.test(pageText)) return "未识别已结束状态";
+  if (!detail?.hasSoldText) return "未识别成交状态";
+  if (!(Number(record?.bidCount || detail?.bidCount || 0) > 0 || detail?.hasExplicitSoldPrice === true)) return "未识别出价次数或明确成交价";
+  const expectedProperty = PROPERTY_LABELS[request.propertyType];
+  if (expectedProperty && record?.propertyType && record.propertyType !== expectedProperty) return "不符合物业类型范围";
+  const date = String(record?.transactionTime || "").slice(0, 10);
+  if (request.startDate && (!date || date < request.startDate)) return "成交日期早于起始日期";
+  if (request.endDate && (!date || date > request.endDate)) return "成交日期晚于结束日期";
+  if (request.keyword && !`${record?.title || ""} ${record?.address || ""}`.includes(request.keyword)) return "不符合关键词范围";
+  return "详情核验条件未满足";
+}
+
 function candidateInScope(item, request) {
-  const text = String(item?.text || "");
-  if (request.status === "finished" && /距开始|距开拍|距结束|尚未开始|未开始|即将开始|立即报名|报名中|竞买中/.test(text)) {
-    return false;
-  }
-  const dates = text.match(/\d{4}[\/-]\d{1,2}[\/-]\d{1,2}/g) || [];
-  if ((request.startDate || request.endDate) && dates.length) {
-    return dates.some((value) => {
-      const date = value.replaceAll("/", "-");
-      return (!request.startDate || date >= request.startDate) && (!request.endDate || date <= request.endDate);
-    });
-  }
+  // 列表卡片状态和日期字段不可靠，最终是否成交及日期由详情页确认。
   return true;
 }
 
 function pageBeforeRequestedRange(items, request) {
-  if (request.status !== "finished" || !request.startDate) return false;
-  const dates = (Array.isArray(items) ? items : [])
-    .flatMap((item) => String(item?.text || "").match(/\d{4}[\/-]\d{1,2}[\/-]\d{1,2}/g) || [])
-    .map((value) => value.replaceAll("/", "-"));
-  return dates.length > 0 && dates.every((date) => date < request.startDate);
+  // 不能用列表卡片日期推断分页边界，避免漏掉最终成交详情。
+  return false;
 }
 
 function listPageUrl(sourceUrl, page) {
@@ -1261,10 +1667,28 @@ function listPageUrl(sourceUrl, page) {
 }
 
 function pageLooksBlocked(value) {
-  const text = `${value?.title || ""} ${value?.pageText || ""}`;
-  if (/验证码|滑块|安全验证|访问验证|captcha|punish/i.test(text)) return "ALIBABA_VERIFICATION_REQUIRED";
+  const text = `${value?.title || ""} ${value?.pageText || ""} ${value?.url || ""}`;
+  if (value?.verificationRequired === true) return "ALIBABA_VERIFICATION_REQUIRED";
+  if (/验证码|滑块|安全验证|访问验证|人机验证|请完成.{0,8}验证|拖动.{0,8}(?:滑块|拼图)|captcha|punish|security\s*check/i.test(text)) return "ALIBABA_VERIFICATION_REQUIRED";
   if (/登录淘宝|请登录|login\.taobao/i.test(text)) return "ALIBABA_LOGIN_REQUIRED";
   return "";
+}
+
+function pageWaitState(value, expectedUrl, pageKind = "detail") {
+  const blocked = pageLooksBlocked(value);
+  if (blocked === "ALIBABA_LOGIN_REQUIRED") return "login";
+  if (blocked === "ALIBABA_VERIFICATION_REQUIRED" || isAlibabaVerificationUrl(value?.url)) return "verification";
+  if (expectedUrl && !alibabaUrlsReferToSamePage(value?.url, expectedUrl)) return "navigation";
+  if (pageKind === "detail" && Object.prototype.hasOwnProperty.call(value || {}, "detailContentReady") && value.detailContentReady !== true) return "detail_loading";
+  return "page_loading";
+}
+
+function verificationWaitMessage(state, pageKind, description, elapsedSeconds) {
+  const pageLabel = pageKind === "detail" ? "详情页" : "列表页";
+  if (state === "verification") return `检测到阿里拍卖验证，请在当前浏览器完成验证；完成后会等待原${pageLabel}重新加载，再继续${description}。已等待 ${elapsedSeconds} 秒。`;
+  if (state === "detail_loading") return `当前${pageLabel}没有验证码，正在等待详情内容加载完成后继续${description}。已等待 ${elapsedSeconds} 秒。`;
+  if (state === "navigation") return `正在等待阿里拍卖${pageLabel}返回目标页面后继续${description}。已等待 ${elapsedSeconds} 秒。`;
+  return `正在等待阿里拍卖${pageLabel}和关键字段加载完成后继续${description}。已等待 ${elapsedSeconds} 秒。`;
 }
 
 function safeError(error) {
@@ -1308,7 +1732,7 @@ function renderResultHtml(results, request, metadata = {}) {
     ["纬度", "latitude"], ["案例网址", "url"],
   ];
   const numericFields = new Set(["transactionAmount", "valuationAmount", "buildingArea", "unitPrice", "totalFloors", "bidCount", "longitude", "latitude"]);
- const header = columns.map(([label], index) => `<th><div class="table-header-cell"><span>${escapeHtml(label)}</span><button class="column-filter-trigger" type="button" data-column="${index + 1}" aria-label="筛选${escapeHtml(label)}" title="筛选${escapeHtml(label)}"><span class="filter-funnel" aria-hidden="true"></span></button></div></th>`).join("");
+  const header = columns.map(([label], index) => `<th><div class="table-header-cell"><span>${escapeHtml(label)}</span><button class="column-filter-trigger" type="button" data-column="${index + 2}" aria-label="筛选${escapeHtml(label)}" title="筛选${escapeHtml(label)}"><span class="filter-funnel" aria-hidden="true"></span></button></div></th>`).join("");
   const rows = (Array.isArray(results) ? results : []).map((item, rowIndex) => {
     const mapKey = String(rowIndex + 1);
     const hasCoordinate = mapNumber(item?.longitude, 70, 140) !== null && mapNumber(item?.latitude, 3, 55) !== null;
@@ -1321,7 +1745,7 @@ function renderResultHtml(results, request, metadata = {}) {
       }
       return `<td class="${cellClass}">${escapeHtml(displayValue(value))}</td>`;
     }).join("");
-    return `<tr data-map-key="${mapKey}"${hasCoordinate ? "" : " class=\"no-coordinate\""}><td class="select-cell">${checkbox}</td>${cells}</tr>`;
+    return `<tr data-map-key="${mapKey}"${hasCoordinate ? "" : " class=\"no-coordinate\""}><td class="sequence-cell">${mapKey}</td><td class="select-cell">${checkbox}</td>${cells}</tr>`;
   }).join("");
   const sourceUrl = escapeHtml(safeExportUrl(request.sourceUrl));
   const generatedAt = escapeHtml(new Date().toLocaleString("zh-CN", { hour12: false }));
@@ -1343,6 +1767,21 @@ function renderResultHtml(results, request, metadata = {}) {
   const filter = document.getElementById("result-filter");
   const count = document.getElementById("result-count");
   const clearSelection = document.getElementById("clear-selection");
+  const resultContext = document.getElementById("result-context");
+  const resultContextToggle = document.getElementById("toggle-result-context");
+  const resultContextStorageKey = "tianyuan-alibaba-result-context-collapsed-v1";
+  function setResultContextCollapsed(collapsed, persist = true) {
+    if (!resultContext || !resultContextToggle) return;
+    const value = Boolean(collapsed);
+    resultContext.classList.toggle("collapsed", value);
+    resultContextToggle.textContent = value ? "展开信息" : "收起信息";
+    resultContextToggle.setAttribute("aria-expanded", String(!value));
+    if (persist) {
+      try { localStorage.setItem(resultContextStorageKey, value ? "1" : "0"); } catch {}
+    }
+  }
+  resultContextToggle?.addEventListener("click", () => setResultContextCollapsed(!resultContext?.classList.contains("collapsed")));
+  try { setResultContextCollapsed(localStorage.getItem(resultContextStorageKey) === "1", false); } catch {}
   const distanceButton = (() => {
     const button = document.createElement("button");
     button.id = "show-selected-distances";
@@ -1372,6 +1811,23 @@ function renderResultHtml(results, request, metadata = {}) {
     if (clearSelection) clearSelection.disabled = selected.size === 0;
     if (distanceButton) distanceButton.disabled = selected.size === 0 || !frame?.contentWindow;
     send({ type: "ALIBABA_MAP_SET_SELECTED", ids: [...selected] });
+  }
+  function applyMapSelection(ids, focusId) {
+    selected.clear();
+    const validKeys = new Set(rows.map((row) => String(row.dataset.mapKey || "")));
+    (Array.isArray(ids) ? ids : []).forEach((id) => {
+      const key = String(id);
+      if (validKeys.has(key)) selected.add(key);
+    });
+    document.querySelectorAll(".result-select").forEach((input) => {
+      input.checked = selected.has(String(input.dataset.mapKey || ""));
+    });
+    updateSelection();
+    const target = rows.find((row) => String(row.dataset.mapKey || "") === String(focusId || ""));
+    if (target && !target.hidden) {
+      target.classList.add("selected-row");
+      target.scrollIntoView?.({ block: "nearest" });
+    }
   }
   function applyFilters() {
     const query = String(filter?.value || "").trim().toLowerCase();
@@ -1465,6 +1921,11 @@ function renderResultHtml(results, request, metadata = {}) {
     send({ type: "ALIBABA_MAP_SET_SELECTED", ids: [...selected] });
     if (distanceButton) distanceButton.disabled = selected.size === 0;
   });
+  window.addEventListener("message", (event) => {
+    if (!frame?.contentWindow || event.source !== frame.contentWindow) return;
+    const message = event.data || {};
+    if (message.type === "ALIBABA_MAP_SELECTION_CHANGED") applyMapSelection(message.ids, message.focusId);
+  });
   document.addEventListener("click", (event) => { if (!event.target.closest(".column-filter-popover, .column-filter-trigger")) closePopover(); });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape") closePopover(); });
   applyFilters();
@@ -1475,13 +1936,13 @@ function renderResultHtml(results, request, metadata = {}) {
 <title>阿里司法拍卖成交案例</title>
 <style>
  :root{color-scheme:light;--text:#1c2430;--muted:#667085;--line:#e5e9f0;--soft:#f8fafc;--blue:#2457c5}
- *{box-sizing:border-box}body{margin:0;background:#f5f7fb;color:var(--text);font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif}main{max-width:1480px;margin:0 auto;padding:16px 20px 28px}h1{margin:0;font-size:21px}h2{margin:0;font-size:16px}.muted{color:var(--muted)}.head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:8px}.head p{margin:4px 0;color:var(--muted)}.head-right{text-align:right;color:var(--muted);font-size:12px}.summary-strip{display:flex;flex-wrap:wrap;gap:7px 16px;padding:8px 10px;margin-bottom:8px;background:#fff;border:1px solid var(--line);border-radius:8px;color:var(--muted)}.summary-strip strong{color:var(--text)}.source{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.source a,a{color:var(--blue);text-decoration:none}.source a:hover,a:hover{text-decoration:underline}.card{background:#fff;border:1px solid var(--line);border-radius:9px;box-shadow:0 3px 12px rgba(29,41,57,.04);padding:10px;margin:8px 0}.section-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:9px}.actions{display:flex;gap:7px;flex-wrap:wrap}.button{display:inline-block;padding:6px 10px;border:0;border-radius:7px;background:var(--blue);color:#fff;text-decoration:none;font-size:12px;white-space:nowrap;cursor:pointer}.button.secondary{background:#eef3ff;color:var(--blue)}.button:disabled{opacity:.5;cursor:default}.map-frame-shell{position:relative;width:100%;height:440px;min-height:380px;overflow:hidden;border:1px solid var(--line);border-radius:8px;background:#f8fafc}.map-frame-shell iframe{display:block;width:100%;height:100%;border:0;border-radius:inherit}.map-resize-handle{position:absolute;z-index:4;left:0;right:0;bottom:0;height:14px;cursor:ns-resize;touch-action:none;background:linear-gradient(to bottom,transparent 0,transparent 45%,rgba(36,87,197,.15) 46%,rgba(36,87,197,.15) 54%,transparent 55%)}.map-resize-handle:after{content:"";position:absolute;left:50%;bottom:4px;width:34px;height:3px;transform:translateX(-50%);border-radius:4px;background:#98a2b3}.map-empty,.inline-notice{padding:12px;color:var(--muted);background:#f8fafc;border-radius:7px}.inline-notice{margin-bottom:8px;color:#8b5e00;background:#fff8e6}.inline-notice p{margin:3px 0 0}.table-toolbar{display:flex;align-items:center;gap:7px;margin:-1px 0 8px}.result-filter{width:300px;max-width:100%;padding:6px 8px;border:1px solid #d0d7e2;border-radius:7px;font:inherit;font-size:12px}.result-filter:focus,.column-filter-popover input:focus{outline:2px solid #c7d7ff;border-color:var(--blue)}.result-count{color:var(--muted);font-size:12px}.table-toolbar .clear-selection{margin-left:auto}.clear-selection,.clear-filters{border:0;border-radius:7px;padding:6px 9px;background:#eef3ff;color:var(--blue);font-size:12px;cursor:pointer}.clear-selection:disabled{opacity:.45;cursor:default}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:7px}table{border-collapse:collapse;width:100%;min-width:1800px;white-space:nowrap}th,td{padding:7px 8px;border-bottom:1px solid #edf0f5;text-align:left;vertical-align:middle}th{position:sticky;top:0;z-index:3;background:var(--soft);font-weight:700}td.numeric-cell{text-align:right;font-variant-numeric:tabular-nums}th:first-child,td.select-cell{width:36px;text-align:center;padding-left:6px;padding-right:6px}.result-select{width:14px;height:14px;accent-color:#f97316}tr[data-map-key]{cursor:pointer}tr[data-map-key]:hover{background:#f5f8ff}tr.selected-row{background:#fff4df!important}tr.no-coordinate{background:#fffaf0}.table-header-cell{display:flex;align-items:center;justify-content:space-between;gap:5px;min-width:0}.table-header-cell>span{overflow:hidden;text-overflow:ellipsis}.column-filter-trigger{display:inline-flex;align-items:center;justify-content:center;flex:0 0 20px;width:20px;height:20px;padding:0;border:0;border-radius:5px;background:transparent;color:#98a2b3;cursor:pointer}.column-filter-trigger:hover,.column-filter-trigger.active{background:#eaf1ff;color:var(--blue)}.filter-funnel{position:relative;display:block;width:11px;height:12px}.filter-funnel:before{content:"";position:absolute;left:1px;top:1px;width:9px;height:5px;background:currentColor;clip-path:polygon(0 0,100% 0,62% 100%,38% 100%)}.filter-funnel:after{content:"";position:absolute;left:5px;top:6px;width:2px;height:5px;background:currentColor;border-radius:1px}.column-filter-popover{position:fixed;z-index:10000;width:230px;padding:9px;background:#fff;border:1px solid #dbe3ef;border-radius:8px;box-shadow:0 10px 26px rgba(15,23,42,.18)}.column-filter-popover[hidden]{display:none}.column-filter-popover-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;color:#344054;font-size:12px;font-weight:700}.column-filter-popover-close{border:0;background:transparent;color:#98a2b3;font-size:17px;line-height:1;cursor:pointer}.column-filter-popover input{width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font:inherit;font-size:12px}.column-filter-actions{display:flex;justify-content:flex-end;margin-top:7px}.column-filter-actions button{border:0;border-radius:6px;padding:5px 8px;background:#eef3ff;color:var(--blue);font-size:11px;cursor:pointer}.foot{margin-top:8px;color:var(--muted);font-size:12px}body.resizing-map{user-select:none;cursor:ns-resize}body.resizing-map iframe{pointer-events:none}@media (max-width:820px){main{padding:12px}.head{display:block}.head-right{text-align:left}.map-frame-shell{height:360px;min-height:320px}.table-toolbar{flex-wrap:wrap}.table-toolbar .clear-selection{margin-left:0}}
- </style></head><body><main>
+ *{box-sizing:border-box}body{margin:0;background:#f5f7fb;color:var(--text);font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif}main{max-width:1480px;margin:0 auto;padding:12px 20px 24px}h1{margin:0;font-size:20px}h2{margin:0;font-size:16px}.muted{color:var(--muted)}.head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:4px}.head p{margin:1px 0;color:var(--muted)}.head-right{text-align:right;color:var(--muted);font-size:12px}.summary-strip{display:flex;align-items:center;flex-wrap:wrap;gap:3px 12px;padding:4px 8px;margin-bottom:4px;background:#fff;border:1px solid var(--line);border-radius:6px;color:var(--muted);font-size:12px;line-height:1.35}.summary-strip strong{color:var(--text)}.source{min-width:0;overflow:hidden;display:flex;align-items:center;gap:5px}.source-label{flex:0 0 auto}.source a{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.source a,a{color:var(--blue);text-decoration:none}.source a:hover,a:hover{text-decoration:underline}.card{background:#fff;border:1px solid var(--line);border-radius:9px;box-shadow:0 3px 12px rgba(29,41,57,.04);padding:10px;margin:8px 0}.section-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:9px}.actions{display:flex;gap:7px;flex-wrap:wrap}.button{display:inline-block;padding:6px 10px;border:0;border-radius:7px;background:var(--blue);color:#fff;text-decoration:none;font-size:12px;white-space:nowrap;cursor:pointer}.button.secondary{background:#eef3ff;color:var(--blue)}.button:disabled{opacity:.5;cursor:default}.map-frame-shell{position:relative;width:100%;height:440px;min-height:380px;overflow:hidden;border:1px solid var(--line);border-radius:8px;background:#f8fafc}.map-frame-shell iframe{display:block;width:100%;height:100%;border:0;border-radius:inherit}.map-resize-handle{position:absolute;z-index:4;left:0;right:0;bottom:0;height:14px;cursor:ns-resize;touch-action:none;background:linear-gradient(to bottom,transparent 0,transparent 45%,rgba(36,87,197,.15) 46%,rgba(36,87,197,.15) 54%,transparent 55%)}.map-resize-handle:after{content:"";position:absolute;left:50%;bottom:4px;width:34px;height:3px;transform:translateX(-50%);border-radius:4px;background:#98a2b3}.map-empty,.inline-notice{padding:12px;color:var(--muted);background:#f8fafc;border-radius:7px}.inline-notice{margin-bottom:8px;color:#8b5e00;background:#fff8e6}.inline-notice p{margin:3px 0 0}.table-toolbar{display:flex;align-items:center;gap:7px;margin:-1px 0 8px}.result-filter{width:300px;max-width:100%;padding:6px 8px;border:1px solid #d0d7e2;border-radius:7px;font:inherit;font-size:12px}.result-filter:focus,.column-filter-popover input:focus{outline:2px solid #c7d7ff;border-color:var(--blue)}.result-count{color:var(--muted);font-size:12px}.table-toolbar .clear-selection{margin-left:auto}.clear-selection,.clear-filters{border:0;border-radius:7px;padding:6px 9px;background:#eef3ff;color:var(--blue);font-size:12px;cursor:pointer}.clear-selection:disabled{opacity:.45;cursor:default}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:7px}table{border-collapse:collapse;width:100%;min-width:1800px;white-space:nowrap}th,td{padding:7px 8px;border-bottom:1px solid #edf0f5;text-align:left;vertical-align:middle}th{position:sticky;top:0;z-index:3;background:var(--soft);font-weight:700}td.numeric-cell{text-align:right;font-variant-numeric:tabular-nums}th.sequence-column,td.sequence-cell{width:48px;text-align:center;color:#475467;font-variant-numeric:tabular-nums}th:first-child,td.select-cell{width:36px;text-align:center;padding-left:6px;padding-right:6px}.result-select{width:14px;height:14px;accent-color:#f97316}tr[data-map-key]{cursor:pointer}tr[data-map-key]:hover{background:#f5f8ff}tr.selected-row{background:#fff4df!important}tr.no-coordinate{background:#fffaf0}.table-header-cell{display:flex;align-items:center;justify-content:space-between;gap:5px;min-width:0}.table-header-cell>span{overflow:hidden;text-overflow:ellipsis}.column-filter-trigger{display:inline-flex;align-items:center;justify-content:center;flex:0 0 20px;width:20px;height:20px;padding:0;border:0;border-radius:5px;background:transparent;color:#98a2b3;cursor:pointer}.column-filter-trigger:hover,.column-filter-trigger.active{background:#eaf1ff;color:var(--blue)}.filter-funnel{position:relative;display:block;width:11px;height:12px}.filter-funnel:before{content:"";position:absolute;left:1px;top:1px;width:9px;height:5px;background:currentColor;clip-path:polygon(0 0,100% 0,62% 100%,38% 100%)}.filter-funnel:after{content:"";position:absolute;left:5px;top:6px;width:2px;height:5px;background:currentColor;border-radius:1px}.column-filter-popover{position:fixed;z-index:10000;width:230px;padding:9px;background:#fff;border:1px solid #dbe3ef;border-radius:8px;box-shadow:0 10px 26px rgba(15,23,42,.18)}.column-filter-popover[hidden]{display:none}.column-filter-popover-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;color:#344054;font-size:12px;font-weight:700}.column-filter-popover-close{border:0;background:transparent;color:#98a2b3;font-size:17px;line-height:1;cursor:pointer}.column-filter-popover input{width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font:inherit;font-size:12px}.column-filter-actions{display:flex;justify-content:flex-end;margin-top:7px}.column-filter-actions button{border:0;border-radius:6px;padding:5px 8px;background:#eef3ff;color:var(--blue);font-size:11px;cursor:pointer}.foot{margin-top:8px;color:var(--muted);font-size:12px}body.resizing-map{user-select:none;cursor:ns-resize}body.resizing-map iframe{pointer-events:none}@media (max-width:820px){main{padding:10px 12px 20px}.head{display:block}.head-right{text-align:left}.map-frame-shell{height:360px;min-height:320px}.table-toolbar{flex-wrap:wrap}.table-toolbar .clear-selection{margin-left:0}}
+ </style><style>.result-context{margin-bottom:5px}.result-context-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px 8px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--muted);font-size:12px}.result-context-toggle{border:1px solid #cbd5e1;border-radius:5px;padding:2px 7px;background:#f8fafc;color:var(--blue);font:inherit;font-size:11px;cursor:pointer}.result-context-toggle:hover{background:#eef3ff}.result-context-body{margin-top:4px}.result-context.collapsed .result-context-body{display:none}</style></head><body><main>
  <div class="head"><div><h1>阿里司法拍卖成交案例</h1><p>本地脚本读取已打开页面并逐条核验详情，不使用 AI 自动判断。</p></div><div class="head-right">生成时间：${generatedAt}</div></div>
- <div class="summary-strip"><span>有效案例：<strong>${results.length}</strong> 条</span><span>候选记录：<strong>${Number(metadata.candidates || 0)}</strong> 条</span><span>跳过记录：<strong>${skipped}</strong> 条</span><span>拍卖状态：<strong>${escapeHtml(request.status === "finished" ? "已结束" : "全部状态")}</strong></span><span>物业类型：<strong>${escapeHtml(request.propertyType || "全部不动产")}</strong></span><span>成交日期：<strong>${escapeHtml(request.startDate || "不限")} 至 ${escapeHtml(request.endDate || "不限")}</strong></span></div>
- <div class="summary-strip source">列表来源：<a href="${sourceUrl}" target="_blank" rel="noopener noreferrer">${sourceUrl}</a></div>
+ <div class="result-context" id="result-context"><div class="result-context-head"><span>抓取条件与来源</span><button id="toggle-result-context" class="result-context-toggle" type="button" aria-expanded="true">收起信息</button></div><div id="result-context-body" class="result-context-body"><div class="summary-strip summary-stats"><span>有效案例：<strong>${results.length}</strong> 条</span><span>候选记录：<strong>${Number(metadata.candidates || 0)}</strong> 条</span><span>跳过记录：<strong>${skipped}</strong> 条</span><span>拍卖状态：<strong>${escapeHtml(request.status === "finished" ? "已结束" : "全部状态")}</strong></span><span>物业类型：<strong>${escapeHtml(request.propertyType || "全部不动产")}</strong></span><span>成交日期：<strong>${escapeHtml(request.startDate || "不限")} 至 ${escapeHtml(request.endDate || "不限")}</strong></span></div>
+ <div class="summary-strip source"><span class="source-label">列表来源：</span><a href="${sourceUrl}" title="${sourceUrl}" target="_blank" rel="noopener noreferrer">${sourceUrl}</a></div></div></div>
  <section class="card"><div class="section-heading"><h2>地图（${results.filter((item) => mapNumber(item?.longitude, 70, 140) !== null && mapNumber(item?.latitude, 3, 55) !== null).length} 条可定位结果）</h2><div class="actions">${mapLink}</div></div>${mapPreview}</section>
- <section class="card"><div class="section-heading"><h2>成交案例明细</h2>${excelActions}</div>${emptyNotice}<div class="table-toolbar"><input id="result-filter" class="result-filter" type="search" placeholder="筛选标题、位置、行政区、物业类型……" aria-label="筛选成交案例"><span id="result-count" class="result-count"></span><button id="clear-filters" class="clear-filters" type="button">清除筛选</button><button id="clear-selection" class="clear-selection" type="button" disabled>清除勾选</button></div><div id="column-filter-popover" class="column-filter-popover" hidden><div class="column-filter-popover-head"><span id="column-filter-label">列筛选</span><button id="close-column-filter" class="column-filter-popover-close" type="button" aria-label="关闭">×</button></div><input id="column-filter-input" type="search" placeholder="输入关键词"><div class="column-filter-actions"><button id="clear-column-filter" type="button">清除当前列</button></div></div><div class="table-wrap"><table id="result-table"><thead><tr><th>选择</th>${header}</tr></thead><tbody>${rows || `<tr><td colspan="${columns.length + 1}" class="empty">暂未找到符合条件的成交案例</td></tr>`}</tbody></table></div></section>
+ <section class="card"><div class="section-heading"><h2>成交案例明细</h2>${excelActions}</div>${emptyNotice}<div class="table-toolbar"><input id="result-filter" class="result-filter" type="search" placeholder="筛选标题、位置、行政区、物业类型……" aria-label="筛选成交案例"><span id="result-count" class="result-count"></span><button id="clear-filters" class="clear-filters" type="button">清除筛选</button><button id="clear-selection" class="clear-selection" type="button" disabled>清除勾选</button></div><div id="column-filter-popover" class="column-filter-popover" hidden><div class="column-filter-popover-head"><span id="column-filter-label">列筛选</span><button id="close-column-filter" class="column-filter-popover-close" type="button" aria-label="关闭">×</button></div><input id="column-filter-input" type="search" placeholder="输入关键词"><div class="column-filter-actions"><button id="clear-column-filter" type="button">清除当前列</button></div></div><div class="table-wrap"><table id="result-table"><thead><tr><th class="sequence-column">序号</th><th>选择</th>${header}</tr></thead><tbody>${rows || `<tr><td colspan="${columns.length + 2}" class="empty">暂未找到符合条件的成交案例</td></tr>`}</tbody></table></div></section>
  <div class="foot">成交案例仅保留详情页显示成交且出价次数大于 0 的记录；点击行可在地图中定位，勾选有坐标的案例可在地图上突出显示。</div>
  ${filterScript}</main></body></html>`;
 }
@@ -1904,16 +2365,16 @@ function renderMapHtmlLegacy(mapData, request = {}) {
   return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>阿里司法拍卖地图</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+<link rel="stylesheet" href="leaflet.css">
+<link rel="stylesheet" href="MarkerCluster.css">
+<link rel="stylesheet" href="MarkerCluster.Default.css">
 <style>
 html,body,#map{height:100%;margin:0}body{font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;color:#1f2937}#map{background:#eef2f7}.map-header,.map-panel{position:absolute;z-index:1000;background:rgba(255,255,255,.96);border:1px solid rgba(148,163,184,.28);box-shadow:0 4px 16px rgba(15,23,42,.12);border-radius:9px}.map-header{top:12px;left:12px;padding:9px 11px;min-width:220px}.map-header strong{display:block;font-size:14px}.map-header span{display:block;margin-top:2px;color:#64748b}.legend{display:flex;gap:10px;margin-top:6px;color:#475569}.legend i{display:inline-block;width:8px;height:8px;margin-right:3px;border-radius:50%}.legend .residential{background:#2563eb}.legend .commercial{background:#16a34a}.legend .selected{background:#f97316}.map-panel{top:12px;right:12px;width:292px;max-width:calc(100vw - 32px);padding:8px}.map-panel.collapsed{width:auto}.map-panel.collapsed .panel-body{display:none}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 1px 7px;color:#344054;font-weight:700}.panel-head button{border:0;border-radius:6px;padding:4px 7px;background:#eef3ff;color:#2457c5;font-size:11px;cursor:pointer}.map-tabs{display:flex;gap:4px;margin-bottom:7px}.map-tab{border:0;border-radius:6px;padding:5px 8px;background:#f1f5f9;color:#475569;cursor:pointer}.map-tab.active{background:#e8f0ff;color:#1d4ed8;font-weight:700}.map-search{width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font:inherit}.map-list{max-height:calc(100vh - 138px);overflow:auto;margin:6px 0 0;padding:0;list-style:none}.map-list li{padding:7px 4px;border-bottom:1px solid #eef2f7;cursor:pointer}.map-list li:hover,.map-list li.selected{background:#fff4df}.map-list strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.map-list span{display:block;margin-top:2px;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.map-count{color:#64748b;margin:5px 0}.empty{padding:12px 4px;color:#64748b}.case-pin{background:transparent;border:0}.case-pin span{display:block;width:16px;height:16px;border:2px solid #fff;border-radius:50% 50% 50% 0;box-shadow:0 2px 7px rgba(15,23,42,.35);transform:rotate(-45deg)}.case-pin span.residential{background:#2563eb}.case-pin span.commercial{background:#16a34a}.case-pin span.selected{background:#f97316;box-shadow:0 0 0 4px rgba(249,115,22,.25),0 2px 7px rgba(15,23,42,.35)}.case-popup-title{font-weight:700;margin-bottom:5px}.case-popup-meta{color:#475569;line-height:1.55}.case-popup-meta a{color:#2563eb;text-decoration:none}.leaflet-popup-content{min-width:230px;max-width:320px}
 </style></head><body><div id="map"></div>
 <div class="map-header"><strong>阿里司法拍卖地图</strong><span>${title} · 共 ${mapData.stats.total} 条，已定位 ${mapData.stats.located} 条</span><div class="legend"><span><i class="residential"></i>住宅</span><span><i class="commercial"></i>商业</span><span><i class="selected"></i>已选</span></div></div>
 <div class="map-panel" id="map-panel"><div class="panel-head"><span>案例清单</span><button id="toggle-panel" type="button">收起清单</button></div><div class="panel-body"><div class="map-tabs"><button class="map-tab active" id="located-tab" type="button">案例 <span>${mapData.stats.located}</span></button><button class="map-tab" id="unlocated-tab" type="button">未定位 <span>${mapData.stats.unlocated}</span></button></div><input id="map-search" class="map-search" type="search" placeholder="搜索标题、地址或物业类型" aria-label="搜索案例"><div id="map-count" class="map-count"></div><ul id="map-list" class="map-list"></ul></div></div>
 <script>const DATA=${dataJson};</script>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="leaflet.js"></script><script src="leaflet.markercluster.js"></script>
 <script>
 const map=L.map("map",{preferCanvas:true,zoomControl:false}).setView([30.25,120.16],9);L.control.zoom({position:"bottomright"}).addTo(map);L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",{maxZoom:19,attribution:"&copy; Esri, Maxar, Earthstar Geographics"}).addTo(map);
 const group=window.L&&L.markerClusterGroup?L.markerClusterGroup({disableClusteringAtZoom:15,showCoverageOnHover:false}):L.layerGroup();const markers=new Map();const located=DATA.points||[];const unlocated=DATA.unlocated||[];const selectedKeys=new Set();const esc=v=>String(v??"").replace(/[&<>"']/g,m=>m==="&"?"&amp;":m==="<"?"&lt;":m===">"?"&gt;":m.charCodeAt(0)===34?"&quot;":"&#39;");const numberText=v=>{const n=Number(String(v??"").replace(/,/g,""));return Number.isFinite(n)?n.toLocaleString("zh-CN",{maximumFractionDigits:2}):esc(v)};const markerKind=item=>String(item.propertyType||"").includes("商业")?"commercial":"residential";
@@ -1938,9 +2399,9 @@ function renderMapHtml(mapData, request = {}) {
   return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>阿里司法拍卖地图</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+<link rel="stylesheet" href="leaflet.css">
+<link rel="stylesheet" href="MarkerCluster.css">
+<link rel="stylesheet" href="MarkerCluster.Default.css">
 <style>
 html,body,#map{height:100%;margin:0}body{font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;color:#1f2937}#map{background:#eef2f7}.map-header,.map-panel{position:absolute;z-index:1000;background:rgba(255,255,255,.96);border:1px solid rgba(148,163,184,.28);box-shadow:0 4px 16px rgba(15,23,42,.12);border-radius:9px}.map-header{top:12px;left:12px;padding:9px 11px;min-width:220px}.map-header strong{display:block;font-size:14px}.map-header span{display:block;margin-top:2px;color:#64748b}.legend{display:flex;gap:10px;margin-top:6px;color:#475569;flex-wrap:wrap}.legend i{display:inline-block;width:8px;height:8px;margin-right:3px;border-radius:50%}.legend .residential{background:#2563eb}.legend .commercial{background:#16a34a}.legend .selected{background:#f97316}.legend .reference{background:#dc2626}.map-reference-badge{position:absolute;z-index:1000;left:12px;top:105px;padding:5px 8px;border-radius:6px;background:rgba(255,255,255,.94);color:#64748b;box-shadow:0 2px 8px rgba(15,23,42,.12)}.map-reference-badge.ready{color:#b42318;font-weight:700}.map-panel{top:12px;right:12px;width:292px;max-width:calc(100vw - 32px);padding:8px}.map-panel.collapsed{width:auto}.map-panel.collapsed .panel-body{display:none}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 1px 7px;color:#344054;font-weight:700}.panel-head button{border:0;border-radius:6px;padding:4px 7px;background:#eef3ff;color:#2457c5;font-size:11px;cursor:pointer}.map-tools{display:grid;gap:5px;margin:0 0 8px;padding:7px;border:1px solid #e7edf5;border-radius:7px;background:#f8fafc}.map-tools-row{display:flex;gap:5px;flex-wrap:wrap}.map-tools button{border:0;border-radius:6px;padding:5px 7px;background:#eef3ff;color:#2457c5;font-size:11px;cursor:pointer}.map-tools button.active{background:#dc2626;color:#fff}.map-tools button:disabled{opacity:.45;cursor:default}.map-tools small{color:#64748b;line-height:1.4}.map-tabs{display:flex;gap:4px;margin-bottom:7px}.map-tab{border:0;border-radius:6px;padding:5px 8px;background:#f1f5f9;color:#475569;cursor:pointer}.map-tab.active{background:#e8f0ff;color:#1d4ed8;font-weight:700}.map-search{width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font:inherit}.map-list{max-height:calc(100vh - 210px);overflow:auto;margin:6px 0 0;padding:0;list-style:none}.map-list li{padding:7px 4px;border-bottom:1px solid #eef2f7;cursor:pointer}.map-list li:hover,.map-list li.selected{background:#fff4df}.map-list strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.map-list span{display:block;margin-top:2px;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.map-list span.distance{color:#b42318;font-weight:700}.map-count{color:#64748b;margin:5px 0}.empty{padding:12px 4px;color:#64748b}.case-pin{background:transparent;border:0}.case-pin span{display:block;width:16px;height:16px;border:2px solid #fff;border-radius:50% 50% 50% 0;box-shadow:0 2px 7px rgba(15,23,42,.35);transform:rotate(-45deg)}.case-pin span.residential{background:#2563eb}.case-pin span.commercial{background:#16a34a}.case-pin span.selected{background:#f97316;box-shadow:0 0 0 4px rgba(249,115,22,.25),0 2px 7px rgba(15,23,42,.35)}.reference-pin{background:transparent;border:0}.reference-pin span{display:block;width:18px;height:18px;border:3px solid #fff;border-radius:50% 50% 50% 0;background:#dc2626;box-shadow:0 2px 8px rgba(127,29,29,.45);transform:rotate(-45deg)}.case-popup-title{font-weight:700;margin-bottom:5px}.case-popup-meta{color:#475569;line-height:1.55}.case-popup-meta a{color:#2563eb;text-decoration:none}.leaflet-popup-content{min-width:230px;max-width:320px}#map.placing-reference{cursor:crosshair}
 </style></head><body><div id="map"></div>
@@ -1948,7 +2409,7 @@ html,body,#map{height:100%;margin:0}body{font:12px/1.45 -apple-system,BlinkMacSy
 <div class="map-reference-badge" id="reference-badge">未设置位置标记</div>
 <div class="map-panel" id="map-panel"><div class="panel-head"><span>案例清单</span><button id="toggle-panel" type="button">收起清单</button></div><div class="panel-body"><div class="map-tools"><div class="map-tools-row"><button id="place-reference" type="button">插入位置标记</button><button id="clear-reference" type="button" disabled>清除标记</button></div><small id="reference-status">先点击“插入位置标记”，再点击地图放置位置；标记可拖动调整。</small></div><div class="map-tabs"><button class="map-tab active" id="located-tab" type="button">案例 <span>${mapData.stats.located}</span></button><button class="map-tab" id="unlocated-tab" type="button">未定位 <span>${mapData.stats.unlocated}</span></button></div><input id="map-search" class="map-search" type="search" placeholder="搜索标题、地址或物业类型" aria-label="搜索案例"><div id="map-count" class="map-count"></div><ul id="map-list" class="map-list"></ul></div></div>
 <script>const DATA=${dataJson};</script>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="leaflet.js"></script><script src="leaflet.markercluster.js"></script>
 <script>
 const map=L.map("map",{preferCanvas:true,zoomControl:false}).setView([30.25,120.16],9);L.control.zoom({position:"bottomright"}).addTo(map);L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",{maxZoom:19,attribution:"&copy; Esri, Maxar, Earthstar Geographics"}).addTo(map);
 const group=window.L&&L.markerClusterGroup?L.markerClusterGroup({disableClusteringAtZoom:15,showCoverageOnHover:false}):L.layerGroup();const markers=new Map();const located=DATA.points||[];const unlocated=DATA.unlocated||[];const selectedKeys=new Set();let referencePoint=null;let referenceMarker=null;let placementMode=false;const esc=v=>String(v??"").replace(/[&<>"']/g,m=>m==="&"?"&amp;":m==="<"?"&lt;":m===">"?"&gt;":m.charCodeAt(0)===34?"&quot;":"&#39;");const numberText=v=>{const n=Number(String(v??"").replace(/,/g,""));return Number.isFinite(n)?n.toLocaleString("zh-CN",{maximumFractionDigits:2}):esc(v)};const markerKind=item=>String(item.propertyType||"").includes("商业")?"commercial":"residential";const storageKey="tianyuan-alibaba-auction-map-reference-v1:"+String(location.pathname||"default");
@@ -1982,20 +2443,42 @@ function renderEnhancedMapHtml(mapData, request = {}) {
   return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>阿里司法拍卖地图</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+<link rel="stylesheet" href="leaflet.css">
+<link rel="stylesheet" href="MarkerCluster.css">
+<link rel="stylesheet" href="MarkerCluster.Default.css">
 <style>
-html,body,#map{height:100%;margin:0}body{font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;color:#1f2937}#map{background:#eef2f7}.legend-panel,.work-panel,.distance-panel{position:absolute;z-index:1000;background:rgba(255,255,255,.96);border:1px solid rgba(148,163,184,.28);box-shadow:0 4px 16px rgba(15,23,42,.12);border-radius:9px}.legend-panel{top:12px;right:12px;max-width:calc(100vw - 340px);padding:8px 10px}.legend{display:flex;gap:9px;flex-wrap:wrap;color:#475569}.legend span{white-space:nowrap}.legend i{display:inline-block;width:8px;height:8px;margin-right:3px;border-radius:50%}.legend .residential{background:#2563eb}.legend .commercial{background:#16a34a}.legend .selected{background:#f97316}.legend .reference{background:#dc2626}.map-tool-row{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.map-tool{border:1px solid #cbd5e1;border-radius:6px;padding:5px 8px;background:#fff;color:#2457c5;font-size:11px;cursor:pointer}.map-tool:hover,.map-tool.active{border-color:#2563eb;background:#eff6ff}.map-tool:disabled{opacity:.45;cursor:default}.map-tool-status{margin-top:5px;color:#64748b;font-size:10px;line-height:1.4}.reference-marker-list{display:flex;flex-direction:column;gap:3px;max-height:120px;overflow-y:auto;margin-top:6px}.reference-marker-row{display:flex;align-items:center;gap:5px;min-width:0;font-size:10px;color:#334155}.reference-marker-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.reference-marker-name>span,.reference-marker-note{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.reference-marker-note{margin-top:1px;color:#64748b;font-size:9px}.reference-marker-delete{border:0;padding:0 3px;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;line-height:1}.reference-marker-delete:hover{color:#dc2626}.reference-marker-icon{width:20px;height:20px;position:relative}.reference-marker-icon:before{content:"";position:absolute;left:2px;top:1px;width:15px;height:15px;border:2px solid #fff;border-radius:50% 50% 50% 0;background:#e11d48;box-shadow:0 0 0 2px rgba(225,29,72,.26),0 2px 6px rgba(15,23,42,.3);transform:rotate(-45deg)}.reference-marker-icon:after{content:"";position:absolute;left:8px;top:7px;width:5px;height:5px;border-radius:50%;background:#fff}.leaflet-tooltip.reference-label{border:1px solid rgba(225,29,72,.28);border-radius:7px;background:rgba(255,255,255,.96);color:#881337;box-shadow:0 3px 10px rgba(15,23,42,.14);font-size:10px;line-height:1.3;padding:3px 6px}.reference-label-name{font-weight:700}.reference-label-note{margin-top:2px;color:#64748b;max-width:180px;white-space:normal;word-break:break-word}.work-panel{left:12px;top:12px;width:292px;height:calc(100% - 24px);display:flex;flex-direction:column;overflow:hidden;padding:8px;transition:all .18s ease}.work-panel.collapsed{width:155px;height:auto;padding:7px 9px}.work-panel.collapsed .panel-body{display:none}.floating-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 1px 7px;color:#344054;font-weight:700}.panel-toggle{border:1px solid #cbd5e1;border-radius:999px;padding:3px 8px;background:#fff;color:#475569;font-size:11px;cursor:pointer}.panel-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}.list-tabs{display:flex;gap:4px;margin-bottom:7px}.list-tab{flex:1;border:0;border-radius:6px;padding:5px 8px;background:#f1f5f9;color:#475569;cursor:pointer}.list-tab.active{background:#e8f0ff;color:#1d4ed8;font-weight:700}.list-section{flex:1;min-height:0;display:flex;flex-direction:column}.list-section.hidden{display:none}.case-search{width:100%;box-sizing:border-box;margin-bottom:6px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font:inherit}.case-meta{color:#64748b;margin-bottom:6px;font-size:10px}.case-list,.unlocated-list{flex:1;min-height:0;overflow-y:auto;margin:0;padding:0;list-style:none}.case-item{padding:7px 4px;border-bottom:1px solid #eef2f7;cursor:pointer}.case-item:hover,.case-item.active{background:#fff4df}.case-item-title{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.case-item-sub,.case-item-distance{display:block;margin-top:2px;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.case-item-distance{color:#b42318;font-weight:700}.unlocated-list{padding-left:18px}.unlocated-list li{margin-bottom:5px;line-height:1.35}.distance-panel{right:12px;bottom:12px;width:min(380px,calc(100vw - 332px));max-height:260px;overflow:auto;box-sizing:border-box;padding:8px 10px}.distance-panel[hidden],.marker-dialog-backdrop[hidden]{display:none}.distance-panel-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px;font-weight:700}.distance-panel-close{border:0;padding:0 3px;background:transparent;color:#94a3b8;cursor:pointer;font-size:16px}.distance-panel-note{margin-bottom:2px;color:#64748b;font-size:10px}.distance-empty{color:#64748b;font-size:10px}.leaflet-tooltip.distance-label{border:1px solid rgba(249,115,22,.35);border-radius:999px;background:rgba(255,247,237,.96);color:#c2410c;box-shadow:0 2px 8px rgba(15,23,42,.16);font-size:10px;font-weight:800;padding:2px 6px;white-space:nowrap}.case-pin,.reference-pin{background:transparent;border:0}.case-pin span{display:block;width:16px;height:16px;border:2px solid #fff;border-radius:50% 50% 50% 0;box-shadow:0 2px 7px rgba(15,23,42,.35);transform:rotate(-45deg)}.case-pin span.residential{background:#2563eb}.case-pin span.commercial{background:#16a34a}.case-pin span.selected{background:#f97316;box-shadow:0 0 0 4px rgba(249,115,22,.25),0 2px 7px rgba(15,23,42,.35)}.reference-pin span{display:block;width:18px;height:18px;border:3px solid #fff;border-radius:50% 50% 50% 0;background:#dc2626;box-shadow:0 2px 8px rgba(127,29,29,.45);transform:rotate(-45deg)}.marker-dialog-backdrop{position:fixed;z-index:2000;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;background:rgba(15,23,42,.28)}.marker-dialog-card{width:min(360px,calc(100vw - 32px));box-sizing:border-box;padding:16px;border:1px solid #cbd5e1;border-radius:12px;background:#fff;box-shadow:0 16px 42px rgba(15,23,42,.22)}.marker-dialog-title{margin:0;color:#1f2937;font-size:15px}.marker-dialog-description{margin:4px 0 12px;color:#64748b;font-size:11px}.marker-dialog-field{display:grid;gap:5px;margin-top:9px;color:#475569;font-size:11px;font-weight:600}.marker-dialog-field input,.marker-dialog-field textarea{width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:7px;padding:7px 8px;font:inherit;font-weight:400;resize:vertical}.marker-dialog-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:14px}.marker-dialog-actions .primary{border-color:#2563eb;background:#2563eb;color:#fff}.leaflet-popup-content{min-width:230px;max-width:420px}#map.placing-reference{cursor:crosshair}@media(max-width:760px){.legend-panel{right:12px;max-width:calc(100vw - 24px)}.work-panel{top:58px;width:244px;height:calc(100% - 70px)}.work-panel.collapsed{top:58px;height:auto}.distance-panel{right:12px;width:calc(100vw - 24px);max-height:220px}}
+html,body,#map{height:100%;margin:0}body{font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;color:#1f2937}#map{background:#eef2f7}.legend-panel,.work-panel,.distance-panel{position:absolute;z-index:1000;background:rgba(255,255,255,.96);border:1px solid rgba(148,163,184,.28);box-shadow:0 4px 16px rgba(15,23,42,.12);border-radius:9px}.legend-panel{top:12px;right:12px;max-width:calc(100vw - 340px);padding:8px 10px}.legend{display:flex;gap:9px;flex-wrap:wrap;color:#475569}.legend span{white-space:nowrap}.legend i{display:inline-block;width:8px;height:8px;margin-right:3px;border-radius:50%}.legend .residential{background:#2563eb}.legend .commercial{background:#16a34a}.legend .selected{background:#f97316}.legend .reference{background:#dc2626}.map-provider-row{display:flex;align-items:center;gap:6px;margin-top:7px;color:#475569}.map-provider-row span{white-space:nowrap}.map-provider-select{min-width:138px;padding:4px 7px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#334155;font:inherit;font-size:11px}.tile-status{margin-top:4px;color:#64748b;font-size:10px;line-height:1.35}.tile-status[data-kind="error"]{color:#b91c1c}.map-tool-row{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.map-tool{border:1px solid #cbd5e1;border-radius:6px;padding:5px 8px;background:#fff;color:#2457c5;font-size:11px;cursor:pointer}.map-tool:hover,.map-tool.active{border-color:#2563eb;background:#eff6ff}.map-tool:disabled{opacity:.45;cursor:default}.map-tool-status{margin-top:5px;color:#64748b;font-size:10px;line-height:1.4}.reference-marker-list{display:flex;flex-direction:column;gap:3px;max-height:120px;overflow-y:auto;margin-top:6px}.reference-marker-row{display:flex;align-items:center;gap:5px;min-width:0;font-size:10px;color:#334155}.reference-marker-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.reference-marker-name>span,.reference-marker-note{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.reference-marker-note{margin-top:1px;color:#64748b;font-size:9px}.reference-marker-delete{border:0;padding:0 3px;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;line-height:1}.reference-marker-delete:hover{color:#dc2626}.reference-marker-icon{width:20px;height:20px;position:relative}.reference-marker-icon:before{content:"";position:absolute;left:2px;top:1px;width:15px;height:15px;border:2px solid #fff;border-radius:50% 50% 50% 0;background:#e11d48;box-shadow:0 0 0 2px rgba(225,29,72,.26),0 2px 6px rgba(15,23,42,.3);transform:rotate(-45deg)}.reference-marker-icon:after{content:"";position:absolute;left:8px;top:7px;width:5px;height:5px;border-radius:50%;background:#fff}.leaflet-tooltip.reference-label{border:1px solid rgba(225,29,72,.28);border-radius:7px;background:rgba(255,255,255,.96);color:#881337;box-shadow:0 3px 10px rgba(15,23,42,.14);font-size:10px;line-height:1.3;padding:3px 6px}.reference-label-name{font-weight:700}.reference-label-note{margin-top:2px;color:#64748b;max-width:180px;white-space:normal;word-break:break-word}.work-panel{left:12px;top:12px;width:292px;height:calc(100% - 24px);display:flex;flex-direction:column;overflow:hidden;padding:8px;transition:all .18s ease}.work-panel.collapsed{width:155px;height:auto;padding:7px 9px}.work-panel.collapsed .panel-body{display:none}.floating-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 1px 7px;color:#344054;font-weight:700}.panel-toggle{border:1px solid #cbd5e1;border-radius:999px;padding:3px 8px;background:#fff;color:#475569;font-size:11px;cursor:pointer}.panel-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}.list-tabs{display:flex;gap:4px;margin-bottom:7px}.list-tab{flex:1;border:0;border-radius:6px;padding:5px 8px;background:#f1f5f9;color:#475569;cursor:pointer}.list-tab.active{background:#e8f0ff;color:#1d4ed8;font-weight:700}.list-section{flex:1;min-height:0;display:flex;flex-direction:column}.list-section.hidden{display:none}.case-search{width:100%;box-sizing:border-box;margin-bottom:6px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font:inherit}.case-meta{color:#64748b;margin-bottom:6px;font-size:10px}.case-list,.unlocated-list{flex:1;min-height:0;overflow-y:auto;margin:0;padding:0;list-style:none}.case-item{padding:7px 4px;border-bottom:1px solid #eef2f7;cursor:pointer}.case-item:hover,.case-item.active{background:#fff4df}.case-item-title{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.case-item-sub,.case-item-distance{display:block;margin-top:2px;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.case-item-distance{color:#b42318;font-weight:700}.unlocated-list{padding-left:18px}.unlocated-list li{margin-bottom:5px;line-height:1.35}.distance-panel{right:12px;bottom:12px;width:min(380px,calc(100vw - 332px));max-height:260px;overflow:auto;box-sizing:border-box;padding:8px 10px}.distance-panel[hidden],.marker-dialog-backdrop[hidden]{display:none}.distance-panel-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px;font-weight:700}.distance-panel-close{border:0;padding:0 3px;background:transparent;color:#94a3b8;cursor:pointer;font-size:16px}.distance-panel-note{margin-bottom:2px;color:#64748b;font-size:10px}.distance-empty{color:#64748b;font-size:10px}.leaflet-tooltip.distance-label{border:1px solid rgba(249,115,22,.35);border-radius:999px;background:rgba(255,247,237,.96);color:#c2410c;box-shadow:0 2px 8px rgba(15,23,42,.16);font-size:10px;font-weight:800;padding:2px 6px;white-space:nowrap}.case-pin,.reference-pin{background:transparent;border:0}.case-pin span{display:block;width:16px;height:16px;border:2px solid #fff;border-radius:50% 50% 50% 0;box-shadow:0 2px 7px rgba(15,23,42,.35);transform:rotate(-45deg)}.case-pin span.residential{background:#2563eb}.case-pin span.commercial{background:#16a34a}.case-pin span.selected{background:#f97316;box-shadow:0 0 0 4px rgba(249,115,22,.25),0 2px 7px rgba(15,23,42,.35)}.reference-pin span{display:block;width:18px;height:18px;border:3px solid #fff;border-radius:50% 50% 50% 0;background:#dc2626;box-shadow:0 2px 8px rgba(127,29,29,.45);transform:rotate(-45deg)}.marker-dialog-backdrop{position:fixed;z-index:2000;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;background:rgba(15,23,42,.28)}.marker-dialog-card{width:min(360px,calc(100vw - 32px));box-sizing:border-box;padding:16px;border:1px solid #cbd5e1;border-radius:12px;background:#fff;box-shadow:0 16px 42px rgba(15,23,42,.22)}.marker-dialog-title{margin:0;color:#1f2937;font-size:15px}.marker-dialog-description{margin:4px 0 12px;color:#64748b;font-size:11px}.marker-dialog-field{display:grid;gap:5px;margin-top:9px;color:#475569;font-size:11px;font-weight:600}.marker-dialog-field input,.marker-dialog-field textarea{width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:7px;padding:7px 8px;font:inherit;font-weight:400;resize:vertical}.marker-dialog-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:14px}.marker-dialog-actions .primary{border-color:#2563eb;background:#2563eb;color:#fff}.leaflet-popup-content{min-width:230px;max-width:420px}#map.placing-reference{cursor:crosshair}@media(max-width:760px){.legend-panel{right:12px;max-width:calc(100vw - 24px)}.work-panel{top:58px;width:244px;height:calc(100% - 70px)}.work-panel.collapsed{top:58px;height:auto}.distance-panel{right:12px;width:calc(100vw - 24px);max-height:220px}}
+</style><style id="land-map-parity">
+.legend-panel{max-width:min(560px,calc(100vw - 320px));border-radius:10px;padding:7px 9px;box-shadow:0 4px 14px rgba(0,0,0,.10)}
+.map-tool{border-color:#cbd5e0;border-radius:7px;padding:4px 7px;color:#1e3a8a;font-size:10px}
+.work-panel{box-sizing:border-box;border-radius:12px;box-shadow:0 4px 14px rgba(0,0,0,.10)}
+.floating-title{margin-bottom:8px}.list-tabs{gap:3px;padding:2px;margin-bottom:6px;background:#f1f5f9;border-radius:8px}
+.list-tab{padding:5px 6px;background:transparent;font-size:11px}.list-tab.active{background:#fff;color:#1e3a8a;box-shadow:0 1px 3px rgba(15,23,42,.12)}
+.case-search,.case-sort{width:100%;box-sizing:border-box;margin-bottom:6px;padding:6px 8px;border:1px solid #cbd5e0;border-radius:8px;background:#fff;color:#374151;font:inherit;font-size:11px;outline:none}
+.case-search:focus,.case-sort:focus{border-color:#3182ce;box-shadow:0 0 0 2px rgba(49,130,206,.12)}
+.case-item{margin-bottom:5px;padding:6px 7px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;transition:all .15s ease}
+.case-item:hover{border-color:#63b3ed;background:#fff;box-shadow:0 4px 12px rgba(66,153,225,.10)}
+.case-item.active{border-color:#3182ce;background:#fff;box-shadow:0 4px 16px rgba(49,130,206,.18)}
+.case-item-title{font-size:11px;line-height:1.25}.case-item-sub{font-size:10px;line-height:1.25}
+.case-item-footer{display:flex;align-items:center;justify-content:space-between;gap:5px;margin-top:4px}
+.case-item-price{overflow:hidden;color:#b91c1c;font-size:11px;font-weight:800;text-overflow:ellipsis;white-space:nowrap}
+.case-item-link{flex:none;color:#2563eb;font-size:10px}.unlocated-reason{display:block;margin-top:2px;color:#b45309;font-size:10px}
+.leaflet-tooltip.case-label{background:rgba(255,255,255,.96);border:1px solid rgba(59,130,246,.22);border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.12);color:#1f2937;cursor:pointer;font-size:11px;line-height:1.3;padding:5px 7px;pointer-events:auto}.case-label-wrap{min-width:120px;max-width:220px}.case-label-index,.case-item-index{display:inline-block;margin-right:4px;color:#1e3a8a;font-weight:800}.case-label-title{font-size:11px;font-weight:700;line-height:1.35;white-space:normal;word-break:break-word}.case-label-price{margin-top:3px;color:#b91c1c;font-size:12px;font-weight:800}
 </style></head><body><div id="map"></div>
-<div class="legend-panel"><div class="legend"><span><i class="residential"></i>住宅</span><span><i class="commercial"></i>商业</span><span><i class="selected"></i>已选案例</span><span><i class="reference"></i>自定义标记</span></div><div class="map-tool-row"><button id="add-reference-marker" class="map-tool" type="button">插入位置标记</button><button id="clear-reference-markers" class="map-tool" type="button" disabled>清除标记</button></div><div id="map-tool-status" class="map-tool-status">点击“插入位置标记”后，再点击地图放置标记。</div><div id="reference-marker-list" class="reference-marker-list"></div></div>
+<div class="legend-panel"><div class="legend"><span><i class="residential"></i>住宅</span><span><i class="commercial"></i>商业</span><span><i class="selected"></i>已选案例</span><span><i class="reference"></i>自定义标记</span></div><label class="map-provider-row"><span>地图底层</span><select id="map-provider-select" class="map-provider-select" aria-label="地图底层"></select></label><div id="tile-status" class="tile-status">正在加载地图底图…</div><div class="map-tool-row"><button id="add-reference-marker" class="map-tool" type="button">插入位置标记</button><button id="clear-reference-markers" class="map-tool" type="button" disabled>清除标记</button></div><div id="map-tool-status" class="map-tool-status">点击“插入位置标记”后，再点击地图放置标记。</div><div id="reference-marker-list" class="reference-marker-list"></div></div>
 <div id="distance-panel" class="distance-panel" hidden><div class="distance-panel-title"><span>选中案例到标记点距离</span><button id="close-distance-panel" class="distance-panel-close" type="button" aria-label="关闭距离结果">×</button></div><div id="distance-panel-note" class="distance-panel-note"></div><div id="distance-results"></div></div>
 <div id="marker-dialog" class="marker-dialog-backdrop" hidden><form id="marker-dialog-form" class="marker-dialog-card" role="dialog" aria-modal="true" aria-labelledby="marker-dialog-title"><h2 id="marker-dialog-title" class="marker-dialog-title">添加位置标记</h2><p class="marker-dialog-description">为地图上的位置填写名称，也可以补充备注。</p><label class="marker-dialog-field"><span>标记名称</span><input id="marker-dialog-name" type="text" maxlength="80" required autocomplete="off"></label><label class="marker-dialog-field"><span>备注（可选）</span><textarea id="marker-dialog-note" rows="2" maxlength="160" placeholder="留空则不显示"></textarea></label><div class="marker-dialog-actions"><button id="marker-dialog-cancel" class="map-tool" type="button">取消</button><button class="map-tool primary" type="submit">确定</button></div></form></div>
-<div class="work-panel" id="work-panel"><div class="floating-title"><span>案例清单</span><button class="panel-toggle" id="work-toggle" type="button">收起</button></div><div class="panel-body" id="work-body"><div class="list-tabs"><button class="list-tab active" id="case-tab" type="button">案例 <span id="case-tab-count">0</span></button><button class="list-tab" id="unlocated-tab" type="button">未定位 <span id="unlocated-tab-count">0</span></button></div><section class="list-section" id="case-section"><input id="case-search" class="case-search" type="search" placeholder="搜索标题、地址或物业类型"><div id="case-meta" class="case-meta"></div><ul id="case-list" class="case-list"></ul></section><section class="list-section hidden" id="unlocated-section"><div id="unlocated-meta" class="case-meta"></div><ul id="unlocated-list" class="unlocated-list"></ul></section></div></div>
+<div class="work-panel collapsed" id="work-panel"><div class="floating-title"><span>案例清单</span><button class="panel-toggle" id="work-toggle" type="button">展开</button></div><div class="panel-body" id="work-body"><div class="list-tabs"><button class="list-tab active" id="case-tab" type="button">案例 <span id="case-tab-count">0</span></button><button class="list-tab" id="unlocated-tab" type="button">未定位 <span id="unlocated-tab-count">0</span></button></div><section class="list-section" id="case-section"><input id="case-search" class="case-search" type="search" placeholder="搜索标题、地址或物业类型"><select id="case-sort" class="case-sort" aria-label="案例排序"><option value="date_desc">时间：新到旧</option><option value="date_asc">时间：旧到新</option><option value="price_desc">成交金额：高到低</option><option value="price_asc">成交金额：低到高</option></select><div id="case-meta" class="case-meta"></div><ul id="case-list" class="case-list"></ul></section><section class="list-section hidden" id="unlocated-section"><div id="unlocated-meta" class="case-meta"></div><ul id="unlocated-list" class="unlocated-list"></ul></section></div></div>
 <script>const DATA=${dataJson};</script>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="leaflet.js"></script><script src="leaflet.markercluster.js"></script>
 <script>
-const map=L.map("map",{preferCanvas:true,zoomControl:false}).setView([30.25,120.16],9);L.control.zoom({position:"bottomright"}).addTo(map);L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",{maxZoom:19,attribution:"&copy; Esri, Maxar, Earthstar Geographics"}).addTo(map);const cluster=window.L&&L.markerClusterGroup?L.markerClusterGroup({disableClusteringAtZoom:15,showCoverageOnHover:false}):L.layerGroup();const markers=new Map();const located=DATA.points||[];const unlocated=DATA.unlocated||[];const selectedKeys=new Set();const referenceMarkerData=[];const referenceMarkerLayers=new Map();const distanceLayer=L.layerGroup().addTo(map);let distanceLinesVisible=false;let placementMode=false;let pendingMarkerPosition=null;const esc=v=>String(v??"").replace(/[&<>"']/g,m=>m==="&"?"&amp;":m==="<"?"&lt;":m===">"?"&gt;":m.charCodeAt(0)===34?"&quot;":"&#39;");const numberText=v=>{const n=Number(String(v??"").replace(/,/g,""));return Number.isFinite(n)?n.toLocaleString("zh-CN",{maximumFractionDigits:2}):esc(v)};const markerKind=item=>String(item.propertyType||"").includes("商业")?"commercial":"residential";const storageKey="tianyuan-alibaba-auction-map-reference-v2:"+String(location.pathname||"default");
+const map=L.map("map",{preferCanvas:true,zoomControl:false}).setView([30.25,120.16],9);L.control.zoom({position:"bottomright"}).addTo(map);
+const mapProviderStorageKey="tianyuan-alibaba-auction-map-provider-v1";const tileStatus=document.getElementById("tile-status");const mapProviderSelect=document.getElementById("map-provider-select");const amapWebKey=String(DATA.mapConfig?.amapWebKey||"").trim();const amapTileUrl="https://webrd0{s}.is.autonavi.com/appmaptile?style=7&x={x}&y={y}&z={z}&lang=zh_cn&size=1&scale=1"+(amapWebKey?"&key="+encodeURIComponent(amapWebKey):"");const tileProviders=[{id:"arcgis",name:"ArcGIS World Street Map",url:"https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",attribution:"&copy; Esri, Maxar, Earthstar Geographics"},{id:"amap",name:amapWebKey?"高德地图（API）":"高德地图（公开瓦片）",url:amapTileUrl,attribution:"&copy; 高德地图",subdomains:"1234"},{id:"osm",name:"OpenStreetMap",url:"https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",attribution:"&copy; OpenStreetMap contributors",subdomains:"abc"}];let tileLayer=null;let tileLoadTimer=null;let tileGeneration=0;const failedTileProviders=new Set();
+function setTileStatus(text,kind=""){if(!tileStatus)return;tileStatus.textContent=text;tileStatus.dataset.kind=kind}
+function installTileProvider(providerId,options={}){const automatic=options.automatic===true;if(!automatic)failedTileProviders.clear();const provider=tileProviders.find(item=>item.id===providerId)||tileProviders[0];failedTileProviders.add(provider.id);const generation=++tileGeneration;if(tileLoadTimer){window.clearTimeout(tileLoadTimer);tileLoadTimer=null}if(tileLayer)map.removeLayer(tileLayer);if(mapProviderSelect)mapProviderSelect.value=provider.id;try{localStorage.setItem(mapProviderStorageKey,provider.id)}catch{}setTileStatus("正在加载"+provider.name+"…");let loaded=false;let errorCount=0;const fallback=()=>{if(generation!==tileGeneration||loaded)return;const next=tileProviders.find(item=>!failedTileProviders.has(item.id));if(!next){setTileStatus("底图暂时不可用，但案例点和清单仍可使用。请检查网络，或在工作台“地图基础配置”中配置高德 API。","error");return}setTileStatus(provider.name+"加载失败，正在切换到"+next.name+"…","error");installTileProvider(next.id,{automatic:true})};const tileOptions={maxZoom:19,attribution:provider.attribution,updateWhenIdle:true,keepBuffer:2};if(provider.subdomains)tileOptions.subdomains=provider.subdomains;tileLayer=L.tileLayer(provider.url,tileOptions);tileLayer.on("tileload",()=>{if(generation!==tileGeneration)return;loaded=true;if(tileLoadTimer){window.clearTimeout(tileLoadTimer);tileLoadTimer=null}failedTileProviders.clear();setTileStatus("当前底图："+provider.name)});tileLayer.on("tileerror",()=>{if(generation!==tileGeneration||loaded)return;errorCount+=1;if(errorCount>=4)fallback()});tileLayer.addTo(map);tileLoadTimer=window.setTimeout(fallback,8000)}
+if(mapProviderSelect){mapProviderSelect.innerHTML=tileProviders.map(provider=>"<option value='"+provider.id+"'>"+provider.name+"</option>").join("");mapProviderSelect.addEventListener("change",()=>installTileProvider(mapProviderSelect.value))}
+let preferredProvider="arcgis";try{const saved=localStorage.getItem(mapProviderStorageKey);if(tileProviders.some(item=>item.id===saved))preferredProvider=saved}catch{}installTileProvider(preferredProvider);
+const cluster=window.L&&L.markerClusterGroup?L.markerClusterGroup({disableClusteringAtZoom:15,showCoverageOnHover:false}):L.layerGroup();const markers=new Map();const located=DATA.points||[];const unlocated=DATA.unlocated||[];const selectedKeys=new Set();const referenceMarkerData=[];const referenceMarkerLayers=new Map();const distanceLayer=L.layerGroup().addTo(map);let distanceLinesVisible=false;let placementMode=false;let pendingMarkerPosition=null;const esc=v=>String(v??"").replace(/[&<>"']/g,m=>m==="&"?"&amp;":m==="<"?"&lt;":m===">"?"&gt;":m.charCodeAt(0)===34?"&quot;":"&#39;");const numberText=v=>{const n=Number(String(v??"").replace(/,/g,""));return Number.isFinite(n)?n.toLocaleString("zh-CN",{maximumFractionDigits:2}):esc(v)};const markerKind=item=>String(item.propertyType||"").includes("商业")?"commercial":"residential";const storageKey="tianyuan-alibaba-auction-map-reference-v2:"+String(location.pathname||"default");
 function radians(value){return Number(value)*Math.PI/180}function distanceKm(a,b,c,d){const lat1=Number(a),lon1=Number(b),lat2=Number(c),lon2=Number(d);if(![lat1,lon1,lat2,lon2].every(Number.isFinite))return null;const dLat=radians(lat2-lat1),dLon=radians(lon2-lon1),x=Math.sin(dLat/2)**2+Math.cos(radians(lat1))*Math.cos(radians(lat2))*Math.sin(dLon/2)**2;return 6371.0088*2*Math.atan2(Math.sqrt(Math.min(1,x)),Math.sqrt(Math.max(0,1-x)))}function distanceText(value){return value<1?Math.round(value*1000)+" m":value.toFixed(2)+" km"}function itemDistance(item,marker){return distanceKm(item.latitude,item.longitude,marker.lat,marker.lon)}
 function iconFor(item){return L.divIcon({className:"case-pin",html:"<span class='"+(selectedKeys.has(String(item.id))?"selected":markerKind(item))+"'></span>",iconSize:[20,20],iconAnchor:[10,18]})}function referenceIcon(){return L.divIcon({className:"reference-pin",html:"<span></span>",iconSize:[24,24],iconAnchor:[12,22]})}function markerById(id){return referenceMarkerData.find(item=>item.id===String(id))}
 function referencePopup(item){return "<div class='case-popup-title'>"+esc(item.name)+"</div><div class='case-popup-meta'>"+(item.note?esc(item.note)+"<br>":"")+"纬度："+item.lat.toFixed(6)+"<br>经度："+item.lon.toFixed(6)+"<br>"+(item.editing?"编辑状态：可拖动":"位置已锁定，点击“编辑”后可移动")+"</div>"}function referenceLabel(item){return "<div class='reference-label-name'>"+esc(item.name)+"</div>"+(item.note?"<div class='reference-label-note'>"+esc(item.note)+"</div>":"")}
@@ -2007,15 +2490,30 @@ function removeReferenceMarker(id){const marker=referenceMarkerLayers.get(String
 function selectedRows(ids){const keys=new Set((Array.isArray(ids)?ids:[]).map(value=>String(value)));return located.filter(item=>keys.has(String(item.id)))}function clearDistanceLines(){distanceLayer.clearLayers()}function renderDistanceResults(ids){const panel=document.getElementById("distance-panel"),note=document.getElementById("distance-panel-note"),results=document.getElementById("distance-results");if(!panel||!note||!results)return;panel.hidden=false;clearDistanceLines();const rows=selectedRows(ids);if(!referenceMarkerData.length){distanceLinesVisible=false;note.textContent="请先点击“插入位置标记”，在地图上放置至少一个标记点。";results.innerHTML="<div class='distance-empty'>当前没有可计算的标记点。</div>";return}if(!rows.length){distanceLinesVisible=false;note.textContent="请先在结果表中勾选有坐标的案例。";results.innerHTML="<div class='distance-empty'>当前没有选中的可定位案例。</div>";return}distanceLinesVisible=true;let lineCount=0;const lines=[];rows.forEach(row=>referenceMarkerData.forEach(marker=>{const distance=itemDistance(row,marker);if(distance===null)return;const line=L.polyline([[marker.lat,marker.lon],[row.latitude,row.longitude]],{color:"#f97316",weight:2,opacity:.9,dashArray:"7 5"}).addTo(distanceLayer);line.bindTooltip(distanceText(distance),{permanent:true,direction:"center",opacity:.98,className:"distance-label",sticky:false});lines.push(marker.name+" → "+(row.title||row.address||("案例 "+row.id))+"："+distanceText(distance));lineCount++}));note.textContent="已绘制 "+lineCount+" 条距离线；标记点默认锁定，进入编辑状态后拖动会自动更新。";results.innerHTML=lines.map(line=>"<div>"+esc(line)+"</div>").join("")||"<div class='distance-empty'>选中案例缺少有效坐标。</div>";updateMarkers()}
 function closeMarkerDialog(){const dialog=document.getElementById("marker-dialog");if(dialog)dialog.hidden=true;pendingMarkerPosition=null;setPlacementMode(false)}function openMarkerDialog(latlng){const dialog=document.getElementById("marker-dialog"),name=document.getElementById("marker-dialog-name"),note=document.getElementById("marker-dialog-note");if(!dialog||!name||!note)return;pendingMarkerPosition={lat:Number(latlng.lat),lon:Number(latlng.lng)};name.value="位置标记 "+(referenceMarkerData.length+1);note.value="";dialog.hidden=false;requestAnimationFrame(()=>{name.focus();name.select()})}function confirmMarkerDialog(event){event.preventDefault();const name=document.getElementById("marker-dialog-name"),note=document.getElementById("marker-dialog-note"),trimmed=String(name?.value||"").trim();if(!trimmed){name?.focus();return}if(!pendingMarkerPosition){closeMarkerDialog();return}addReferenceMarker({name:trimmed,note:String(note?.value||"").trim(),lat:pendingMarkerPosition.lat,lon:pendingMarkerPosition.lon});closeMarkerDialog();updateStatus("已添加“"+trimmed+"”，位置已锁定；如需调整请点击“编辑”。")}
 function initReferenceMarkers(){document.getElementById("add-reference-marker")?.addEventListener("click",()=>setPlacementMode(!placementMode));document.getElementById("clear-reference-markers")?.addEventListener("click",()=>{referenceMarkerData.slice().forEach(item=>removeReferenceMarker(item.id));updateStatus("标记已清除。点击“插入位置标记”后可重新放置。")});document.getElementById("close-distance-panel")?.addEventListener("click",()=>{const panel=document.getElementById("distance-panel");if(panel)panel.hidden=true});document.getElementById("marker-dialog-form")?.addEventListener("submit",confirmMarkerDialog);document.getElementById("marker-dialog-cancel")?.addEventListener("click",closeMarkerDialog);document.getElementById("marker-dialog")?.addEventListener("click",event=>{if(event.target?.id==="marker-dialog")closeMarkerDialog()});document.addEventListener("keydown",event=>{const dialog=document.getElementById("marker-dialog");if(event.key==="Escape"&&dialog&&!dialog.hidden)closeMarkerDialog()});map.on("click",event=>{if(placementMode)openMarkerDialog(event.latlng)});loadReferenceMarkers()}
-function popup(item){const coordinateSource=item.coordinateProvider==="amap"?"高德坐落位置搜索":item.coordinateProvider==="nominatim"?"Nominatim 备用搜索":item.coordinateSource==="address-search"?"坐落位置搜索":"详情页明确坐标";const precision=item.coordinatePrecision==="poi"?"POI 精确点":item.coordinatePrecision==="address"?"地址点":"详情页坐标";const distances=distanceLinesVisible&&selectedKeys.has(String(item.id))?referenceMarkerData.map(marker=>itemDistance(item,marker)).filter(Number.isFinite):[];const distanceLine=distances.length?"<br>距位置标记："+distances.map(distanceText).join(" / "):"";return "<div class='case-popup-title'>"+esc(item.title||"阿里拍卖案例")+"</div><div class='case-popup-meta'>物业类型："+esc(item.propertyType||"未填写")+"<br>坐落位置："+esc(item.address||"未填写")+"<br>交易时间："+esc(item.transactionTime||"未填写")+"<br>成交金额："+numberText(item.transactionAmount||"")+" 元<br>建筑面积："+numberText(item.buildingArea||"")+" m²"+distanceLine+"<br>坐标来源："+coordinateSource+"（"+precision+"）<br><a href='"+esc(item.url||"#")+"' target='_blank' rel='noopener noreferrer'>打开详情页</a></div>"}
-function focus(item){const marker=markers.get(String(item?.id));if(!marker)return;const show=()=>{map.flyTo(marker.getLatLng(),Math.max(map.getZoom(),15),{duration:.45});marker.openPopup()};if(cluster.zoomToShowLayer)cluster.zoomToShowLayer(marker,show);else show()}function renderCaseList(){const query=String(document.getElementById("case-search")?.value||"").trim().toLowerCase(),rows=located.filter(item=>!query||[item.title,item.address,item.propertyType,item.transactionTime,item.district].join(" ").toLowerCase().includes(query));document.getElementById("case-meta").textContent="共 "+rows.length+" 条，点击案例可定位地图；先在结果明细中勾选案例，再点击“显示到标记距离”。";document.getElementById("case-tab-count").textContent=located.length;document.getElementById("case-list").innerHTML=rows.map(item=>{const distances=distanceLinesVisible&&selectedKeys.has(String(item.id))?referenceMarkerData.map(marker=>itemDistance(item,marker)).filter(Number.isFinite):[];const distance=distances.length?"<span class='case-item-distance'>距标记 "+distances.map(distanceText).join(" / ")+"</span>":"";return "<li class='case-item"+(selectedKeys.has(String(item.id))?" active":"")+"' data-id='"+esc(item.id)+"'><div class='case-item-title'>"+esc(item.title||item.address||"未填写标题")+"</div><span class='case-item-sub'>"+esc([item.propertyType,item.address,item.transactionTime].filter(Boolean).join(" · "))+"</span>"+distance+"</li>"}).join("")||"<li class='case-item'>没有匹配记录</li>";document.querySelectorAll("#case-list .case-item[data-id]").forEach(node=>node.addEventListener("click",()=>focus(located.find(item=>String(item.id)===node.dataset.id))))}
-function updateMarkers(){located.forEach(item=>{const marker=markers.get(String(item.id));if(marker){marker.setIcon(iconFor(item));marker.setPopupContent(popup(item))}});renderCaseList()}function setSelected(ids){selectedKeys.clear();(Array.isArray(ids)?ids:[]).forEach(id=>selectedKeys.add(String(id)));updateMarkers();if(distanceLinesVisible)renderDistanceResults([...selectedKeys])}function initLists(){document.getElementById("case-search")?.addEventListener("input",renderCaseList);document.getElementById("work-toggle")?.addEventListener("click",()=>{const root=document.getElementById("work-panel"),collapsed=root.classList.toggle("collapsed");document.getElementById("work-toggle").textContent=collapsed?"展开":"收起"});[["case-tab","case-section"],["unlocated-tab","unlocated-section"]].forEach(([tabId,sectionId])=>document.getElementById(tabId)?.addEventListener("click",()=>{[["case-tab","case-section"],["unlocated-tab","unlocated-section"]].forEach(([otherTab,otherSection])=>{const active=otherTab===tabId;document.getElementById(otherTab)?.classList.toggle("active",active);document.getElementById(otherSection)?.classList.toggle("hidden",!active)})}));document.getElementById("unlocated-meta").textContent="共 "+unlocated.length+" 条，未返回坐标的记录保留在这里。";document.getElementById("unlocated-tab-count").textContent=unlocated.length;document.getElementById("unlocated-list").innerHTML=unlocated.slice(0,200).map(item=>"<li><strong>"+esc(item.title||item.address||"未填写标题")+"</strong><br>"+esc([item.propertyType,item.transactionTime].filter(Boolean).join("｜"))+'</li>').join("")||"<li>没有未定位记录。</li>"}
-located.forEach(item=>{const marker=L.marker([item.latitude,item.longitude],{icon:iconFor(item)});marker.bindPopup(popup(item));markers.set(String(item.id),marker);cluster.addLayer(marker)});map.addLayer(cluster);const bounds=located.map(item=>[item.latitude,item.longitude]);if(bounds.length)map.fitBounds(bounds,{padding:[30,30]});initLists();initReferenceMarkers();renderCaseList();window.addEventListener("message",event=>{const message=event.data||{};if(message.type==="ALIBABA_MAP_SET_SELECTED")setSelected(message.ids);if(message.type==="ALIBABA_MAP_FOCUS")focus(located.find(item=>String(item.id)===String(Array.isArray(message.ids)?message.ids[0]:message.id)));if(message.type==="ALIBABA_MAP_DISTANCE_REQUEST"){setSelected(message.ids);renderDistanceResults(message.ids)}});if(window.parent!==window)window.parent.postMessage({type:"ALIBABA_MAP_READY"},"*");if(window.ResizeObserver)new ResizeObserver(()=>map.invalidateSize()).observe(document.body);
+  function popup(item){const coordinateSource=item.coordinateProvider==="amap"?"高德坐落位置搜索":item.coordinateProvider==="nominatim"?"Nominatim 备用搜索":item.coordinateSource==="address-search"?"坐落位置搜索":"详情页明确坐标";const precision=item.coordinatePrecision==="poi"?"POI 精确点":item.coordinatePrecision==="address"?"地址点":"详情页坐标";const distances=distanceLinesVisible&&selectedKeys.has(String(item.id))?referenceMarkerData.map(marker=>itemDistance(item,marker)).filter(Number.isFinite):[];const distanceLine=distances.length?"<br>距位置标记："+distances.map(distanceText).join(" / "):"";return "<div class='case-popup-title'><span class='case-label-index'>序号 "+esc(item.id)+"</span>"+esc(item.title||"阿里拍卖案例")+"</div><div class='case-popup-meta'>物业类型："+esc(item.propertyType||"未填写")+"<br>坐落位置："+esc(item.address||"未填写")+"<br>交易时间："+esc(item.transactionTime||"未填写")+"<br>成交金额："+numberText(item.transactionAmount||"")+" 元<br>建筑面积："+numberText(item.buildingArea||"")+" m²"+distanceLine+"<br>坐标来源："+coordinateSource+"（"+precision+"）<br><a href='"+esc(item.url||"#")+"' target='_blank' rel='noopener noreferrer'>打开详情页</a></div>"}
+function focus(item){const marker=markers.get(String(item?.id));if(!marker)return;const show=()=>{map.flyTo(marker.getLatLng(),Math.max(map.getZoom(),15),{duration:.45});marker.openPopup()};if(cluster.zoomToShowLayer)cluster.zoomToShowLayer(marker,show);else show()}
+const basePopup=popup;const popupUnitPrice=value=>value===null||value===undefined||String(value).trim()===""?"未填写":numberText(value)+" 元/m²";popup=item=>basePopup(item).replace("<br>成交金额：","<br>单价："+popupUnitPrice(item?.unitPrice)+"<br>成交金额：");
+function sortAmount(value){const parsed=Number(String(value??"").replace(/,/g,"").trim());return Number.isFinite(parsed)?parsed:0}
+  function renderCaseList(){const query=String(document.getElementById("case-search")?.value||"").trim().toLowerCase(),sort=String(document.getElementById("case-sort")?.value||"date_desc"),rows=located.filter(item=>!query||[item.title,item.address,item.propertyType,item.transactionTime,item.district].join(" ").toLowerCase().includes(query)).slice().sort((a,b)=>sort.startsWith("price")?(sortAmount(a.transactionAmount)-sortAmount(b.transactionAmount))*(sort.endsWith("desc")?-1:1):String(a.transactionTime||"").localeCompare(String(b.transactionTime||""))*(sort.endsWith("desc")?-1:1));document.getElementById("case-meta").textContent="共 "+rows.length+" 条，点击案例可定位地图；点击地图标记可多选/取消并同步高亮表格；先在结果明细中勾选案例，再点击“显示到标记距离”。";document.getElementById("case-tab-count").textContent=located.length;document.getElementById("case-list").innerHTML=rows.map(item=>{const distances=distanceLinesVisible&&selectedKeys.has(String(item.id))?referenceMarkerData.map(marker=>itemDistance(item,marker)).filter(Number.isFinite):[];const distance=distances.length?"<span class='case-item-distance'>距标记 "+distances.map(distanceText).join(" / ")+"</span>":"";const amount=sortAmount(item.transactionAmount),amountText=amount?"成交金额 "+amount.toLocaleString("zh-CN",{maximumFractionDigits:2})+" 元":"成交金额未填写";return "<li class='case-item"+(selectedKeys.has(String(item.id))?" active":"")+"' data-id='"+esc(item.id)+"'><div class='case-item-title'><span class='case-item-index'>序号 "+esc(item.id)+"</span>"+esc(item.title||item.address||"未填写标题")+"</div><span class='case-item-sub'>"+esc([item.propertyType,item.address,item.transactionTime].filter(Boolean).join(" · "))+"</span>"+distance+"<div class='case-item-footer'><span class='case-item-price'>"+esc(amountText)+"</span><span class='case-item-link'>定位</span></div></li>"}).join("")||"<li class='case-item'>没有匹配记录</li>";document.querySelectorAll("#case-list .case-item[data-id]").forEach(node=>node.addEventListener("click",()=>focus(located.find(item=>String(item.id)===node.dataset.id))))}
+const baseRenderCaseList=renderCaseList;const listUnitPrice=value=>{const number=Number(String(value??"").replace(/,/g,"").trim());return Number.isFinite(number)?number.toLocaleString("zh-CN",{maximumFractionDigits:2}):String(value||"未填写")};renderCaseList=()=>{baseRenderCaseList();document.querySelectorAll("#case-list .case-item[data-id]").forEach(node=>{const item=located.find(row=>String(row.id)===String(node.dataset.id));const footer=node.querySelector(".case-item-footer"),link=footer?.querySelector(".case-item-link");if(!item||!footer||!link)return;const unit=document.createElement("span");unit.className="case-item-unit-price";unit.textContent="单价 "+listUnitPrice(item.unitPrice)+" 元/m²";unit.style.color="#475569";unit.style.fontWeight="600";footer.insertBefore(unit,link)})};function updateMarkers(){located.forEach(item=>{const marker=markers.get(String(item.id));if(marker){marker.setIcon(iconFor(item));marker.setPopupContent(popup(item))}});renderCaseList()}function setSelected(ids){selectedKeys.clear();(Array.isArray(ids)?ids:[]).forEach(id=>selectedKeys.add(String(id)));updateMarkers();if(distanceLinesVisible)renderDistanceResults([...selectedKeys])}
+  function syncCaseLabels(){const mode=map.getZoom()>=11?"compact":"none";located.forEach(item=>{const marker=markers.get(String(item.id));if(!marker)return;if(mode==="none"){if(marker.getTooltip())marker.unbindTooltip();return}if(marker.getTooltip())return;marker.bindTooltip("<div class='case-label-wrap'><div class='case-label-title'><span class='case-label-index'>序号 "+esc(item.id)+"</span>"+esc(item.address||"未填写位置")+"</div><div class='case-label-price'>单价："+popupUnitPrice(item.unitPrice)+"</div></div>",{permanent:true,direction:"top",offset:[0,-18],opacity:.98,className:"case-label",sticky:false})});}queueMicrotask(()=>{map.on("zoomend",syncCaseLabels);syncCaseLabels()});
+function initLists(){document.getElementById("case-search")?.addEventListener("input",renderCaseList);document.getElementById("case-sort")?.addEventListener("change",renderCaseList);document.getElementById("work-toggle")?.addEventListener("click",()=>{const root=document.getElementById("work-panel"),collapsed=root.classList.toggle("collapsed");document.getElementById("work-toggle").textContent=collapsed?"展开":"收起"});[["case-tab","case-section"],["unlocated-tab","unlocated-section"]].forEach(([tabId,sectionId])=>document.getElementById(tabId)?.addEventListener("click",()=>{[["case-tab","case-section"],["unlocated-tab","unlocated-section"]].forEach(([otherTab,otherSection])=>{const active=otherTab===tabId;document.getElementById(otherTab)?.classList.toggle("active",active);document.getElementById(otherSection)?.classList.toggle("hidden",!active)})}));document.getElementById("unlocated-meta").textContent="共 "+unlocated.length+" 条，未返回坐标的记录保留在这里。";document.getElementById("unlocated-tab-count").textContent=unlocated.length;document.getElementById("unlocated-list").innerHTML=unlocated.slice(0,200).map(item=>"<li><strong>"+esc(item.title||item.address||"未填写标题")+"</strong><br>"+esc([item.propertyType,item.transactionTime].filter(Boolean).join("｜"))+"<span class='unlocated-reason'>"+esc(item.coordinateStatus||"未定位（缺少有效坐标）")+"</span></li>").join("")||"<li>没有未定位记录。</li>"}
+  located.forEach(item=>{const marker=L.marker([item.latitude,item.longitude],{icon:iconFor(item)});marker.bindPopup(popup(item));marker.on("click",()=>{const key=String(item.id);if(selectedKeys.has(key))selectedKeys.delete(key);else selectedKeys.add(key);updateMarkers();if(window.parent!==window)window.parent.postMessage({type:"ALIBABA_MAP_SELECTION_CHANGED",ids:[...selectedKeys],focusId:key},"*")});markers.set(String(item.id),marker);cluster.addLayer(marker)});map.addLayer(cluster);const bounds=located.map(item=>[item.latitude,item.longitude]);if(bounds.length)map.fitBounds(bounds,{padding:[30,30]});initLists();initReferenceMarkers();renderCaseList();window.addEventListener("message",event=>{const message=event.data||{};if(message.type==="ALIBABA_MAP_SET_SELECTED")setSelected(message.ids);if(message.type==="ALIBABA_MAP_FOCUS")focus(located.find(item=>String(item.id)===String(Array.isArray(message.ids)?message.ids[0]:message.id)));if(message.type==="ALIBABA_MAP_DISTANCE_REQUEST"){setSelected(message.ids);renderDistanceResults(message.ids)}});if(window.parent!==window)window.parent.postMessage({type:"ALIBABA_MAP_READY"},"*");if(window.ResizeObserver)new ResizeObserver(()=>map.invalidateSize()).observe(document.body);
 </script></body></html>`;
 }
 
 function writeMapAssets(results, request = {}) {
   const outputDirectory = outputDirectoryFor(request);
+  for (const relativePath of MAP_ASSET_RELATIVE_PATHS) {
+    const source = path.join(MAP_ASSET_SOURCE_DIRECTORY, relativePath);
+    const target = path.join(outputDirectory, relativePath);
+    if (!fs.existsSync(source) || !fs.statSync(source).isFile()) throw new Error(`MAP_ASSET_MISSING: ${relativePath}`);
+    fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+    const temporary = `${target}.tmp-${process.pid}`;
+    fs.copyFileSync(source, temporary);
+    fs.chmodSync(temporary, 0o600);
+    fs.renameSync(temporary, target);
+  }
   const rows = mapRowsFromResults(results);
   const points = rows.filter((item) => item.longitude !== null && item.latitude !== null);
   const unlocated = rows.filter((item) => item.longitude === null || item.latitude === null);
@@ -2023,6 +2521,7 @@ function writeMapAssets(results, request = {}) {
     stats: { total: rows.length, located: points.length, unlocated: unlocated.length },
     points,
     unlocated,
+    mapConfig: loadMapConfig(),
   };
   const coordsPath = path.join(outputDirectory, RESULT_COORDS_NAME);
   const pointsJsPath = path.join(outputDirectory, RESULT_POINTS_NAME);
@@ -2035,9 +2534,145 @@ function writeMapAssets(results, request = {}) {
 
 function removeMapAssets(request = {}) {
   const outputDirectory = outputDirectoryFor(request);
-  for (const name of [RESULT_COORDS_NAME, RESULT_POINTS_NAME, RESULT_MAP_NAME]) {
+  for (const name of [RESULT_COORDS_NAME, RESULT_POINTS_NAME, RESULT_MAP_NAME, ...MAP_ASSET_RELATIVE_PATHS]) {
     try { fs.unlinkSync(path.join(outputDirectory, name)); } catch (error) { if (error?.code !== "ENOENT") throw error; }
   }
+  try { fs.rmdirSync(path.join(outputDirectory, "images")); } catch (error) { if (!["ENOENT", "ENOTEMPTY"].includes(error?.code)) throw error; }
+}
+
+function validateHistoryDirectory(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw.includes("\0") || !path.isAbsolute(raw)) throw new Error("ALIBABA_HISTORY_DIRECTORY_INVALID");
+  const resolved = fs.realpathSync(raw);
+  if (!fs.statSync(resolved).isDirectory()) throw new Error("ALIBABA_HISTORY_DIRECTORY_NOT_FOUND");
+  return resolved;
+}
+
+function validateHistoryPath(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw.includes("\0") || !path.isAbsolute(raw)) throw new Error("ALIBABA_HISTORY_PATH_INVALID");
+  const resolved = fs.realpathSync(raw);
+  if (path.extname(resolved).toLowerCase() !== ".json") throw new Error("ALIBABA_HISTORY_PATH_TYPE_NOT_ALLOWED");
+  if (!fs.statSync(resolved).isFile()) throw new Error("ALIBABA_HISTORY_PATH_NOT_FOUND");
+  return resolved;
+}
+
+function readHistoryPayload(value) {
+  const historyPath = validateHistoryPath(value);
+  let payload;
+  try { payload = JSON.parse(fs.readFileSync(historyPath, "utf8")); } catch { throw new Error("ALIBABA_HISTORY_READ_FAILED"); }
+  if (payload?.type !== "alibaba-auction-history") throw new Error("ALIBABA_HISTORY_FORMAT_INVALID");
+  const results = Array.isArray(payload.results)
+    ? payload.results
+    : Array.isArray(payload.items)
+      ? payload.items.map((item) => item?.record || item).filter(Boolean)
+      : [];
+  return { historyPath, payload, results };
+}
+
+function historyOutputPath(historyPath, value, extensions = [".html", ".xlsx", ".json", ".js"]) {
+  const name = String(value || "").trim();
+  if (!name) return "";
+  const candidate = path.resolve(path.dirname(historyPath), name);
+  if (!isInsideDirectory(path.dirname(historyPath), candidate)) return "";
+  if (!extensions.includes(path.extname(candidate).toLowerCase()) || !fs.existsSync(candidate)) return "";
+  return fs.statSync(candidate).isFile() ? fs.realpathSync(candidate) : "";
+}
+
+function historyRequest(request = {}) {
+  const safeRequest = { ...request };
+  delete safeRequest.historyPath;
+  delete safeRequest.historyRefresh;
+  return safeRequest;
+}
+
+function writeHistoryManifest(results, request, metadata = {}, outputs = {}) {
+  const outputDirectory = outputDirectoryFor(request);
+  const target = path.join(outputDirectory, RESULT_HISTORY_NAME);
+  const payload = {
+    type: "alibaba-auction-history",
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    request: historyRequest(request),
+    summary: {
+      candidates: Number(metadata.candidates || results.length),
+      skipped: Number(metadata.skipped || 0),
+      written: results.length,
+    },
+    outputs: Object.fromEntries(Object.entries(outputs).map(([key, value]) => [key, value ? path.basename(value) : ""])),
+    results: results.map((item) => ({
+      ...item,
+      url: safeExportUrl(item?.url),
+      attachments: undefined,
+    })),
+  };
+  writeUtf8Atomic(target, `${JSON.stringify(payload, null, 2)}\n`);
+  return target;
+}
+
+function listHistory(directory) {
+  const root = validateHistoryDirectory(directory);
+  const items = [];
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isFile() || !(entry.name === RESULT_HISTORY_NAME || entry.name.endsWith("_history.json"))) continue;
+    const fullPath = path.join(root, entry.name);
+    try {
+      const loaded = readHistoryPayload(fullPath);
+      const outputs = loaded.payload.outputs || {};
+      items.push({
+        path: loaded.historyPath,
+        name: entry.name,
+        label: `${loaded.payload.request?.city || loaded.payload.request?.district || "全省"} · ${loaded.payload.generatedAt || "历史抓取"} · ${loaded.results.length} 条`,
+        generatedAt: loaded.payload.generatedAt || "",
+        recordCount: loaded.results.length,
+        canRefresh: loaded.results.some((item) => item?.url),
+        htmlPath: historyOutputPath(loaded.historyPath, outputs.html),
+        excelPath: historyOutputPath(loaded.historyPath, outputs.excel),
+        mapPath: historyOutputPath(loaded.historyPath, outputs.map),
+      });
+    } catch {
+      // Ignore unrelated or incomplete JSON files.
+    }
+  }
+  items.sort((left, right) => String(right.generatedAt || right.name).localeCompare(String(left.generatedAt || left.name), "zh-CN"));
+  return { ok: true, action: "list_alibaba_auction_history", directory: root, items: items.slice(0, 200), security: security() };
+}
+
+function loadHistory(value) {
+  const loaded = readHistoryPayload(value);
+  const outputs = loaded.payload.outputs || {};
+  const storedRequest = loaded.payload.request && typeof loaded.payload.request === "object"
+    ? loaded.payload.request
+    : {};
+  const generateMap = storedRequest.generateMap !== false;
+  let mapPath = "";
+  let mapRebuilt = false;
+  if (generateMap) {
+    const artifacts = writeMapAssets(loaded.results, {
+      ...storedRequest,
+      outputDirectory: path.dirname(loaded.historyPath),
+      generateMap: true,
+      geocodeMissing: false,
+    });
+    mapPath = artifacts.mapPath;
+    mapRebuilt = true;
+  }
+  return {
+    ok: true,
+    action: "load_alibaba_auction_history",
+    path: loaded.historyPath,
+    outputDirectory: path.dirname(loaded.historyPath),
+    request: storedRequest,
+    recordCount: loaded.results.length,
+    canRefresh: loaded.results.some((item) => item?.url),
+    results: loaded.results,
+    htmlPath: historyOutputPath(loaded.historyPath, outputs.html),
+    excelPath: historyOutputPath(loaded.historyPath, outputs.excel),
+    mapPath,
+    mapRebuilt,
+    mapGeneration: generateMap ? "rebuilt-from-history" : "disabled-by-history-request",
+    security: security(),
+  };
 }
 
 async function writeResultArtifacts(results, request, metadata = {}) {
@@ -2062,8 +2697,10 @@ async function writeResultArtifacts(results, request, metadata = {}) {
   const htmlPath = writeResultHtml(enrichedResults, request, metadata);
   if (request.generateMap === false) {
     removeMapAssets(request);
+    const historyPath = writeHistoryManifest(enrichedResults, request, metadata, { html: htmlPath });
     return {
       htmlPath,
+      historyPath,
       results: enrichedResults,
       mapPath: "",
       coordsPath: "",
@@ -2073,7 +2710,14 @@ async function writeResultArtifacts(results, request, metadata = {}) {
       ...emptyGeocodeStats(),
     };
   }
-  return { htmlPath, results: enrichedResults, ...writeMapAssets(enrichedResults, request), ...geocodeStats };
+  const mapArtifacts = writeMapAssets(enrichedResults, request);
+  const historyPath = writeHistoryManifest(enrichedResults, request, metadata, {
+    html: htmlPath,
+    map: mapArtifacts.mapPath,
+    coords: mapArtifacts.coordsPath,
+    pointsJs: mapArtifacts.pointsJsPath,
+  });
+  return { htmlPath, historyPath, results: enrichedResults, ...mapArtifacts, ...geocodeStats };
 }
 
 function writeResultHtml(results, request, metadata = {}) {
@@ -2208,10 +2852,17 @@ async function scrape(requestInput, emit = () => {}) {
   for (let page = 1; page <= SAFE_MAX_PAGES; page += 1) {
     const pageUrl = listPageUrl(request.sourceUrl, page);
     try {
-      const page = await openBrowserPage(request.session, pageUrl, { window: "background" });
-      const extracted = parseJsonOutput((await runOpenCli([
-        "browser", request.session, "eval", LIST_EXTRACT_SCRIPT, ...browserTargetArgs(page.target),
-      ], { timeout: 30000 })).stdout);
+      const page = await openBrowserPage(request.session, pageUrl, { window: "foreground", allowVerification: true });
+      const extractedRead = await readBrowserPageWithManualVerification(
+        request.session,
+        page,
+        LIST_EXTRACT_SCRIPT,
+        pageUrl,
+        "list",
+        progress,
+        "读取列表",
+      );
+      const extracted = extractedRead.value;
       const blocked = pageLooksBlocked(extracted);
       if (blocked) throw new Error(blocked);
       const pageItems = Array.isArray(extracted.items) ? extracted.items : [];
@@ -2225,7 +2876,14 @@ async function scrape(requestInput, emit = () => {}) {
           prefiltered += 1;
           continue;
         }
-        candidates.push({ url, title: String(item.text || "").split("\n")[0].trim() });
+        candidates.push({
+          url,
+          title: String(item.text || "").split("\n")[0].trim(),
+          listedAmount: String(item.listedAmount || ""),
+          listedBidCount: Number(item.listedBidCount || 0),
+          listedHasEndedText: item.listedHasEndedText === true,
+          listedHasExplicitSoldPrice: item.listedHasExplicitSoldPrice === true,
+        });
       }
       progress({
         phase: "listing",
@@ -2262,20 +2920,32 @@ async function scrape(requestInput, emit = () => {}) {
   }
 
   const results = [];
+  const skippedReasons = [];
   let skipped = prefiltered;
   const attempted = new Set();
   for (const candidate of candidates) {
     if (attempted.has(candidate.url)) continue;
     attempted.add(candidate.url);
     try {
-      const detailPage = await openBrowserPage(request.session, candidate.url, { window: "background" });
-      let detail = parseJsonOutput((await runOpenCli([
-        "browser", request.session, "eval", DETAIL_EXTRACT_SCRIPT, ...browserTargetArgs(detailPage.target),
-      ], { timeout: 30000 })).stdout);
+      const detailPage = await openBrowserPage(request.session, candidate.url, { window: "foreground", allowVerification: true });
+      const detailRead = await readBrowserPageWithManualVerification(
+        request.session,
+        detailPage,
+        DETAIL_EXTRACT_SCRIPT,
+        candidate.url,
+        "detail",
+        progress,
+        "核验当前详情",
+      );
+      let detail = detailRead.value;
       const blocked = pageLooksBlocked(detail);
       if (blocked) throw new Error(blocked);
       const detailFloors = extractFloorFieldsFromText(detail.pageText);
-      const needsAttachmentFields = !parseAmount(detail.buildingArea)
+      const hasLowConfidenceFields = detail.fieldSources?.buildingArea !== "structured"
+        || detail.fieldSources?.floor !== "structured"
+        || detail.fieldSources?.totalFloors !== "structured";
+      const needsAttachmentFields = hasLowConfidenceFields
+        || !parseAmount(detail.buildingArea)
         || !detailFloors.floor
         || !detailFloors.totalFloors;
       if (needsAttachmentFields && Array.isArray(detail.attachments) && detail.attachments.length) {
@@ -2294,13 +2964,38 @@ async function scrape(requestInput, emit = () => {}) {
           target: detailPage.target,
         });
       }
-      const parsed = parseDetail(detail, request);
-      if (parsed.valid && matchesRequest(parsed, request)) results.push(parsed);
-      else skipped += 1;
+      const detailWithListingEvidence = {
+        ...detail,
+        transactionAmount: detail.transactionAmount || candidate.listedAmount,
+        bidCount: detail.bidCount || String(candidate.listedBidCount || ""),
+        hasExplicitSoldPrice: detail.hasExplicitSoldPrice === true || candidate.listedHasExplicitSoldPrice === true,
+        hasSoldText: detail.hasSoldText === true || (candidate.listedBidCount > 0 && candidate.listedHasEndedText === true),
+        hasEndedText: detail.hasEndedText === true || candidate.listedHasEndedText === true,
+      };
+      const parsed = parseDetail(detailWithListingEvidence, request);
+      const accepted = parsed.valid && matchesRequest(parsed, request);
+      if (accepted) results.push(parsed);
+      else {
+        skipped += 1;
+        skippedReasons.push({
+          title: parsed.title || candidate.title,
+          url: candidate.url,
+          reason: skipReason(detailWithListingEvidence, parsed, request),
+          diagnostics: {
+            transactionAmount: parsed.transactionAmount || null,
+            transactionTime: parsed.transactionTime || "",
+            bidCount: Number(parsed.bidCount || 0),
+            hasExplicitSoldPrice: detailWithListingEvidence.hasExplicitSoldPrice === true,
+            hasEndedText: detailWithListingEvidence.hasEndedText === true,
+            valid: parsed.valid === true,
+            matched: matchesRequest(parsed, request),
+          },
+        });
+      }
       progress({
         phase: "verifying",
         percent: Math.min(98, 35 + Math.round((attempted.size / candidates.length) * 63)),
-        message: parsed.valid ? `已核验成交案例 ${results.length} 条。` : `已跳过未通过成交核验的记录 ${skipped} 条。`,
+        message: accepted ? `已核验成交案例 ${results.length} 条。` : `已跳过记录 ${skipped} 条：${skippedReasons.at(-1)?.reason || "未通过核验"}。`,
         fetched: candidates.length,
         verified: results.length,
         skipped,
@@ -2309,10 +3004,12 @@ async function scrape(requestInput, emit = () => {}) {
     } catch (error) {
       skipped += 1;
       const reason = safeError(error);
-      if (["ALIBABA_LOGIN_REQUIRED", "ALIBABA_VERIFICATION_REQUIRED"].includes(reason)) {
+      const errorCode = String(error?.code || reason);
+      if (["ALIBABA_LOGIN_REQUIRED", "ALIBABA_VERIFICATION_REQUIRED", "ALIBABA_VERIFICATION_TIMEOUT"].includes(errorCode)) {
         return { ok: false, phase: "failed", errorCode: reason, reason: reason === "ALIBABA_LOGIN_REQUIRED" ? "阿里拍卖页面需要登录，请先在浏览器完成登录后重试。" : "阿里拍卖页面出现验证，请在浏览器完成验证后重试。", candidates: candidates.length, results, skipped, security: security() };
       }
       progress({ phase: "verifying", percent: Math.min(98, 35 + Math.round((attempted.size / candidates.length) * 63)), message: `详情读取失败，已跳过 ${skipped} 条。`, fetched: candidates.length, verified: results.length, skipped, current: candidate.title });
+      skippedReasons.push({ title: candidate.title, url: candidate.url, reason: `详情读取失败：${reason}` });
     }
   }
   const htmlPath = results.length ? writeResultHtml(results, request, { candidates: candidates.length, skipped }) : "";
@@ -2320,11 +3017,12 @@ async function scrape(requestInput, emit = () => {}) {
     ok: results.length > 0,
     phase: "completed",
     errorCode: results.length ? "" : "ALIBABA_NO_VALID_CASES",
-    reason: results.length ? "阿里拍卖成交案例已完成详情核验。" : "候选记录中没有找到满足成交且出价次数大于 0 的案例。",
+    reason: results.length ? "阿里拍卖成交案例已完成详情核验。" : "候选记录中没有找到详情页可确认的成交案例。",
     candidates: candidates.length,
     results,
     htmlPath,
     skipped,
+    skippedReasons: skippedReasons.slice(-20),
     security: security(),
   };
 }
@@ -2358,6 +3056,7 @@ module.exports = {
   LIST_EXTRACT_SCRIPT,
   RESULT_ROOT,
   RESULT_HTML_NAME,
+  RESULT_HISTORY_NAME,
   DEFAULT_GEOCODE_CACHE_PATH,
   GEOCODE_REQUEST_TIMEOUT_MS,
   GEOCODE_TOTAL_BUDGET_MS,
@@ -2376,6 +3075,10 @@ module.exports = {
   renderMapHtml,
   writeMapAssets,
   writeResultArtifacts,
+  writeHistoryManifest,
+  listHistory,
+  loadHistory,
+  validateHistoryPath,
   outputDirectoryFor,
   safeError,
   scrape,
@@ -2385,6 +3088,9 @@ module.exports = {
   writeResultHtml,
   extractBuildingAreaFromText,
   extractFloorFieldsFromText,
+  browserPageReady,
+  candidateInScope,
+  pageBeforeRequestedRange,
   extractPdfText,
   extractPdfTextWithOcr,
   enrichDetailFromAttachments,

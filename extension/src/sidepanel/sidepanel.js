@@ -6,10 +6,13 @@ import { createModuleStorageFactory } from "../core/module-storage.js";
 import { updatesModule } from "../modules/updates/module.js";
 import { feedbackModule } from "../modules/feedback/module.js";
 import { landPublicityModule } from "../modules/land-publicity/module.js";
+import { mapSettingsModule } from "../modules/map-settings/module.js";
 import { alibabaAuctionModule } from "../modules/alibaba-auction/module.js";
 import { anjukePropertyModule } from "../modules/anjuke-property/module.js";
 import { depreciationCapexModule } from "../modules/depreciation-capex-forecast/module.js";
 import { tableFormatModule } from "../modules/table-format/module.js";
+import { detailTableWorkflowModule } from "../modules/detail-table-workflow/module.js";
+import { declarationTableWorkflowModule } from "../modules/declaration-table-workflow/module.js";
 
 const REQUEST_TYPE = "TIANYUAN_WORKBENCH_GET_CONTEXT_V2";
 const ACTION_REQUEST_TYPE = "TIANYUAN_WORKBENCH_RUN_ACTION_V2";
@@ -72,6 +75,7 @@ const elements = {
   openConnectionsTopConnector: document.getElementById("openConnectionsTopConnector"),
   openConnectionsTop: document.getElementById("openConnectionsTop"),
   openConnectionsTopMcp: document.getElementById("openConnectionsTopMcp"),
+  mapSettingsStatus: document.getElementById("mapSettingsStatus"),
   openConnectionsTopCli: document.getElementById("openConnectionsTopCli"),
   openBatchSave: document.getElementById("openBatchSave"),
   openBatchExit: document.getElementById("openBatchExit"),
@@ -82,6 +86,7 @@ const elements = {
   openFormatDetail: document.getElementById("openFormatDetail"),
   openFormatDeclaration: document.getElementById("openFormatDeclaration"),
   openLinkRestore: document.getElementById("openLinkRestore"),
+  openMapSettings: document.getElementById("openMapSettings"),
   backFromConnections: document.getElementById("backFromConnections"),
   backFromSave: document.getElementById("backFromSave"),
   backFromExit: document.getElementById("backFromExit"),
@@ -350,6 +355,8 @@ let connectionCheckPromise = null;
 let connectionCheckProbe = false;
 let autoConnectionProbeTimer = null;
 let lastAutomaticConnectionProbeAt = 0;
+let mcpProbeVerified = false;
+let cliProbeVerified = false;
 let cliAuthBusy = false;
 let cliAuthorizationUrl = "";
 let availableSubjects = [];
@@ -439,10 +446,13 @@ for (const module of legacyFeatureModules) moduleRegistry.register(module);
 moduleRegistry.register(updatesModule);
 moduleRegistry.register(feedbackModule);
 moduleRegistry.register(landPublicityModule);
+moduleRegistry.register(mapSettingsModule);
 moduleRegistry.register(alibabaAuctionModule);
 moduleRegistry.register(anjukePropertyModule);
 moduleRegistry.register(depreciationCapexModule);
 moduleRegistry.register(tableFormatModule);
+moduleRegistry.register(detailTableWorkflowModule);
+moduleRegistry.register(declarationTableWorkflowModule);
 elements.extensionId.textContent = chrome.runtime.id;
 
 function on(element, eventName, handler) {
@@ -496,6 +506,7 @@ function renderConnectionStatusSummary() {
     ["Connector", elements.connectorStatus],
     ["Helper", elements.helperStatus],
     ["MCP", elements.mcpStatus],
+    ["地图", elements.mapSettingsStatus],
     ["CLI", elements.cliStatus],
     ["版本", elements.updateTopStatus],
   ]
@@ -539,6 +550,7 @@ function setBusy(nextBusy) {
     elements.openFormatDetail,
     elements.openFormatDeclaration,
     elements.openLinkRestore,
+    elements.openMapSettings,
     elements.backFromConnections,
     elements.backFromSave,
     elements.backFromExit,
@@ -3382,7 +3394,8 @@ async function chooseExportDirectory(exportType) {
   setBusy(true);
   setStatus("正在打开文件夹选择器...", "idle");
   try {
-    const result = await sendNativeMessage({ action: "select_export_directory" }, 130000);
+    const directoryName = exportType === "asset_declare_table" ? "申报表导出" : "明细表导出";
+    const result = await sendNativeMessage({ action: "select_export_directory", directoryName }, 130000);
     if (!result?.ok) {
       if (result?.cancelled) {
         setStatus("已取消选择目录", "warn");
@@ -3390,7 +3403,7 @@ async function chooseExportDirectory(exportType) {
       }
       throw new Error(result?.reason || "DIRECTORY_SELECTION_FAILED");
     }
-    ui.outputPath.value = result.path || "";
+    ui.outputPath.value = result.outputDirectory || result.path || result.paths?.[0] || "";
     latestPayload = {
       ...result,
       collectedAt: new Date().toISOString(),
@@ -3436,7 +3449,9 @@ async function runCliExport(exportType) {
 
   try {
     const health = await checkConnections({ probe: true });
-    if (!health?.cli?.ok) throw new Error("CLI 未连接，请先在连接配置页完成授权。");
+    if (!health?.cli?.ok || health?.cli?.authenticated !== true) {
+      throw new Error("CLI 未完成授权或授权已失效，请先在连接配置页重新授权。");
+    }
     const context = await refreshContext({ allowBusy: true }) || latestContext;
     const projectId = String(context?.route?.projectId || "").trim();
     if (!/^\d+$/.test(projectId)) throw new Error("当前页面未读取到项目 ID。");
@@ -3600,7 +3615,10 @@ async function choosePrintOutputDirectory(formatType) {
   setBusy(true);
   setStatus("正在选择打印版存放位置...", "idle");
   try {
-    const result = await sendNativeMessage({ action: "select_print_output_directory" }, 130000);
+    const directoryName = formatType === "declaration"
+      ? "申报表打印格式"
+      : (formatType === "link" ? "明细表公式恢复" : "明细表打印格式");
+    const result = await sendNativeMessage({ action: "select_print_output_directory", directoryName }, 130000);
     if (!result?.ok) {
       if (result?.cancelled) {
         setStatus("已取消选择目录", "warn");
@@ -3608,7 +3626,7 @@ async function choosePrintOutputDirectory(formatType) {
       }
       throw new Error(result?.reason || "PRINT_OUTPUT_SELECTION_FAILED");
     }
-    ui.outputPath.value = result.paths?.[0] || "";
+    ui.outputPath.value = result.outputDirectory || result.path || result.paths?.[0] || "";
     setStatus(`已选择存放位置：${ui.outputPath.value}`, "ok");
   } catch (error) {
     setStatus(`选择目录失败：${error?.message || String(error)}`, "error");
@@ -5096,7 +5114,10 @@ async function performConnectionCheck({ probe = false } = {}) {
       ? (probe ? "Native Messaging 已拉起，正在验证连接" : "本地助手已连接，等待主动验证")
       : (probe ? "HTTP helper 已连接，正在验证连接" : "本地助手已连接，等待主动验证");
 
-    if (health.mcp?.connected) {
+    if (probe) mcpProbeVerified = Boolean(health.mcp?.connected);
+    if (probe) cliProbeVerified = Boolean(health.cli?.ok && health.cli?.authenticated);
+
+    if (health.mcp?.connected || (!probe && health.mcp?.configured && mcpProbeVerified)) {
       setConnection(elements.mcpStatus, "已连接", "ok");
     } else if (health.mcp?.configured && !probe) {
       setConnection(elements.mcpStatus, "已配置，待验证", "idle");
@@ -5106,8 +5127,11 @@ async function performConnectionCheck({ probe = false } = {}) {
       setConnection(elements.mcpStatus, runtimeMcpToken ? "token 无效" : "未配置 token", "warn");
     }
 
-    if (health.cli?.ok) {
+    if ((health.cli?.ok && health.cli?.authenticated === true)
+      || (!probe && health.cli?.authenticated === true && cliProbeVerified)) {
       setConnection(elements.cliStatus, health.cli.version || "可用", "ok");
+    } else if (health.cli?.ok && health.cli?.authenticated === false) {
+      setConnection(elements.cliStatus, "未授权或授权已失效", "warn");
     } else if (!probe && health.cli?.authenticated) {
       setConnection(elements.cliStatus, "已授权，待验证", "idle");
     } else if (!probe && health.cli?.reason === "CLI_NOT_PROBED") {
@@ -5120,6 +5144,10 @@ async function performConnectionCheck({ probe = false } = {}) {
     if (!probe) scheduleAutomaticConnectionProbe();
     return health;
   } catch (error) {
+    if (probe) {
+      mcpProbeVerified = false;
+      cliProbeVerified = false;
+    }
     const message = error?.message || String(error);
     const payload = {
       ok: false,
@@ -5204,6 +5232,7 @@ async function confirmMcpToken() {
   }
 
   runtimeMcpToken = token;
+  mcpProbeVerified = false;
   if (elements.rememberMcpToken.checked) {
     await storageSet({ [STORAGE_MCP_TOKEN_KEY]: token });
   } else {
@@ -5219,6 +5248,7 @@ async function confirmMcpToken() {
 async function clearMcpToken() {
   runtimeMcpToken = "";
   mcpTokenPersisted = false;
+  mcpProbeVerified = false;
   await storageRemove(STORAGE_MCP_TOKEN_KEY);
   elements.mcpTokenInput.value = "";
   elements.rememberMcpToken.checked = false;
@@ -6270,7 +6300,6 @@ on(elements.backToBatchCleanupRows, "click", () => {
 on(elements.runBatchCleanup, "click", runBatchCleanup);
 on(elements.chooseDetailOutputPath, "click", () => chooseExportDirectory("asset_detail_table"));
 on(elements.chooseDeclareOutputPath, "click", () => chooseExportDirectory("asset_declare_table"));
-on(elements.runExportDetail, "click", () => runCliExport("asset_detail_table"));
 on(elements.runExportDeclare, "click", () => runCliExport("asset_declare_table"));
 on(elements.chooseDetailPrintFiles, "click", () => choosePrintInputs("detail", "files"));
 on(elements.chooseDetailPrintFolder, "click", () => choosePrintInputs("detail", "directory"));
@@ -6342,8 +6371,14 @@ async function bootstrapApplication() {
       extensionManifest,
       connectorProtocolVersion: EXPECTED_CONNECTOR_PROTOCOL_VERSION,
       isBusy: () => busy,
+      setBusy,
       navigate: navigateToRoute,
       getSafeDiagnostics,
+      checkConnections,
+      checkLocalConnections: () => fetchNativeHelperJson("/health?probe=1"),
+      getRuntimeMcpToken: () => runtimeMcpToken,
+      getCurrentProjectId: () => String(latestContext?.route?.projectId || "").trim(),
+      getExportCompanyIds,
       copyText: (text) => navigator.clipboard.writeText(text),
       sendNativeMessage,
       streamNativeMessage,

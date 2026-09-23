@@ -61,6 +61,16 @@ const NATIVE_RUNTIME_BACKUP_FILES = [
   "depreciation-capex-forecast.js",
   "alibaba-auction.js",
   "anjuke-property.js",
+  "map-assets/leaflet.js",
+  "map-assets/leaflet.css",
+  "map-assets/leaflet.markercluster.js",
+  "map-assets/MarkerCluster.css",
+  "map-assets/MarkerCluster.Default.css",
+  "map-assets/images/layers.png",
+  "map-assets/images/layers-2x.png",
+  "map-assets/images/marker-icon.png",
+  "map-assets/images/marker-icon-2x.png",
+  "map-assets/images/marker-shadow.png",
   "update-sources.json",
   "runtime-config.json",
   "com.tianyuan.workbench.helper.json",
@@ -408,6 +418,7 @@ function writeRuntimeCompatibility(extensionVersion, runtimeBuildId) {
     bridgeProtocol: connectorBridge.PROTOCOL_VERSION,
     buildId: connectorBridge.BUILD_ID,
     runtimeBuildId,
+    runtimeBuildKind: "local",
     generatedAt: new Date().toISOString(),
   };
   writePrivateJson(compatibilityPath, compatibility);
@@ -633,6 +644,12 @@ function main() {
       "src/modules/anjuke-property/module.js",
       "src/modules/anjuke-property/template.js",
       "src/modules/anjuke-property/styles.css",
+      "src/modules/detail-table-workflow/module.js",
+      "src/modules/detail-table-workflow/template.js",
+      "src/modules/detail-table-workflow/styles.css",
+      "src/modules/declaration-table-workflow/module.js",
+      "src/modules/declaration-table-workflow/template.js",
+      "src/modules/declaration-table-workflow/styles.css",
     ],
   );
   copyDir(
@@ -686,6 +703,11 @@ function main() {
   copyFileAtomic(path.join(repoRoot, "native-helper", "alibaba-auction.js"), path.join(nativeRuntimeRoot, "alibaba-auction.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "anjuke-property.js"), path.join(nativeRuntimeRoot, "anjuke-property.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "update-sources.json"), path.join(nativeRuntimeRoot, "update-sources.json"));
+  copyDir(
+    path.join(repoRoot, "native-helper", "map-assets"),
+    path.join(nativeRuntimeRoot, "map-assets"),
+    ["leaflet.js", "leaflet.css", "leaflet.markercluster.js", "MarkerCluster.css", "MarkerCluster.Default.css", "images/marker-icon.png"],
+  );
   const packagedNativeHostExe = path.join(repoRoot, "native-helper", "native_host.exe");
   if (isWindows && fs.existsSync(packagedNativeHostExe)) {
     unblockWindowsFile(packagedNativeHostExe);

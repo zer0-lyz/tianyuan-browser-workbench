@@ -32,7 +32,7 @@ python3 scripts/adjust_appraisal_declaration_print.py "/path/to/申报表.xlsx"
 - 将可见 sheet 标题里的 `评估明细表` 替换为 `评估申报明细表`。
 - 清理只有序号、没有对象、没有非零金额的模板空行；序号本身和零金额都不算实质内容。
 - 模板空行清理后，如果整张明细表没有对象或金额，隐藏该 sheet。
-- 如果整本 workbook 没有任何可保留的实质明细 sheet，不能保存成“所有 sheet 都隐藏”的状态；应恢复原 sheet 显示状态并输出 `no_visible_detail=True`，表示该文件无需做申报打印版处理。
+- 如果整本 workbook 没有任何可保留的实质明细 sheet，不能保存成“所有 sheet 都隐藏”的状态；应恢复原 sheet 显示状态并输出 `no_visible_detail=True`。若原文件本身所有 sheet 都隐藏，则仅将“设定信息”或首个 sheet 设为可见，保证工作簿合法，不改业务数据。
 - 表格主体行高默认统一为 `16.5`。
 - 清理后自动做打印分页判断：
   - 短表：在最后一个实质数据行下方插入带格式的整行空白行，尽量填满当前页且不新增空白页；

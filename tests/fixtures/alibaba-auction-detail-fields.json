@@ -144,5 +144,25 @@
     "buildingArea": 49.04,
     "floor": "5",
     "totalFloors": "7"
+  },
+  {
+    "sourceId": "1057267088196",
+    "propertyType": "residential",
+    "sourceType": "evaluation-report-attachment",
+    "structure": "评估报告文字层中的登记面积、总楼层和所在层",
+    "text": "估价范围内登记建筑面积为 163.07 平方米。房屋总楼层为 31 层，本次估价对象位于第 18 层。",
+    "buildingArea": 163.07,
+    "floor": "18",
+    "totalFloors": "31"
+  },
+  {
+    "sourceId": "1057771171410",
+    "propertyType": "residential",
+    "sourceType": "detail-page",
+    "structure": "详情页标的物介绍中的斜杠楼层与建筑面积",
+    "text": "该房屋为钢混结构，所在楼层为7/12层，房号为英伦皇都小区20栋703室。建筑面积为89.92平方米，规划用途为住宅。",
+    "buildingArea": 89.92,
+    "floor": "7",
+    "totalFloors": "12"
   }
 ]

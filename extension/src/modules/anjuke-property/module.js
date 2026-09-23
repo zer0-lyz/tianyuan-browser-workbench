@@ -353,7 +353,7 @@ export const anjukePropertyModule = {
 
     async function chooseOutput() {
       const result = await context.sendNativeMessage({ action: "select_anjuke_property_output_directory" }, 130000);
-      const selected = result?.paths?.[0] || "";
+      const selected = result?.outputDirectory || result?.path || result?.paths?.[0] || "";
       if (!result?.ok || !selected) {
         if (!result?.cancelled) setMessage(elements.anjukePropertyParameterMessage, result?.reason || "未选择输出目录", "warn");
         return;

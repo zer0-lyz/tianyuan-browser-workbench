@@ -30,10 +30,13 @@ test("land publicity module and skill package are wired", () => {
   assert.match(moduleSource, /displayName: "浙江土地市场网"/);
   assert.match(moduleSource, /streamNativeMessage/);
   assert.match(moduleSource, /list_land_publicity_regions/);
+  assert.match(moduleSource, /list_land_publicity_history/);
+  assert.match(moduleSource, /load_land_publicity_history/);
   assert.match(moduleSource, /if \(!result\?\.ok\) throw/);
   for (const id of [
     "openLandPublicity", "page-land-publicity", "landPublicityDistrict", "landPublicityCounty", "landPublicityStartDate", "landPublicityEndDate",
     "landPublicityGenerateMap", "runLandPublicity",
+    "landPublicityHistoryDirectory", "landPublicityHistorySelect", "loadLandPublicityHistory", "landPublicityRefreshHistory", "runLandPublicityHistory",
     "clearLandPublicityFilters",
     "openLandPublicityHtml", "openLandPublicityExcel", "openLandPublicityMap",
   ]) assert.match(`${html}\n${template}`, new RegExp(`id=\\"${id}\\"`), `missing ${id}`);
@@ -46,6 +49,9 @@ test("land publicity module and skill package are wired", () => {
   assert.match(template, /<select id="landPublicityCounty"/);
   assert.match(template, /id="landPublicityLocation"/);
   assert.match(template, /id="reloadLandPublicityRegions"[^>]*>刷新<\/button>/);
+  assert.match(template, /开始网络抓取/);
+  assert.match(template, /仅加载历史结果（本地）/);
+  assert.match(template, /重新抓取历史详情/);
   assert.doesNotMatch(template, /landPublicityProvinceWide|landPublicityDistrictExact/);
   assert.match(template, /浙江土地成交公示.*子文件夹/);
   assert.doesNotMatch(template, /landPublicityStartYear|landPublicityQuotePreset|landPublicityStartPriceMin|landPublicityAreaMin|landPublicityMaxPages/);
@@ -172,7 +178,16 @@ print(json.dumps(result, ensure_ascii=False))
       assert.match(map, new RegExp(marker), `map should include ${marker}`);
     }
     assert.match(map, /server\.arcgisonline\.com\/ArcGIS\/rest\/services\/World_Street_Map/);
-    assert.doesNotMatch(map, /https:\/\/\{\{?s\}\}?\.tile\.openstreetmap\.org/);
+    assert.match(map, /OpenStreetMap/);
+    assert.match(map, /高德地图（API）/);
+    assert.match(map, /tile-status/);
+    assert.match(map, /tileerror/);
+    assert.match(map, /tileLoadTimer/);
+    assert.match(map, /底图加载超时或失败/);
+    assert.match(map, /installTileProvider/);
+    assert.match(map, /typeof L\.markerClusterGroup === 'function'/);
+    assert.match(map, /: L\.layerGroup\(\)/);
+    assert.match(map, /amapWebKey/);
     assert.match(map, /插入位置标记/);
     assert.match(map, /marker-dialog-backdrop/);
     assert.match(map, /marker-dialog-name/);
@@ -201,6 +216,35 @@ print(json.dumps(result, ensure_ascii=False))
   } finally {
     fs.rmSync(outputDirectory, { recursive: true, force: true });
   }
+});
+
+test("land publicity writes a reusable history manifest and reruns from it", () => {
+  const outputDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "land-publicity-history-"));
+  const python = process.env.TIANYUAN_PYTHON_BIN || "python3";
+  const script = String.raw`
+import json, os, shutil, sys
+from pathlib import Path
+sys.path.insert(0, "skills/zj-land-publicity")
+from land_publicity_runner import execute_request
+out = Path(os.environ["LAND_HISTORY_OUTPUT"])
+records = [{"publicityId":"H1","sourceCode":"H-001","districtName":"杭州","releaseTime":"2026-01-02","sourceId":"s1","content":"<table><tr><td>地块位置</td><td>历史位置</td></tr><tr><td>土地用途</td><td>住宅</td></tr></table>"}]
+detail = {"s1":{"resourceCoordinate":{"center":{"lng":120.1,"lat":30.2}},"assignmentArea":"1000","dealPrice":"120","resourceLocation":"历史位置","assignmentPurpose":"住宅"}}
+request = {"outputDirectory":str(out),"startYear":"2026","district":"杭州","districtExact":True,"landUses":["住宅用地"],"generateMap":True,"maxPages":1}
+first = execute_request(request, fetcher=lambda **kwargs: records, detail_fetcher=lambda source_id: detail[source_id], progress=lambda *args, **kwargs: None)
+manifest = Path(first["historyPath"])
+reuse = execute_request({**request, "historyPath":str(manifest), "historyRefresh":False}, fetcher=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("live list must not run")), detail_fetcher=lambda source_id: (_ for _ in ()).throw(RuntimeError("detail must not run")), progress=lambda *args, **kwargs: None)
+refresh = execute_request({**request, "historyPath":str(manifest), "historyRefresh":True}, fetcher=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("live list must not run")), detail_fetcher=lambda source_id: detail[source_id], progress=lambda *args, **kwargs: None)
+print(json.dumps({"items":len(json.loads(manifest.read_text(encoding="utf-8"))["items"]),"reuse":reuse["historyMode"],"refresh":refresh["historyMode"],"map":Path(reuse["mapPath"]).exists()}, ensure_ascii=False))
+shutil.rmtree(out)
+`;
+  const result = spawnSync(python, ["-c", script], {
+    cwd: repoRoot,
+    env: { ...process.env, LAND_HISTORY_OUTPUT: outputDirectory },
+    encoding: "utf8",
+    timeout: 30000,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout.trim()), { items: 1, reuse: "history_reuse", refresh: "history_refresh", map: true });
 });
 
 test("same land publicity query updates stable output paths instead of creating duplicate HTML", () => {
@@ -528,12 +572,18 @@ test("installers include the land publicity skill", () => {
   const nativeHost = fs.readFileSync(path.join(repoRoot, "native-helper/native_host.js"), "utf8");
   assert.match(nativeHost, /message\?\.action === "run_land_publicity"/);
   assert.match(nativeHost, /message\?\.action === "list_land_publicity_regions"/);
+  assert.match(nativeHost, /message\?\.action === "list_land_publicity_history"/);
+  assert.match(nativeHost, /message\?\.action === "load_land_publicity_history"/);
   assert.match(nativeHost, /TY_LAND_PROGRESS/);
   assert.match(nativeHost, /provinceWide: request\.provinceWide === true/);
   assert.match(nativeHost, /endDate: String\(request\.endDate/);
   assert.match(nativeHost, /chooseLandPublicityOutputDirectory/);
-  assert.match(nativeHost, /path\.join\(parentPath, "浙江土地成交公示"\)/);
+  assert.match(nativeHost, /chooseManagedOutputDirectory/);
+  assert.match(nativeHost, /directoryName: folderName/);
+  assert.match(nativeHost, /"浙江土地成交公示"/);
+  assert.match(fs.readFileSync(path.join(repoRoot, "extension/src/modules/land-publicity/module.js"), "utf8"), /result\?\.outputDirectory \|\| result\?\.path/);
   assert.match(nativeHost, /LAND_OUTPUT_OUTSIDE_DIRECTORY/);
+  assert.match(nativeHost, /LAND_HISTORY_PATH_TYPE_NOT_ALLOWED/);
 });
 
 test("land publicity uses the website land-bidding endpoint and normalizes its records", () => {

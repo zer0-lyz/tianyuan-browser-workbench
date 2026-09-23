@@ -60,6 +60,10 @@ function compareSemver(leftValue, rightValue) {
   return comparePrerelease(left.prerelease, right.prerelease);
 }
 
+function normalizeRuntimeBuildKind(value) {
+  return String(value || "").trim().toLowerCase() === "local" ? "local" : "release";
+}
+
 function platformKey(platform = process.platform, architecture = process.arch) {
   if (platform === "win32" && architecture === "x64") return "windows-x64";
   if (platform === "darwin" && architecture === "arm64") return "macos-arm64";
@@ -160,13 +164,30 @@ function isAuthoritativeLatestManifestUrl(value) {
   }
 }
 
-function normalizeManifestAsset(asset, manifestUrl) {
+function githubManifestAssetUrl(manifest, manifestUrl, fileName) {
+  if (!fileName) return "";
+  try {
+    const sourceUrl = new URL(String(manifestUrl || ""));
+    if (sourceUrl.protocol !== "https:" || sourceUrl.hostname !== "github.com") return "";
+    if (/\/releases\/latest\/download\/update-manifest\.json$/i.test(sourceUrl.pathname)) {
+      return new URL(`./${encodeURIComponent(fileName)}`, sourceUrl).href;
+    }
+    const releaseUrl = new URL(String(manifest?.releaseUrl || ""));
+    const match = releaseUrl.pathname.match(/^(.*\/releases)\/tag\/([^/]+)\/?$/i);
+    if (releaseUrl.protocol !== "https:" || releaseUrl.hostname !== "github.com" || !match) return "";
+    return `${releaseUrl.origin}${match[1]}/download/${match[2]}/${encodeURIComponent(fileName)}`;
+  } catch {
+    return "";
+  }
+}
+
+function normalizeManifestAsset(asset, manifestUrl, manifest = null) {
   if (!asset || typeof asset !== "object") return null;
   const fileName = String(asset.fileName || asset.name || "");
   const directUrl = String(asset.url || "").trim();
   const url = directUrl
     ? new URL(directUrl, manifestUrl).href
-    : "";
+    : githubManifestAssetUrl(manifest, manifestUrl, fileName);
   return {
     name: fileName,
     url,
@@ -189,11 +210,14 @@ function resultFromManifest(manifest, manifestUrl, input) {
     && latestBuildNumber > currentBuildNumber;
   const latestRuntimeBuildId = String(manifest?.runtimeBuildId || "").trim();
   const currentRuntimeBuildId = String(input.currentRuntimeBuildId || "").trim();
+  const currentRuntimeBuildKind = normalizeRuntimeBuildKind(input.currentRuntimeBuildKind);
+  const latestRuntimeBuildKind = normalizeRuntimeBuildKind(manifest?.runtimeBuildKind);
   const repairRequired = versionComparison === 0
+    && currentRuntimeBuildKind !== "local"
     && Boolean(latestRuntimeBuildId && currentRuntimeBuildId && latestRuntimeBuildId !== currentRuntimeBuildId);
   const key = platformKey(input.platform, input.architecture);
   const requestedAsset = manifest?.assets?.[key] || null;
-  const packageAsset = normalizeManifestAsset(requestedAsset, manifestUrl);
+  const packageAsset = normalizeManifestAsset(requestedAsset, manifestUrl, manifest);
   const minimumSupportedVersion = String(manifest?.minimumSupportedVersion || "").trim();
   const mandatory = Boolean(
     manifest?.mandatory
@@ -208,9 +232,11 @@ function resultFromManifest(manifest, manifestUrl, input) {
     currentVersion,
     currentBuildNumber,
     currentRuntimeBuildId,
+    currentRuntimeBuildKind,
     latestVersion,
     latestBuildNumber,
     latestRuntimeBuildId,
+    latestRuntimeBuildKind,
     releasePublished: true,
     updateAvailable: versionComparison > 0 || buildUpdate || repairRequired,
     repairRequired,
@@ -351,7 +377,10 @@ async function checkGithubUpdateInternal(input = {}, options = {}) {
   const checksumAsset = selectChecksumAsset(release.assets, packageAsset?.name);
   const latestRuntimeBuildId = String(manifest?.runtimeBuildId || "").trim();
   const currentRuntimeBuildId = String(input.currentRuntimeBuildId || "").trim();
+  const currentRuntimeBuildKind = normalizeRuntimeBuildKind(input.currentRuntimeBuildKind);
+  const latestRuntimeBuildKind = normalizeRuntimeBuildKind(manifest?.runtimeBuildKind);
   const repairRequired = versionComparison === 0
+    && currentRuntimeBuildKind !== "local"
     && Boolean(latestRuntimeBuildId && currentRuntimeBuildId && latestRuntimeBuildId !== currentRuntimeBuildId);
 
   return {
@@ -361,9 +390,11 @@ async function checkGithubUpdateInternal(input = {}, options = {}) {
     currentVersion,
     currentBuildNumber,
     currentRuntimeBuildId,
+    currentRuntimeBuildKind,
     latestVersion,
     latestBuildNumber,
     latestRuntimeBuildId,
+    latestRuntimeBuildKind,
     releasePublished: true,
     updateAvailable: updateAvailable || repairRequired,
     repairRequired,

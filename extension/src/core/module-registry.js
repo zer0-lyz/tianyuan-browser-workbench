@@ -151,9 +151,7 @@ export class ModuleRegistry {
   }
 
   #renderModuleCount() {
-    const count = [...this.entries.values()].filter((entry) =>
-      entry.enabled && entry.manifest.type === "feature"
-    ).length;
+    const count = [...this.entries.values()].filter((entry) => entry.enabled && entry.manifest.countInModuleBadge !== false).length;
     const badge = this.document.getElementById("moduleCountBadge");
     if (badge) badge.textContent = `${count} 个模块`;
   }

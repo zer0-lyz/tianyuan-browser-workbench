@@ -35,6 +35,10 @@
               <span>MCP</span>
               <strong id="mcpStatus" class="conn conn-idle">未检查</strong>
             </button>
+            <button id="openMapSettings" type="button" class="connection-pill" title="地图基础配置">
+              <span>地图</span>
+              <strong id="mapSettingsStatus" class="conn conn-idle">未配置</strong>
+            </button>
             <button id="openConnectionsTopCli" type="button" class="connection-pill">
               <span>CLI</span>
               <strong id="cliStatus" class="conn conn-idle">未检查</strong>
@@ -60,7 +64,7 @@
             <h2>功能模块</h2>
             <p>选择一个功能开始处理</p>
           </div>
-          <span id="moduleCountBadge" class="badge">14 个模块</span>
+          <span id="moduleCountBadge" class="badge">15 个模块</span>
         </div>
         <div class="module-sections">
           <section id="moduleSectionStable" class="module-section" aria-labelledby="moduleSectionStableTitle">
@@ -117,8 +121,8 @@
                 <path d="M21 4.5H3a.75.75 0 0 0-.75.75V18A1.5 1.5 0 0 0 3.75 19.5h16.5a1.5 1.5 0 0 0 1.5-1.5V5.25A.75.75 0 0 0 21 4.5M3.75 10.5H7.5v3H3.75Zm5.25 0h11.25v3H9Zm11.25-4.5v3H3.75V6ZM3.75 15H7.5v3H3.75Zm16.5 3H9v-3h11.25z"></path>
               </svg>
             </span>
-            <strong>导出明细表</strong>
-            <small>选择公司和本机目录后导出资产基础法明细表</small>
+            <strong>明细表导出与整理</strong>
+            <small>导出后自动恢复公式并设置明细表格式</small>
           </button>
           <button id="openExportDeclare" type="button" class="module-card">
             <span class="module-icon module-icon-declare" aria-hidden="true">
@@ -127,8 +131,8 @@
                 <path d="m20.03 7.72-5.25-5.25A.75.75 0 0 0 14.25 2.25h-9A1.5 1.5 0 0 0 3.75 3.75v16.5a1.5 1.5 0 0 0 1.5 1.5h13.5a1.5 1.5 0 0 0 1.5-1.5v-12a.75.75 0 0 0-.22-.53M15 4.81 17.69 7.5H15Zm3.75 15.44H5.25V3.75H13.5v4.5a.75.75 0 0 0 .75.75h4.5zm-3.97-5.78a.75.75 0 0 1 0 1.06l-2.25 2.25a.75.75 0 0 1-1.06 0l-2.25-2.25a.75.75 0 0 1 1.06-1.06l.97.97v-4.19a.75.75 0 0 1 1.5 0v4.19l.97-.97a.75.75 0 0 1 1.06 0"></path>
               </svg>
             </span>
-            <strong>导出申报表</strong>
-            <small>选择公司和本机目录后导出资产基础法申报表</small>
+            <strong>申报表导出与整理</strong>
+            <small>导出申报表后自动设置打印格式</small>
           </button>
           <button id="openFormatDetail" type="button" class="module-card">
             <span class="module-icon module-icon-print-detail" aria-hidden="true">
@@ -140,7 +144,7 @@
             <strong>明细表打印格式</strong>
             <small>批量调整明细表的打印区域、列宽、分页和页边距</small>
           </button>
-          <button id="openFormatDeclaration" type="button" class="module-card">
+          <button id="openFormatDeclaration" type="button" class="module-card" hidden>
             <span class="module-icon module-icon-print-declare" aria-hidden="true">
               <svg viewBox="0 0 24 24" focusable="false">
                 <path class="ph-duotone" d="M21.75 9v7.5H18v-2.25H6v2.25H2.25V9c0-.83.73-1.5 1.63-1.5h16.24c.9 0 1.63.67 1.63 1.5"></path>
@@ -231,6 +235,7 @@
       <section id="page-updates" class="route-page hidden" data-route="updates"></section>
       <section id="page-feedback" class="route-page hidden" data-route="feedback"></section>
       <section id="page-land-publicity" class="route-page hidden" data-route="land-publicity"></section>
+      <section id="page-map-settings" class="route-page hidden" data-route="map-settings"></section>
       <section id="page-alibaba-auction" class="route-page hidden" data-route="alibaba-auction"></section>
       <section id="page-anjuke-property" class="route-page hidden" data-route="anjuke-property"></section>
       <section id="page-table-format" class="route-page hidden" data-route="table-format"></section>
@@ -703,40 +708,7 @@
         </section>
       </section>
 
-      <section id="page-export-detail" class="route-page hidden" data-route="export-detail">
-        <div class="page-heading">
-          <div>
-            <h2>导出资产基础法明细表</h2>
-            <p>选择公司和存放目录后由 CLI 执行导出</p>
-          </div>
-          <button id="backFromExportDetail" type="button" class="secondary">功能中心</button>
-        </div>
-        <div id="detailScopeMount" class="page-mount"></div>
-        <section class="section export-panel">
-          <div class="section-title-row feature-title">
-            <h2>导出设置</h2>
-            <span class="badge">功能 3</span>
-          </div>
-          <div class="directory-field">
-            <span>存放路径</span>
-            <div class="directory-row">
-              <input id="detailOutputPath" type="text" readonly placeholder="请选择本机文件夹">
-              <button id="chooseDetailOutputPath" type="button" class="secondary">选择</button>
-            </div>
-          </div>
-          <div class="export-progress" aria-live="polite">
-            <div class="progress-heading">
-              <span id="detailProgressText">等待导出</span>
-              <strong id="detailProgressPercent">0%</strong>
-            </div>
-            <progress id="detailProgressBar" max="100" value="0"></progress>
-          </div>
-          <div class="task-actions">
-            <button id="runExportDetail" type="button">导出明细表</button>
-          </div>
-        </section>
-        <div id="detailSupportMount" class="page-mount"></div>
-      </section>
+      <section id="page-export-detail" class="route-page hidden" data-route="export-detail"></section>
 
       <section id="page-export-declare" class="route-page hidden" data-route="export-declare">
         <div class="page-heading">

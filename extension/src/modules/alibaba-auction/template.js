@@ -37,18 +37,16 @@ export const alibabaAuctionTemplate = `
     <label class="alibaba-auction-source-row"><span>检索网址</span><input id="alibabaAuctionSourceUrl" type="text" readonly></label>
     <div class="button-row alibaba-auction-parameter-actions">
       <button id="saveAlibabaAuctionParams" type="button">确认并应用参数</button>
-      <button id="openAlibabaAuctionSource" type="button" class="secondary">打开并登录</button>
-      <button id="runAlibabaAuction" type="button">开始抓取</button>
       <button id="resetAlibabaAuctionParams" type="button" class="secondary">恢复默认</button>
     </div>
-    <div id="alibabaAuctionParameterMessage" class="inline-feedback">请调整参数后先点击“确认并应用参数”；应用后再打开页面并开始抓取。</div>
+    <div id="alibabaAuctionParameterMessage" class="inline-feedback">请调整参数后先点击“确认并应用参数”。</div>
   </section>
 
   <section class="section alibaba-auction-output">
     <div class="section-title-row">
       <div>
         <h2>输出位置</h2>
-        <p class="section-description">结果页、Excel 和地图统一保存到本机所选目录；同一目录重复执行会更新原结果。</p>
+        <p class="section-description">网络抓取前先选择上级目录，系统会自动创建专用子文件夹保存结果。</p>
       </div>
     </div>
     <div class="alibaba-auction-output-row">
@@ -56,6 +54,25 @@ export const alibabaAuctionTemplate = `
       <button id="chooseAlibabaAuctionOutput" type="button" class="secondary">选择目录</button>
     </div>
     <label class="alibaba-auction-map-option"><input id="alibabaAuctionGenerateMap" type="checkbox" checked> 生成独立地图 HTML</label>
+  </section>
+
+  <section class="section alibaba-auction-network-action">
+    <div class="section-title-row">
+      <div><h2>网络抓取</h2><p class="section-description">确认参数并选定输出位置后，只访问当前阿里拍卖列表和详情页；不会读取历史文件。</p></div>
+      <span class="badge">访问网络</span>
+    </div>
+    <div class="button-row"><button id="openAlibabaAuctionSource" type="button" class="secondary">当前页打开并登录</button><button id="runAlibabaAuction" type="button">开始网络抓取</button><button id="clearAlibabaAuctionResults" type="button" class="tiny secondary" disabled>清空当前结果</button></div>
+  </section>
+
+  <section class="section alibaba-auction-history">
+    <div class="section-title-row">
+      <div><h2>历史抓取数据</h2><p class="section-description">从所选文件夹加载历史清单和结果；仅点击“重新抓取详情”时访问网络。</p></div>
+      <span class="badge">本地优先</span>
+    </div>
+    <div class="alibaba-auction-output-row"><input id="alibabaAuctionHistoryDirectory" type="text" readonly placeholder="请选择历史数据目录"><button id="chooseAlibabaAuctionHistoryDirectory" type="button" class="secondary">选择历史目录</button><button id="loadAlibabaAuctionHistoryCatalog" type="button" class="secondary">加载历史清单</button></div>
+    <div class="alibaba-auction-history-controls"><select id="alibabaAuctionHistorySelect"><option value="">请选择历史抓取清单</option></select><button id="loadAlibabaAuctionHistory" type="button" class="secondary">仅加载历史结果</button></div>
+    <div class="alibaba-auction-history-refresh"><label><input id="alibabaAuctionRefreshHistory" type="checkbox" checked> 允许访问网络重新读取历史详情</label><button id="runAlibabaAuctionHistory" type="button" class="secondary" disabled>重新抓取历史详情</button></div>
+    <p id="alibabaAuctionHistoryStatus" class="section-description" role="status">选择目录后可加载历史清单。</p>
   </section>
 
   <section class="section alibaba-auction-results">

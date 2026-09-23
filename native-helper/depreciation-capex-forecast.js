@@ -61,6 +61,22 @@ function selectedPath(result) {
   return String(result?.paths?.[0] || result?.path || "").trim();
 }
 
+function managedOutputDirectory(value) {
+  const parentPath = fs.realpathSync(ensureAbsolutePath(value, "EXPORT_DIRECTORY_INVALID"));
+  if (!fs.statSync(parentPath).isDirectory()) throw new Error("EXPORT_DIRECTORY_NOT_DIRECTORY");
+  const outputPath = path.basename(parentPath) === "折旧摊销预测"
+    ? parentPath
+    : path.join(parentPath, "折旧摊销预测");
+  const alreadyExists = fs.existsSync(outputPath);
+  fs.mkdirSync(outputPath, { recursive: true, mode: 0o700 });
+  return {
+    path: fs.realpathSync(outputPath),
+    parentPath,
+    directoryName: "折旧摊销预测",
+    createdDirectory: !alreadyExists,
+  };
+}
+
 function atomicWriteJson(filePath, payload) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
   const temporary = `${filePath}.tmp-${process.pid}-${randomBytes(5).toString("hex")}`;
@@ -313,11 +329,12 @@ function createDepreciationCapexForecastService(options = {}) {
         security: security(),
       };
     }
+    const managed = managedOutputDirectory(selected);
     return {
       ok: true,
       action: "depreciation_capex_forecast_output_directory_selected",
       namespace: NAMESPACE,
-      path: path.resolve(selected.replace(/[\\/]+$/, "") || path.parse(selected).root),
+      ...managed,
       security: security({ fileContentsReturned: false }),
     };
   }

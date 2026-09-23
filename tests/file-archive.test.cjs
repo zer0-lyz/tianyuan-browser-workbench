@@ -7,6 +7,7 @@ const test = require("node:test");
 const {
   FileArchiveDaemon,
   collectFiles,
+  createFileArchiveService,
   detectApplications,
   waitForStableFile,
 } = require("../native-helper/file-archive.js");
@@ -89,4 +90,21 @@ test("refuses an export directory inside a monitored source root", async () => {
     detector: () => ({ applications: { wechat: { installed: true, fileRoots: [source], sourceMatching: "unavailable" } } }),
   });
   await assert.rejects(() => daemon.start(), /ARCHIVE_OUTPUT_MUST_NOT_BE_INSIDE_SOURCE/);
+});
+
+test("file archive output selection creates one managed subdirectory", async () => {
+  const root = tempDirectory();
+  const parent = path.join(root, "selected");
+  fs.mkdirSync(parent, { recursive: true });
+  const service = createFileArchiveService({
+    runtimeDirectory: path.join(root, "runtime"),
+    platformAdapter: { platform: "darwin", chooseDirectory: async () => ({ ok: true, path: parent }) },
+  });
+  const first = await service.selectOutputDirectory();
+  assert.equal(first.ok, true);
+  assert.equal(first.path, path.join(fs.realpathSync(parent), "微信文件归档"));
+  assert.equal(first.createdDirectory, true);
+  const second = await service.selectOutputDirectory();
+  assert.equal(second.path, first.path);
+  assert.equal(second.createdDirectory, false);
 });

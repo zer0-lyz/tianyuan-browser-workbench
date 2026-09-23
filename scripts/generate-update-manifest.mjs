@@ -106,6 +106,7 @@ const payload = {
   minimumSupportedVersion: versionConfig.minimumSupportedVersion,
   bridgeProtocol: versionConfig.bridgeProtocol,
   runtimeBuildId: runtimeBuildId(),
+  runtimeBuildKind: "release",
   mandatory: Boolean(versionConfig.mandatory),
   releaseNotes: Array.isArray(versionConfig.releaseNotes) ? versionConfig.releaseNotes : [],
   assets,

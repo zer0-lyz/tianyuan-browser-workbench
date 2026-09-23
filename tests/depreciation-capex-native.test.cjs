@@ -181,7 +181,12 @@ test("depreciation native helper runs the bundled workbook engine end to end", a
   const sourceDigest = digest(prepared.workbookPath);
   const selected = await service.handle({ operation: "select_output_directory" });
   assert.equal(selected.ok, true);
-  assert.equal(selected.path, exportDirectory);
+  const realExportDirectory = fs.realpathSync(exportDirectory);
+  assert.equal(selected.path, path.join(realExportDirectory, "折旧摊销预测"));
+  assert.equal(selected.parentPath, realExportDirectory);
+  assert.equal(fs.existsSync(selected.path), true);
+  const selectedAgain = await service.handle({ operation: "select_output_directory" });
+  assert.equal(selectedAgain.path, selected.path);
   const exported = await service.handle({ operation: "export_readback", outputDirectory: selected.path });
   assert.equal(exported.ok, true);
   assert.equal(exported.sourceOverwritten, false);
