@@ -33,6 +33,8 @@ test("alibaba auction module is wired for deterministic current-tab scraping", (
   assert.match(moduleSource, /phase: "syncing_filters"/);
   assert.match(moduleSource, /write_alibaba_auction_result/);
   assert.match(moduleSource, /open_alibaba_auction_path/);
+  assert.match(moduleSource, /openInCurrentBrowserTab/);
+  assert.match(moduleSource, /tabs\.create\(\{ url, active: true \}\)/);
   assert.match(moduleSource, /htmlPath/);
   assert.match(moduleSource, /mapPath: String\(saved\?\.mapPath/);
   assert.match(moduleSource, /directFirstDistrict/);
@@ -121,6 +123,7 @@ test("alibaba auction module is wired for deterministic current-tab scraping", (
   assert.match(nativeHost, /message\?\.action === "open_alibaba_auction"/);
   assert.match(nativeHost, /message\?\.action === "enrich_alibaba_auction_detail"/);
   assert.match(nativeHost, /message\?\.action === "open_alibaba_auction_path"/);
+  assert.match(nativeHost, /openInCurrentBrowserTab === true/);
   assert.match(nativeHost, /message\?\.action === "write_alibaba_auction_result"/);
   assert.match(nativeHost, /message\?\.action === "write_alibaba_auction_excel"/);
   assert.match(nativeHost, /message\?\.action === "select_alibaba_auction_output_directory"/);
@@ -756,6 +759,15 @@ test("building area extraction accepts Alibaba detail-page label variants", () =
     ["总建筑面积=1,234.56㎡", 1234.56],
     ["房屋面积：42.00 平方公尺", 42],
     ["建筑面积：49.04，土地使用权面积：7", 49.04],
+    ["建筑总面积（㎡） 57.16㎡", 57.16],
+    ["证载建筑面积:合计90.16㎡", 90.16],
+    ["面积为384.05平方米（其中专有建筑面积293.85平方米，分摊建筑面积90.2平方米）", 384.05],
+    ["标的物面积为53.9882平方米", 53.9882],
+    ["位于宝坻区橄榄园115-2-602房屋，91.6平方米", 91.6],
+    ["（面积1058.1865平方米）", 1058.1865],
+    ["登记建筑面积\n163 . 07", 163.07],
+    ["产权证载面积（㎡） 89.92", 89.92],
+    ["建 筑 面 积：135.33平方米", 135.33],
   ]) assert.equal(helper.extractBuildingAreaFromText(source), expected, source);
   assert.equal(helper.extractBuildingAreaFromText("建筑面积：详见评估报告"), null);
 });
@@ -775,13 +787,49 @@ test("floor extraction accepts Alibaba labelled fields", () => {
     floor: "5",
     totalFloors: "7层",
   });
+  assert.deepEqual(helper.extractFloorFieldsFromText("所在楼层    10\n总楼层    14"), {
+    floor: "10",
+    totalFloors: "14",
+  });
   for (const [source, expected] of [
     ["房屋所在楼层为第5层，总层数共18层", { floor: "5", totalFloors: "18层" }],
     ["所在层位于1-2层，总楼层：4", { floor: "1-2", totalFloors: "4" }],
     ["楼层：负1层/18层", { floor: "负1", totalFloors: "18" }],
     ["楼层：地上1层（共3层）", { floor: "地上1", totalFloors: "3层" }],
+    ["拍卖对象为第4层", { floor: "4", totalFloors: "" }],
+    ["本次拍卖房屋位于五层", { floor: "5", totalFloors: "" }],
+    ["位于武汉市硚口区古田路19号江湾国际二期A栋18层9号商业房地产", { floor: "", totalFloors: "" }],
+    ["所在层10/共计15层", { floor: "10", totalFloors: "15" }],
+    ["房屋楼层 所在层1-2层、总层数4层", { floor: "1-2", totalFloors: "4层" }],
+    ["所在层数/总层数：17/17", { floor: "17", totalFloors: "17" }],
+    ["所在层数/总层数", { floor: "", totalFloors: "" }],
+    ["拍卖对象为第4层", { floor: "4", totalFloors: "" }],
+    ["本次拍卖房屋位于五层", { floor: "5", totalFloors: "" }],
+    ["位于武汉市硚口区古田路19号江湾国际二期A栋18层9号商业房地产", { floor: "", totalFloors: "" }],
+    ["房屋建筑总楼层\n房屋所在楼层", { floor: "", totalFloors: "" }],
+    ["本次拍卖标的所在的建筑物共26层，所在1层", { floor: "1", totalFloors: "26层" }],
+    ["所在楼层 7 总楼层 42", { floor: "7", totalFloors: "42" }],
+    ["所在楼层 19层，共30层", { floor: "19", totalFloors: "30层" }],
     ["楼层：顶层", { floor: "顶层", totalFloors: "" }],
   ]) assert.deepEqual(helper.extractFloorFieldsFromText(source), expected, source);
+});
+
+test("floor and area extraction handles replayed table and OCR variants", () => {
+  for (const [source, expected] of [
+    ["所在楼层为4/5层", { floor: "4", totalFloors: "5" }],
+    ["所在楼层 28 | 总楼层 32", { floor: "28", totalFloors: "32" }],
+    ["房屋建筑总楼层\n48\n房屋所在楼层\n22", { floor: "22", totalFloors: "48" }],
+    ["楼层：/总7层", { floor: "", totalFloors: "7层" }],
+    ["房屋所在楼层为地上 11-12层，总层数为地上13层", { floor: "地上11-12", totalFloors: "13层" }],
+    ["该房屋所在建筑地上总层数为6层，拍卖对象为第4层", { floor: "4", totalFloors: "6层" }],
+  ]) assert.deepEqual(helper.extractFloorFieldsFromText(source), expected, source);
+  assert.equal(
+    helper.extractBuildingAreaFromText("面积 90.2 平方米。建筑面积为384.05平方米（其中专有建筑面积293.85平方米）"),
+    384.05,
+  );
+  assert.equal(helper.extractBuildingAreaFromText("房屋面积:82.44平方米"), 82.44);
+  assert.equal(helper.extractBuildingAreaFromText("登记单元类型 共有情况 建筑面积 房屋性质 房屋 单独所有 14.5平方米 商品房"), 14.5);
+  assert.equal(helper.extractBuildingAreaFromText("建筑总面积 1号：199.23平方米；2号：236.08平方米"), null);
 });
 
 test("extension-side direct extraction covers residential and commercial variants", async () => {
@@ -790,15 +838,32 @@ test("extension-side direct extraction covers residential and commercial variant
     ["建筑面积约为：89.53平方米", 89.53],
     ["总建筑面积=1,234.56㎡", 1234.56],
     ["建筑面积：49.04，土地使用权面积：7", 49.04],
+    ["面积为384.05平方米（其中专有建筑面积293.85平方米，分摊建筑面积90.2平方米）", 384.05],
+    ["标的物面积为53.9882平方米", 53.9882],
+    ["位于宝坻区橄榄园115-2-602房屋，91.6平方米", 91.6],
   ]) assert.equal(directExtractBuildingAreaFromText(source), expected, source);
   for (const [source, expected] of [
     ["房屋所在楼层为第5层，总层数共18层", { floor: "5", totalFloors: "18层" }],
     ["所在层位于1-2层，总楼层：4", { floor: "1-2", totalFloors: "4" }],
     ["楼层：负1层/18层", { floor: "负1", totalFloors: "18" }],
+    ["所在层10/共计15层", { floor: "10", totalFloors: "15" }],
+    ["房屋楼层 所在层1-2层、总层数4层", { floor: "1-2", totalFloors: "4层" }],
+    ["所在层数/总层数", { floor: "", totalFloors: "" }],
+    ["房屋建筑总楼层\n48\n房屋所在楼层\n22", { floor: "22", totalFloors: "48" }],
+    ["本次拍卖标的所在的建筑物共26层，所在1层", { floor: "1", totalFloors: "26层" }],
+    ["所在楼层 7 总楼层 42", { floor: "7", totalFloors: "42" }],
+    ["所在楼层 19层，共30层", { floor: "19", totalFloors: "30层" }],
+    ["楼层：/总7层", { floor: "", totalFloors: "7层" }],
   ]) assert.deepEqual(directExtractFloorFieldsFromText(source), expected, source);
+  assert.equal(
+    directExtractBuildingAreaFromText("面积 90.2 平方米。建筑面积为384.05平方米（其中专有建筑面积293.85平方米）"),
+    384.05,
+  );
+  assert.equal(directExtractBuildingAreaFromText("登记单元类型 共有情况 建筑面积 房屋性质 房屋 单独所有 14.5平方米 商品房"), 14.5);
+  assert.equal(directExtractBuildingAreaFromText("建筑总面积 1号：199.23平方米；2号：236.08平方米"), null);
 });
 
-test("extension-side detail parser infers a floor from a room number", async () => {
+test("extension-side detail parser does not infer a floor from a room number", async () => {
   const moduleSource = await import(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js"));
   const parsed = moduleSource.directParseDetail({
     title: "凯旋门公寓2幢2单元1602室不动产",
@@ -814,14 +879,69 @@ test("extension-side detail parser infers a floor from a room number", async () 
     hasInvalidStatus: false,
     url: "https://sf-item.taobao.com/sf_item/room-floor-test.htm",
   }, { propertyType: "residential", status: "finished", province: "浙江省", city: "杭州市" });
-  assert.equal(parsed.floor, "16");
+  assert.equal(parsed.floor, "");
+});
+
+test("extension-side detail parser prioritizes attachment evidence over page noise", async () => {
+  const moduleSource = await import(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js"));
+  const parsed = moduleSource.directParseDetail({
+    title: "附件证据覆盖页面噪声",
+    pageText: "建筑面积：详见评估报告。楼层：2 /总。",
+    attachmentText: "本次估价对象位于第18层，建筑面积为163.07平方米，所在楼栋总楼层31层。",
+    buildingArea: "2",
+    floor: "2",
+    totalFloors: "三",
+    fieldSources: { buildingArea: "page", floor: "page", totalFloors: "page" },
+    transactionAmount: "100000",
+    bidCount: "1",
+    hasSoldText: true,
+    hasEndedText: true,
+    hasInvalidStatus: false,
+    url: "https://sf-item.taobao.com/sf_item/evidence-priority-extension.htm",
+  }, { propertyType: "residential", status: "finished", province: "浙江省", city: "杭州市" });
+  assert.equal(parsed.buildingArea, 163.07);
+  assert.equal(parsed.floor, "18");
+  assert.equal(parsed.totalFloors, 31);
+});
+
+test("floor evidence rejects OCR totals below the reported floor", async () => {
+  const nativeParsed = helper.parseDetail({
+    title: "OCR楼层冲突",
+    pageText: "建筑面积 85.51平方米\n所在楼层 7 总楼层 42",
+    buildingArea: "85.51",
+    transactionAmount: "100000",
+    bidCount: "1",
+    hasSoldText: true,
+    hasEndedText: true,
+    hasInvalidStatus: false,
+    url: "https://sf-item.taobao.com/sf_item/ocr-floor-conflict.htm",
+  }, { propertyType: "residential", status: "finished", province: "浙江省", city: "杭州市" });
+  assert.equal(nativeParsed.floor, "7");
+  assert.equal(nativeParsed.totalFloors, 42);
+  const extensionModule = await import(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js"));
+  const extensionParsed = extensionModule.directParseDetail({
+    title: "可见楼层成对字段",
+    pageText: "建筑面积 163.15平方米\n所在楼层 19层，共30层",
+    buildingArea: "163.15",
+    floor: "",
+    totalFloors: "十",
+    fieldSources: { buildingArea: "page", floor: "structured", totalFloors: "page" },
+    transactionAmount: "100000",
+    bidCount: "1",
+    hasSoldText: true,
+    hasEndedText: true,
+    hasInvalidStatus: false,
+    url: "https://sf-item.taobao.com/sf_item/visible-floor-pair.htm",
+  }, { propertyType: "residential", status: "finished", province: "浙江省", city: "杭州市" });
+  assert.equal(extensionParsed.floor, "19");
+  assert.equal(extensionParsed.totalFloors, 30);
 });
 
 test("real Alibaba residential and commercial samples keep area and floor fields separate", async () => {
   const samples = JSON.parse(fs.readFileSync(path.join(repoRoot, "tests/fixtures/alibaba-auction-detail-fields.json"), "utf8"));
   const { directExtractBuildingAreaFromText, directExtractFloorFieldsFromText } = await import(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js"));
   const comparableTotal = (value) => String(value || "").replace(/[层楼]/g, "");
-  assert.equal(samples.filter((sample) => sample.sourceType === "evaluation-report-attachment").length, 2);
+  assert.equal(samples.filter((sample) => sample.sourceType === "evaluation-report-attachment").length, 3);
   for (const sample of samples) {
     assert.equal(helper.extractBuildingAreaFromText(sample.text), sample.buildingArea, `${sample.sourceId} native area`);
     assert.equal(directExtractBuildingAreaFromText(sample.text), sample.buildingArea, `${sample.sourceId} extension area`);
@@ -869,7 +989,7 @@ test("native detail parser falls back to page text for missing structured fields
   assert.equal(parsed.totalFloors, 7);
 });
 
-test("native detail parser infers a residential floor from an explicit room number", () => {
+test("native detail parser does not infer a floor from an explicit room number", () => {
   const parsed = helper.parseDetail({
     title: "杭州市上城区凯旋门公寓2幢2单元1602室不动产",
     pageText: "",
@@ -883,8 +1003,72 @@ test("native detail parser infers a residential floor from an explicit room numb
     hasInvalidStatus: false,
     url: "https://sf-item.taobao.com/sf_item/room-floor-test.htm",
   }, { propertyType: "residential", status: "finished", province: "浙江省", city: "杭州市" });
-  assert.equal(parsed.floor, "16");
+  assert.equal(parsed.floor, "");
   assert.equal(parsed.totalFloors, null);
+});
+
+test("native detail parser rejects contradictory floor evidence", () => {
+  const parsed = helper.parseDetail({
+    title: "楼层冲突测试",
+    pageText: "所在楼层为99/总层数10",
+    buildingArea: "",
+    floor: "",
+    totalFloors: "",
+    transactionAmount: "100000",
+    bidCount: "1",
+    hasSoldText: true,
+    hasEndedText: true,
+    hasInvalidStatus: false,
+    url: "https://sf-item.taobao.com/sf_item/floor-conflict-test.htm",
+  }, { propertyType: "residential", status: "finished", province: "浙江省", city: "杭州市" });
+  assert.equal(parsed.floor, "");
+  assert.equal(parsed.totalFloors, 10);
+});
+
+test("native detail parser does not use low-confidence area when page has no area evidence", () => {
+  const parsed = helper.parseDetail({
+    title: "面积待附件测试",
+    pageText: "建筑面积：详见评估报告",
+    buildingArea: "2",
+    floor: "",
+    totalFloors: "",
+    transactionAmount: "100000",
+    bidCount: "1",
+    hasSoldText: true,
+    hasEndedText: true,
+    hasInvalidStatus: false,
+    url: "https://sf-item.taobao.com/sf_item/area-attachment-test.htm",
+  }, { propertyType: "residential", status: "finished", province: "浙江省", city: "杭州市" });
+  assert.equal(parsed.buildingArea, null);
+});
+
+test("native field mapping separates floors and prioritizes attachment evidence", () => {
+  assert.equal(helper.extractBuildingAreaFromText("面积为 384. 05 平方米(其中专有建筑面积 293. 85 平方米)"), 384.05);
+  for (const [source, expected] of [
+    ["所在楼层为4/5层", { floor: "4", totalFloors: "5" }],
+    ["所在楼层 5 | 总楼层 32", { floor: "5", totalFloors: "32" }],
+    ["楼层：地上1层（共3层）", { floor: "地上1", totalFloors: "3层" }],
+    ["楼层：/总7层", { floor: "", totalFloors: "7层" }],
+  ]) assert.deepEqual(helper.extractFloorFieldsFromText(source), expected, source);
+
+  const parsed = helper.parseDetail({
+    title: "附件证据覆盖页面噪声",
+    pageText: "建筑面积：详见评估报告。楼层：2 /总。",
+    attachmentText: "本次估价对象位于第18层，建筑面积为163. 07平方米，所在楼栋总楼层31层。",
+    buildingArea: "2",
+    floor: "2",
+    totalFloors: "三",
+    fieldSources: { buildingArea: "page", floor: "page", totalFloors: "page" },
+    transactionAmount: "100000",
+    bidCount: "1",
+    hasSoldText: true,
+    hasEndedText: true,
+    hasInvalidStatus: false,
+    url: "https://sf-item.taobao.com/sf_item/evidence-priority-test.htm",
+  }, { propertyType: "residential", status: "finished", province: "浙江省", city: "杭州市" });
+  assert.equal(parsed.buildingArea, 163.07);
+  assert.equal(parsed.floor, "18");
+  assert.equal(parsed.totalFloors, 31);
 });
 
 test("image-only PDF OCR fallback recovers area and floor fields", async () => {
@@ -899,6 +1083,21 @@ test("image-only PDF OCR fallback recovers area and floor fields", async () => {
   const floors = helper.extractFloorFieldsFromText(text);
   assert.equal(floors.floor, "9");
   assert.equal(floors.totalFloors, "34层");
+});
+
+test("text-layer PDF extraction avoids OCR and recovers the verified case", async () => {
+  const pdfPath = "/tmp/alibaba-attach-1057267088196.pdf";
+  if (!fs.existsSync(pdfPath) || process.platform !== "darwin") {
+    assert.ok(true, "live PDF fixture is optional on other machines");
+    return;
+  }
+  const startedAt = Date.now();
+  const text = await helper.extractPdfText(fs.readFileSync(pdfPath));
+  const floors = helper.extractFloorFieldsFromText(text);
+  assert.equal(helper.extractBuildingAreaFromText(text), 163.07);
+  assert.equal(floors.floor, "18");
+  assert.equal(floors.totalFloors, "31层");
+  assert.ok(Date.now() - startedAt < 5000, "text-layer extraction should not fall back to full-document OCR");
 });
 
 test("current-tab attachment bridge enriches missing fields through local OCR", async () => {
@@ -981,14 +1180,27 @@ test("standalone result HTML contains the verified case table and source link", 
   assert.match(html, /location_code=330102/);
   assert.match(html, /打开详情/);
   assert.match(html, /候选记录：<strong>4<\/strong>/);
+  assert.match(html, /class="summary-strip summary-stats"/);
+  assert.match(html, /class="source-label">列表来源：<\/span>/);
+  assert.match(html, /id="result-context"/);
+  assert.match(html, /id="toggle-result-context"/);
+  assert.match(html, /result-context-collapsed-v1/);
+  assert.match(html, /展开信息/);
+  assert.match(html, /title="https:\/\/sf\.taobao\.com\/list\/50025969__2\.htm\?location_code=330102"/);
+  assert.match(html, /text-overflow:ellipsis/);
   assert.match(html, /id="alibaba-map-frame"/);
   assert.match(html, /id="result-table"/);
+  assert.match(html, /<th class="sequence-column">序号<\/th>/);
+  assert.match(html, /class="sequence-cell">1<\/td>/);
+  assert.match(html, /data-column="2"/);
   assert.match(html, /show-selected-distances/);
   assert.match(html, /ALIBABA_MAP_DISTANCE_REQUEST/);
   assert.match(html, /class="result-select"/);
   assert.match(html, /class="column-filter-trigger"/);
   assert.match(html, /ALIBABA_MAP_SET_SELECTED/);
   assert.match(html, /ALIBABA_MAP_FOCUS/);
+  assert.match(html, /ALIBABA_MAP_SELECTION_CHANGED/);
+  assert.match(html, /applyMapSelection/);
   assert.match(html, /map-resize-handle/);
   const inlineScripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
   assert.equal(inlineScripts.length, 1);
@@ -1027,13 +1239,15 @@ test("custom output directory creates stable result and map artifacts", async ()
       city: "杭州市",
       sourceUrl: helper.DEFAULT_SOURCE_URL,
     }, { candidates: 2, skipped: 0 });
-    assert.deepEqual(fs.readdirSync(outputDirectory).sort(), ["latest.html", "latest_coords.json", "latest_map.html", "latest_points.js"]);
+    assert.deepEqual(fs.readdirSync(outputDirectory).sort(), ["MarkerCluster.Default.css", "MarkerCluster.css", "images", "latest.html", "latest_coords.json", "latest_history.json", "latest_map.html", "latest_points.js", "leaflet.css", "leaflet.js", "leaflet.markercluster.js"]);
     assert.equal(artifacts.locatedCount, 1);
     assert.equal(artifacts.unlocatedCount, 1);
     const mapHtml = fs.readFileSync(artifacts.mapPath, "utf8");
     assert.match(mapHtml, /阿里司法拍卖地图/);
     assert.match(mapHtml, /未定位商业/);
     assert.match(mapHtml, /leaflet\.js/);
+    assert.match(mapHtml, /href="leaflet\.css"/);
+    assert.doesNotMatch(mapHtml, /unpkg\.com\/leaflet/);
     assert.match(mapHtml, /markerCluster/);
     assert.match(mapHtml, /ALIBABA_MAP_SET_SELECTED/);
     assert.match(mapHtml, /ALIBABA_MAP_FOCUS/);
@@ -1044,11 +1258,17 @@ test("custom output directory creates stable result and map artifacts", async ()
   assert.match(mapHtml, /插入位置标记/);
   assert.match(mapHtml, /id="clear-reference-markers"/);
   assert.match(mapHtml, /reference-marker-edit/);
-  assert.match(mapHtml, /setReferenceMarkerEditing/);
-  assert.match(mapHtml, /marker\.dragging\?\.disable\(\)/);
-  assert.match(mapHtml, /server\.arcgisonline\.com\/ArcGIS\/rest\/services\/World_Street_Map/);
-  assert.doesNotMatch(mapHtml, /https:\/\/\{s\}\.tile\.openstreetmap\.org/);
-  assert.match(mapHtml, /位置已锁定/);
+	  assert.match(mapHtml, /setReferenceMarkerEditing/);
+	  assert.match(mapHtml, /marker\.dragging\?\.disable\(\)/);
+	  assert.match(mapHtml, /server\.arcgisonline\.com\/ArcGIS\/rest\/services\/World_Street_Map/);
+	  assert.match(mapHtml, /id="map-provider-select"/);
+	  assert.match(mapHtml, /地图底层/);
+	  assert.match(mapHtml, /高德地图（公开瓦片）/);
+	  assert.match(mapHtml, /https:\/\/\{s\}\.tile\.openstreetmap\.org/);
+	  assert.match(mapHtml, /function installTileProvider/);
+	  assert.match(mapHtml, /tianyuan-alibaba-auction-map-provider-v1/);
+	  assert.match(mapHtml, /正在切换到/);
+	  assert.match(mapHtml, /位置已锁定/);
   assert.match(mapHtml, /marker-dialog-name/);
   assert.match(mapHtml, /marker-dialog-note/);
   assert.match(mapHtml, /distanceKm/);
@@ -1064,6 +1284,116 @@ test("custom output directory creates stable result and map artifacts", async ()
   } finally {
     fs.rmSync(outputDirectory, { recursive: true, force: true });
   }
+	});
+
+test("map output reuses configured Amap web key without exposing security code", async () => {
+  const outputDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "alibaba-auction-map-provider-"));
+  const configDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "alibaba-auction-map-config-"));
+  const configPath = path.join(configDirectory, "map-config.json");
+  const originalConfigPath = process.env.TIANYUAN_MAP_CONFIG_PATH;
+  try {
+    fs.writeFileSync(configPath, JSON.stringify({
+      amap: {
+        enabled: true,
+        webKey: "test-map-key-1234",
+        securityJsCode: "must-not-appear-in-map-html",
+      },
+    }));
+    process.env.TIANYUAN_MAP_CONFIG_PATH = configPath;
+    const artifacts = await helper.writeResultArtifacts([{
+      id: "case-amap",
+      title: "高德底图测试",
+      propertyType: "住宅用房",
+      address: "杭州市测试路",
+      transactionTime: "2026-09-05",
+      transactionAmount: 1000000,
+      longitude: 120.1,
+      latitude: 30.2,
+      url: "https://sf-item.taobao.com/sf_item/amap-map.htm",
+    }], {
+      outputDirectory,
+      generateMap: true,
+      geocodeMissing: false,
+      sourceUrl: helper.DEFAULT_SOURCE_URL,
+    });
+    const mapHtml = fs.readFileSync(artifacts.mapPath, "utf8");
+    assert.match(mapHtml, /id="map-provider-select"/);
+    assert.match(mapHtml, /ArcGIS World Street Map/);
+    assert.match(mapHtml, /高德地图（API）/);
+    assert.match(mapHtml, /OpenStreetMap/);
+    assert.match(mapHtml, /function installTileProvider/);
+    assert.match(mapHtml, /tileLayer\.on\("tileerror"/);
+    assert.match(mapHtml, /tianyuan-alibaba-auction-map-provider-v1/);
+    assert.match(mapHtml, /test-map-key-1234/);
+    assert.doesNotMatch(mapHtml, /must-not-appear-in-map-html/);
+  } finally {
+    if (originalConfigPath === undefined) delete process.env.TIANYUAN_MAP_CONFIG_PATH;
+    else process.env.TIANYUAN_MAP_CONFIG_PATH = originalConfigPath;
+    fs.rmSync(outputDirectory, { recursive: true, force: true });
+    fs.rmSync(configDirectory, { recursive: true, force: true });
+  }
+});
+
+test("enhanced map keeps land-map parity controls and existing auction interactions", () => {
+  const mapHtml = helper.renderMapHtml({
+    stats: { total: 2, located: 1, unlocated: 1 },
+    points: [{
+      id: "1",
+      title: "历史住宅案例",
+      propertyType: "住宅用房",
+      address: "杭州市西湖区测试路1号",
+      transactionTime: "2026-09-05",
+      transactionAmount: "1,234,567",
+      unitPrice: 12345.67,
+      longitude: 120.1,
+      latitude: 30.2,
+      url: "https://sf-item.taobao.com/sf_item/1.htm",
+    }],
+    unlocated: [{
+      id: "2",
+      title: "未定位商业案例",
+      propertyType: "商业房",
+      transactionTime: "2026-09-04",
+      coordinateStatus: "未定位（详情页未返回坐标）",
+    }],
+    mapConfig: { amapWebKey: "" },
+  }, { city: "杭州市" });
+
+  assert.match(mapHtml, /id="land-map-parity"/);
+  assert.match(mapHtml, /class="work-panel collapsed"/);
+  assert.match(mapHtml, /id="case-sort"/);
+  assert.match(mapHtml, /成交金额：高到低/);
+  assert.match(mapHtml, /case-item-price/);
+  assert.match(mapHtml, /case-item-unit-price/);
+  assert.match(mapHtml, /case-item-index/);
+  assert.match(mapHtml, /case-label-index/);
+  assert.match(mapHtml, /marker\.on\("click"/);
+  assert.match(mapHtml, /ALIBABA_MAP_SELECTION_CHANGED/);
+  assert.match(mapHtml, /case-item-link/);
+  assert.match(mapHtml, /单价：/);
+  assert.match(mapHtml, /popupUnitPrice/);
+  assert.match(mapHtml, /syncCaseLabels/);
+  assert.match(mapHtml, /className:"case-label"/);
+  assert.match(mapHtml, /map\.on\("zoomend",syncCaseLabels\)/);
+  assert.match(mapHtml, /permanent:true/);
+  assert.match(mapHtml, /打开详情页/);
+  assert.match(mapHtml, /unlocated-reason/);
+  assert.match(mapHtml, /未定位（详情页未返回坐标）/);
+  assert.match(mapHtml, /ArcGIS World Street Map/);
+  assert.match(mapHtml, /高德地图（公开瓦片）/);
+  assert.match(mapHtml, /OpenStreetMap/);
+  assert.match(mapHtml, /function installTileProvider/);
+  assert.match(mapHtml, /const tileOptions=/);
+  assert.doesNotMatch(mapHtml, /subdomains:provider\.subdomains\|\|undefined/);
+  assert.match(mapHtml, /tileLayer\.on\("tileerror"/);
+  assert.match(mapHtml, /正在切换到/);
+  assert.match(mapHtml, /tianyuan-alibaba-auction-map-provider-v1/);
+  assert.match(mapHtml, /localStorage\.getItem\(mapProviderStorageKey\)/);
+  assert.match(mapHtml, /reference-marker-edit/);
+  assert.match(mapHtml, /位置已锁定/);
+  assert.match(mapHtml, /marker\.dragging\?\.disable\(\)/);
+  assert.match(mapHtml, /renderDistanceResults/);
+  assert.match(mapHtml, /ALIBABA_MAP_DISTANCE_REQUEST/);
 });
 
 test("map assets are removed when map generation is disabled", async () => {
@@ -1089,7 +1419,7 @@ test("map assets are removed when map generation is disabled", async () => {
     assert.equal(withoutMap.geocodeCacheHits, 0);
     assert.equal(withoutMap.geocodeResolved, 0);
     assert.equal(withoutMap.geocodeDurationMs, 0);
-    assert.deepEqual(fs.readdirSync(outputDirectory).sort(), ["latest.html"]);
+    assert.deepEqual(fs.readdirSync(outputDirectory).sort(), ["latest.html", "latest_history.json"]);
   } finally {
     fs.rmSync(outputDirectory, { recursive: true, force: true });
   }

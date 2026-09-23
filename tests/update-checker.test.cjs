@@ -218,6 +218,7 @@ async function run() {
     currentVersion: "0.9.0",
     currentBuildNumber: 2026072601,
     currentRuntimeBuildId: "old-build",
+    currentRuntimeBuildKind: "release",
     platform: "win32",
     architecture: "x64",
   }, {
@@ -245,6 +246,8 @@ async function run() {
   });
   assert.equal(repair.updateAvailable, true);
   assert.equal(repair.repairRequired, true);
+  assert.equal(repair.currentRuntimeBuildKind, "release");
+  assert.equal(repair.latestRuntimeBuildKind, "release");
   assert.equal(repair.manifestFound, true);
   assert.equal(repair.asset.sha256, "b".repeat(64));
 
@@ -269,7 +272,6 @@ async function run() {
         assets: {
           "windows-x64": {
             fileName: "tianyuan-workbench-v0.14.21-windows-x64.zip",
-            url: "tianyuan-workbench-v0.14.21-windows-x64.zip",
             sha256: "f".repeat(64),
             size: 100,
           },
@@ -280,7 +282,40 @@ async function run() {
   assert.equal(authoritativeCurrent.ok, true);
   assert.equal(authoritativeCurrent.updateAvailable, false);
   assert.equal(authoritativeCurrent.latestVersion, "0.14.21");
+  assert.equal(
+    authoritativeCurrent.asset.url,
+    "https://github.com/zer0-lyz/tianyuan-browser-workbench-releases/releases/latest/download/tianyuan-workbench-v0.14.21-windows-x64.zip",
+  );
   assert.equal(authoritativeRequestCount, 1);
+
+  const localBuild = await checkGithubUpdate({
+    currentVersion: "0.14.21",
+    currentBuildNumber: 2026080209,
+    currentRuntimeBuildId: "local-integrated-build",
+    currentRuntimeBuildKind: "local",
+    updateManifestUrls: [
+      "https://github.com/zer0-lyz/tianyuan-browser-workbench-releases/releases/latest/download/update-manifest.json",
+    ],
+    platform: "win32",
+    architecture: "x64",
+  }, {
+    fetchImpl: async () => response(200, {
+      productVersion: "0.14.21",
+      buildNumber: 2026080209,
+      runtimeBuildId: "published-build",
+      runtimeBuildKind: "release",
+      assets: {
+        "windows-x64": {
+          fileName: "tianyuan-workbench-v0.14.21-windows-x64.zip",
+          sha256: "f".repeat(64),
+        },
+      },
+    }),
+  });
+  assert.equal(localBuild.updateAvailable, false);
+  assert.equal(localBuild.repairRequired, false);
+  assert.equal(localBuild.currentRuntimeBuildKind, "local");
+  assert.equal(localBuild.latestRuntimeBuildKind, "release");
 
   await assert.rejects(
     checkGithubUpdate({

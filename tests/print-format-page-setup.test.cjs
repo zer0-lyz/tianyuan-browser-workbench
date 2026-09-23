@@ -76,6 +76,14 @@ const code = [
   "            'scale': setup.attrib.get('scale'),",
   "        }",
   "    }))",
+  "with tempfile.TemporaryDirectory() as temp_dir:",
+  "    workbook = Workbook()",
+  "    workbook.active.title = '设定信息'",
+  "    workbook.active.sheet_state = 'hidden'",
+  "    hidden = workbook.create_sheet('3-1现金')",
+  "    hidden.sheet_state = 'hidden'",
+  "    module.restore_or_create_visible_sheet(workbook, {ws.title: ws.sheet_state for ws in workbook.worksheets})",
+  "    print(json.dumps({'visible': [ws.title for ws in workbook.worksheets if ws.sheet_state == 'visible']}))",
 ].join("\n");
 
 const result = spawnSync(python, ["-c", code, declarationScript, detailScript], {
@@ -100,5 +108,6 @@ assert.deepEqual(output[1], {
     scale: null,
   },
 });
+assert.deepEqual(output[2], { visible: ["设定信息"] });
 
 console.log("Print format page setup tests passed.");

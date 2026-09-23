@@ -567,13 +567,34 @@ function createFileArchiveService({ runtimeDirectory, platformAdapter, selfLaunc
 
   async function selectOutputDirectory() {
     const result = await platformAdapter.chooseDirectory("选择微信或企业微信文件导出目录");
-    const selectedPath = result.paths?.[0] || "";
-    return {
-      ...result,
-      action: "file_archive_output_directory_selected",
-      path: selectedPath ? selectedPath.replace(/[\\/]+$/, "") || path.parse(selectedPath).root : "",
-      security: security(),
-    };
+    const parentPath = String(result?.path || result?.paths?.[0] || "").trim();
+    if (!result?.ok || !parentPath) {
+      return { ...result, action: "file_archive_output_directory_selected", path: "", security: security() };
+    }
+    try {
+      const resolvedParent = fs.realpathSync(parentPath);
+      if (!fs.statSync(resolvedParent).isDirectory()) throw new Error("FILE_ARCHIVE_OUTPUT_PARENT_NOT_DIRECTORY");
+      const outputPath = path.basename(resolvedParent) === "微信文件归档"
+        ? resolvedParent
+        : path.join(resolvedParent, "微信文件归档");
+      const alreadyExists = fs.existsSync(outputPath);
+      fs.mkdirSync(outputPath, { recursive: true, mode: 0o700 });
+      const selectedPath = fs.realpathSync(outputPath);
+      return {
+        ...result,
+        ok: true,
+        action: "file_archive_output_directory_selected",
+        path: selectedPath,
+        paths: [selectedPath],
+        outputDirectory: selectedPath,
+        parentPath: resolvedParent,
+        directoryName: "微信文件归档",
+        createdDirectory: !alreadyExists,
+        security: security(),
+      };
+    } catch {
+      return { ok: false, action: "file_archive_output_directory_selected", path: "", reason: "FILE_ARCHIVE_OUTPUT_DIRECTORY_CREATE_FAILED", security: security() };
+    }
   }
 
   async function start(config = {}) {

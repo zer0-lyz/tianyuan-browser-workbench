@@ -176,10 +176,10 @@ export const tableFormatModule = {
           }
           throw new Error(result?.reason || "TABLE_FORMAT_OUTPUT_SELECTION_FAILED");
         }
-        config.outputDirectory = String(result.paths?.[0] || "");
+        config.outputDirectory = String(result.outputDirectory || result.path || result.paths?.[0] || "");
         elements.tableFormatOutputDirectory.value = config.outputDirectory;
         await context.storage.save(config);
-        setMessage(elements.tableFormatResultMessage, "目标文件夹已选择。", "ok");
+        setMessage(elements.tableFormatResultMessage, `已选择并创建专用子文件夹：${result.directoryName || "表格格式设置"}。`, "ok");
         context.setStatus(`已选择目标文件夹：${config.outputDirectory}`, "ok");
       } catch (error) {
         setMessage(elements.tableFormatResultMessage, `选择目标文件夹失败：${error?.message || String(error)}`, "error");

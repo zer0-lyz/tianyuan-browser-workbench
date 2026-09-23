@@ -1,0 +1,12 @@
+[data-module-id="declaration-table-workflow"] .declaration-table-workflow-panel { display: grid; gap: 12px; }
+[data-module-id="declaration-table-workflow"] .declaration-table-workflow-mode-card { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border: 1px solid var(--border-color, #d7dde5); border-radius: 10px; background: var(--panel-muted, #f8fafc); cursor: pointer; }
+[data-module-id="declaration-table-workflow"] .declaration-table-workflow-mode-card:has(input:checked) { border-color: var(--accent-color, #2f6feb); background: color-mix(in srgb, var(--accent-color, #2f6feb) 8%, white); }
+[data-module-id="declaration-table-workflow"] .declaration-table-workflow-mode-card input { margin-top: 3px; }
+[data-module-id="declaration-table-workflow"] .declaration-table-workflow-mode-card span { display: grid; gap: 4px; }
+[data-module-id="declaration-table-workflow"] .declaration-table-workflow-mode-card small, [data-module-id="declaration-table-workflow"] .section-description { color: var(--muted-text, #667085); font-size: 12px; line-height: 1.45; }
+[data-module-id="declaration-table-workflow"] .declaration-table-workflow-result-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 12px; }
+[data-module-id="declaration-table-workflow"] .declaration-table-workflow-result-list li { padding: 7px 9px; border-radius: 7px; background: var(--panel-muted, #f8fafc); overflow-wrap: anywhere; }
+[data-module-id="declaration-table-workflow"] .declaration-table-workflow-result-list li[data-kind="error"] { color: var(--danger-color, #b42318); }
+[data-module-id="declaration-table-workflow"] .directory-row { display: flex; gap: 8px; }
+[data-module-id="declaration-table-workflow"] .directory-row input { min-width: 0; flex: 1; }
+@media (max-width: 520px) { [data-module-id="declaration-table-workflow"] .directory-row { display: grid; } }

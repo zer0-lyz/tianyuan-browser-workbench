@@ -59,6 +59,7 @@ cat > "$STAGE/native-helper/runtime-compat.json" <<EOF
   "bridgeProtocol": "connector-agent-binding-v3",
   "buildId": "2026-07-24-browser-contract-v2-capability-matrix",
   "runtimeBuildId": "$RUNTIME_BUILD_ID",
+  "runtimeBuildKind": "release",
   "generatedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF

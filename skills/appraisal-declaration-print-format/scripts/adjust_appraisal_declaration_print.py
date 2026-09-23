@@ -892,6 +892,22 @@ def make_base_args(args):
     )
 
 
+def restore_or_create_visible_sheet(wb, original_sheet_states):
+    for ws in wb.worksheets:
+        ws.sheet_state = original_sheet_states.get(ws.title, ws.sheet_state)
+    if any(ws.sheet_state == "visible" for ws in wb.worksheets):
+        return ""
+    if not wb.worksheets:
+        raise RuntimeError("WORKBOOK_HAS_NO_SHEETS")
+    fallback = next((ws for ws in wb.worksheets if "设定信息" in ws.title), wb.worksheets[0])
+    fallback.sheet_state = "visible"
+    for ws in wb.worksheets:
+        ws.sheet_view.tabSelected = False
+    fallback.sheet_view.tabSelected = True
+    wb.active = wb.worksheets.index(fallback)
+    return fallback.title
+
+
 def main(argv=None):
     args = parse_args(argv or sys.argv[1:])
     path = Path(args.workbook).expanduser()
@@ -961,12 +977,11 @@ def main(argv=None):
         report.append((ws.title, "detail", result_cols, title_cells, footer_changed, (empty_cols + row_changes, metrics)))
 
     if not any(ws.sheet_state == "visible" for ws in wb.worksheets):
-        for ws in wb.worksheets:
-            ws.sheet_state = original_sheet_states.get(ws.title, ws.sheet_state)
+        fallback_title = restore_or_create_visible_sheet(wb, original_sheet_states)
         if not args.dry_run:
             wb.save(path)
         print(f"processed_sheets={len(report)} dry_run={args.dry_run} no_visible_detail=True")
-        print("action=no-visible-detail restored_original_sheet_states=True")
+        print(f"action=no-visible-detail restored_original_sheet_states=True fallback_visible={fallback_title or '-'}")
         return
 
     first_visible_index = next(

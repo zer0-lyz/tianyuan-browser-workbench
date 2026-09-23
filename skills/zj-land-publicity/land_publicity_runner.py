@@ -21,6 +21,7 @@ import zipfile
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from urllib.parse import parse_qs, urlparse
 
 import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -362,7 +363,7 @@ def _list(value: Any, allowed: Iterable[str], field: str) -> List[str]:
 def validate_request(request: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(request, dict):
         raise ValueError("LAND_REQUEST_INVALID")
-    for boolean_field in ("districtExact", "generateMap", "provinceWide"):
+    for boolean_field in ("districtExact", "generateMap", "provinceWide", "historyRefresh"):
         if boolean_field in request and not isinstance(request[boolean_field], bool):
             raise ValueError(f"{boolean_field.upper()}_MUST_BE_BOOLEAN")
     output_directory = _text(request.get("outputDirectory"), 2000)
@@ -371,6 +372,13 @@ def validate_request(request: Dict[str, Any]) -> Dict[str, Any]:
     output_directory = os.path.realpath(output_directory)
     if not os.path.isdir(output_directory):
         raise ValueError("LAND_OUTPUT_DIRECTORY_NOT_DIRECTORY")
+    history_path = _text(request.get("historyPath"), 2000)
+    if history_path:
+        if "\x00" in history_path or not os.path.isabs(history_path):
+            raise ValueError("LAND_HISTORY_PATH_INVALID")
+        history_path = os.path.realpath(history_path)
+        if not os.path.isfile(history_path) or Path(history_path).suffix.lower() not in (".json", ".xlsx"):
+            raise ValueError("LAND_HISTORY_PATH_NOT_FOUND")
 
     start_year = request.get("startYear", "")
     if start_year not in (None, ""):
@@ -476,6 +484,8 @@ def validate_request(request: Dict[str, Any]) -> Dict[str, Any]:
         "generateMap": bool(request.get("generateMap", False)),
         "maxPages": max_pages,
         "outputDirectory": output_directory,
+        "historyPath": history_path,
+        "historyRefresh": bool(request.get("historyRefresh", True)),
     }
 
 
@@ -1147,6 +1157,92 @@ main{{max-width:1440px;margin:0 auto;padding:16px 20px}}h1{{margin:0 0 8px;font-
     path.write_text(html_content, encoding="utf-8")
 
 
+def _legacy_items_from_workbook(path: Path) -> Dict[str, Any]:
+    workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    sheet = workbook[workbook.sheetnames[0]]
+    values = list(sheet.iter_rows(values_only=True))
+    workbook.close()
+    if not values:
+        return {"items": [], "request": {}, "legacy": True}
+    headers = [str(value or "").strip() for value in values[0]]
+    rows = [dict(zip(headers, row)) for row in values[1:] if any(value not in (None, "") for value in row)]
+    coords = {}
+    coord_path_value = next((row.get("坐标数据文件") for row in rows if row.get("坐标数据文件")), "")
+    coord_path = Path(str(coord_path_value)) if coord_path_value else path.with_name(f"{path.stem}_coords.json")
+    if coord_path.exists():
+        try:
+            for point in json.loads(coord_path.read_text(encoding="utf-8")):
+                for item in point.get("items", []):
+                    coords[_text(item.get("sourceCode"))] = {"center": {"lng": point.get("lon"), "lat": point.get("lat")}}
+        except (OSError, ValueError, TypeError):
+            coords = {}
+    items = []
+    refreshable = False
+    for row in rows:
+        source_code = _text(row.get("公示标题") or row.get("地块编号（宗地编码）") or row.get("公示编号"))
+        detail_url = _text(row.get("详情页网址"))
+        source_id = _text(parse_qs(urlparse(detail_url).query).get("resourceId", [""])[0]) or _text(row.get("公示编号"))
+        refreshable = refreshable or bool(parse_qs(urlparse(detail_url).query).get("resourceId"))
+        record = {
+            "publicityId": _text(row.get("公示编号")),
+            "sourceCode": source_code,
+            "districtName": _text(row.get("行政区")),
+            "releaseTime": _text(row.get("发布时间")),
+            "sourceId": source_id,
+            "content": "",
+        }
+        items.append({
+            "record": record,
+            "detail": {},
+            "detail_data": {},
+            "coord": coords.get(source_code, {}),
+            "source_id": _text(row.get("公示编号")),
+            "detail_url": detail_url,
+            "location": _text(row.get("地块位置")),
+            "land_use": _text(row.get("土地用途")),
+            "area_mu": row.get("土地面积(亩)"),
+            "area_sqm": row.get("土地面积(平方米)"),
+            "start_price": row.get("起始单价(元/平方米)"),
+            "start_total_price": row.get("起始总价(万元)"),
+            "deal_price": row.get("成交单价(元/平方米)"),
+            "deal_total_price": row.get("成交总价(万元)"),
+            "term": _text(row.get("出让年限")),
+            "transferee": _text(row.get("受让单位")),
+            "trade_form": _text(row.get("交易形式")),
+        })
+    return {"items": items, "request": {}, "legacy": True, "refreshable": refreshable}
+
+
+def load_history_file(path: Path) -> Dict[str, Any]:
+    if path.suffix.lower() == ".xlsx":
+        return _legacy_items_from_workbook(path)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError(f"LAND_HISTORY_READ_FAILED:{error}") from error
+    if not isinstance(payload, dict) or payload.get("type") != "zj-land-publicity-history":
+        raise ValueError("LAND_HISTORY_FORMAT_INVALID")
+    items = payload.get("items")
+    if not isinstance(items, list):
+        raise ValueError("LAND_HISTORY_ITEMS_INVALID")
+    return {"items": items, "request": payload.get("request") or {}, "legacy": False, "payload": payload}
+
+
+def write_history_manifest(path: Path, request: Dict[str, Any], summary: Dict[str, Any], items: List[Dict[str, Any]], outputs: Dict[str, str], source_mode: str) -> None:
+    payload = {
+        "type": "zj-land-publicity-history",
+        "version": 1,
+        "generatedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "querySignature": _query_signature(request),
+        "sourceMode": source_mode,
+        "request": {key: value for key, value in request.items() if key not in ("historyPath", "historyRefresh")},
+        "summary": summary,
+        "outputs": outputs,
+        "items": items,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+
+
 def _move_asset(source: Path, target: Path) -> None:
     if not source.exists() or source.stat().st_size <= 0:
         raise ValueError(f"LAND_OUTPUT_EMPTY:{source.name}")
@@ -1169,26 +1265,41 @@ def execute_request(
         "coords": output_dir / f"{stem}_coords.json",
         "points": output_dir / f"{stem}_points.js",
         "map": output_dir / f"{stem}_map.html",
+        "history": output_dir / f"{stem}_history.json",
     }
-    output_will_update = final_paths["excel"].exists() or final_paths["html"].exists()
+    output_will_update = final_paths["excel"].exists() or final_paths["html"].exists() or final_paths["history"].exists()
     stage = Path(tempfile.mkdtemp(prefix=".tianyuan-land-", dir=output_dir))
     try:
-        progress("fetching", 5, "正在按条件读取浙江土地成交公示候选列表", fetched=0, filtered=0, written=0)
-        list_filter = _list_district_filter(config)
-        records = fetcher(
-            district_filter=list_filter,
-            max_pages=config["maxPages"],
-            record_filter=lambda record: _list_record_matches_request(config, record),
-            stop_before=_list_stop_before(config),
-            server_filters=_website_server_filters(config),
-        )
+        history_info = load_history_file(Path(config["historyPath"])) if config.get("historyPath") else None
+        source_mode = "live"
+        history_refresh = bool(config.get("historyRefresh", True)) and not bool(history_info and history_info.get("legacy") and not history_info.get("refreshable"))
+        if history_info:
+            source_mode = "history_refresh" if history_refresh else "history_reuse"
+            records = [item.get("record", {}) for item in history_info["items"] if isinstance(item, dict) and isinstance(item.get("record"), dict)]
+            if not records:
+                raise ValueError("LAND_HISTORY_ITEMS_EMPTY")
+            progress("fetching", 5, f"已加载历史清单，共 {len(records)} 条，正在{'重新读取详情' if history_refresh else '复用历史详情'}", fetched=0, filtered=0, written=0)
+        else:
+            progress("fetching", 5, "正在按条件读取浙江土地成交公示候选列表", fetched=0, filtered=0, written=0)
+            list_filter = _list_district_filter(config)
+            records = fetcher(
+                district_filter=list_filter,
+                max_pages=config["maxPages"],
+                record_filter=lambda record: _list_record_matches_request(config, record),
+                stop_before=_list_stop_before(config),
+                server_filters=_website_server_filters(config),
+            )
         fetched_count = len(records)
         progress("fetching", 38, f"条件候选读取完成，共 {fetched_count} 条，正在复核详情", fetched=fetched_count, filtered=0, written=0)
         enriched: List[Dict[str, Any]] = []
+        stored_items = history_info["items"] if history_info else []
         for index, record in enumerate(records, 1):
-            enriched.append(enrich_record(record, detail_fetcher))
+            if history_info and not history_refresh and index <= len(stored_items):
+                enriched.append(stored_items[index - 1])
+            else:
+                enriched.append(enrich_record(record, detail_fetcher))
             percent = 40 + round(index / max(1, fetched_count) * 28)
-            progress("enriching", percent, f"正在读取详情 {index}/{fetched_count}", fetched=fetched_count, enriched=index, filtered=0, written=0)
+            progress("enriching", percent, f"正在读取详情 {index}/{fetched_count}" if history_refresh or not history_info else f"正在复用历史详情 {index}/{fetched_count}", fetched=fetched_count, enriched=index, filtered=0, written=0)
         filtered, filter_summary = filter_records(enriched, config)
         fetched_coordinate_count = sum(
             1 for item in enriched
@@ -1269,10 +1380,19 @@ def execute_request(
             summary,
             {"excel": final_paths["excel"].name, "map": map_name},
         )
+        history_stage = stage / "result_history.json"
+        write_history_manifest(
+            history_stage,
+            config,
+            summary,
+            filtered,
+            {"excel": final_paths["excel"].name, "html": final_paths["html"].name, "map": map_name},
+            source_mode,
+        )
 
         # 所有新文件先在暂存目录中生成并校验，之后才一次性替换目标文件；
         # 抓取或渲染失败时，上一轮已经完成的 Excel/HTML 仍然可用。
-        staged_assets = [(stage_xlsx, final_paths["excel"]), (stage / "result.html", final_paths["html"])]
+        staged_assets = [(stage_xlsx, final_paths["excel"]), (stage / "result.html", final_paths["html"]), (history_stage, final_paths["history"])]
         if config["generateMap"]:
             staged_assets.extend([
                 (coord_stage, final_paths["coords"]),
@@ -1307,6 +1427,8 @@ def execute_request(
             "coordsPath": str(final_paths["coords"]) if config["generateMap"] else "",
             "pointsJsPath": str(final_paths["points"]) if config["generateMap"] else "",
             "mapPath": str(final_paths["map"]) if config["generateMap"] else "",
+            "historyPath": str(final_paths["history"]),
+            "historyMode": source_mode,
             "fetchedCoordinateCount": fetched_coordinate_count,
             "filteredCoordinateCount": filtered_coordinate_count,
             "noCoordinateCount": len(filtered) - filtered_coordinate_count,

@@ -74,13 +74,14 @@ async function exportWorkbook() {
   elements.exportWorkbook.disabled = true;
   try {
     const selected = await nativeRequest({ action: ACTIONS.selectOutputDirectory }, 130_000);
-    if (selected.cancelled || selected.canceled || !selected.path) {
+    const selectedDirectory = selected.outputDirectory || selected.path || selected.paths?.[0] || "";
+    if (selected.cancelled || selected.canceled || !selectedDirectory) {
       setMessage(elements.exportStatus, "已取消导出", "");
       return;
     }
     const result = await nativeRequest({
       action: ACTIONS.export,
-      outputDirectory: selected.path,
+      outputDirectory: selectedDirectory,
       outputPath: selected.outputPath || "",
     }, 120_000);
     const filePath = result.outputPath || result.path || result.file?.path || "";

@@ -52,7 +52,9 @@ function cacheMatchesRuntime(result, config, contract) {
     || "";
   return String(result.currentVersion || "") === String(currentVersion)
     && Number(result.currentBuildNumber || 0) === Number(config.buildNumber || 0)
-    && String(result.currentRuntimeBuildId || "") === String(contract?.runtimeBuildId || "");
+    && String(result.currentRuntimeBuildId || "") === String(contract?.runtimeBuildId || "")
+    && String(result.currentRuntimeBuildKind || "release")
+      === String(contract?.runtimeBuildKind || "release");
 }
 
 function elementMap(documentRef) {
@@ -290,6 +292,17 @@ export const updatesModule = {
         setTopStatus(`v${currentVersion}`, "ok");
         return;
       }
+      if (result.currentRuntimeBuildKind === "local" && !result.updateAvailable) {
+        elements.updateHeadline.textContent = "本地整合构建";
+        elements.updateDescription.textContent =
+          "当前组件来自本机整合构建；不会因与官方发布指纹不同而反复提示修复。";
+        elements.updateBadge.textContent = "本地构建";
+        elements.updateFeedback.textContent = "版本检查完成，正式包校验规则保持不变";
+        elements.updateFeedback.dataset.kind = "ok";
+        setTopStatus(`v${currentVersion}`, "ok");
+        renderProgress();
+        return;
+      }
       if (result.repairRequired) {
         elements.updateHeadline.textContent = "检测到组件版本不一致";
         elements.updateDescription.textContent = "产品版本相同，但运行指纹不同，需要重新下载安装当前版本。";
@@ -358,6 +371,7 @@ export const updatesModule = {
             || context.extensionManifest.version,
           currentBuildNumber: Number(config.buildNumber || 0),
           currentRuntimeBuildId: String(contract?.runtimeBuildId || ""),
+          currentRuntimeBuildKind: String(contract?.runtimeBuildKind || "release"),
         // Leave enough room for the Helper's bounded network fallback to
         // return UPDATE_CHECK_TIMEOUT instead of surfacing a transport timeout.
         }, 30000);
@@ -445,6 +459,7 @@ export const updatesModule = {
             || context.extensionManifest.version,
           currentBuildNumber: Number(config.buildNumber || 0),
           currentRuntimeBuildId: String(contract?.runtimeBuildId || ""),
+          currentRuntimeBuildKind: String(contract?.runtimeBuildKind || "release"),
         }, 20 * 60 * 1000).finally(() => {
           requestFinished = true;
         });
@@ -553,6 +568,7 @@ export const updatesModule = {
             || context.extensionManifest.version,
           currentBuildNumber: Number(config.buildNumber || 0),
           currentRuntimeBuildId: String(contract?.runtimeBuildId || ""),
+          currentRuntimeBuildKind: String(contract?.runtimeBuildKind || "release"),
         }, 10 * 60 * 1000).finally(() => {
           requestFinished = true;
         });

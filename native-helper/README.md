@@ -55,18 +55,20 @@ export VALUATION_MCP_TOKEN="你的 MCP token"
 
 Native Messaging 额外支持：
 
-- `select_export_directory`：调用当前系统文件夹选择器，由用户明确授权导出目录。
+- `select_export_directory`：选择上级目录并自动创建对应的天源表格导出子目录。
 - `run_cli_export`：仅允许执行资产基础法明细表或申报表导出，并持续返回阶段进度。
+- `run_detail_table_workflow`：按“导出 → 恢复公式 → 设置明细表格式”顺序执行统一流程，或对用户选择的工作簿执行手动整理；每个文件使用临时副本、ZIP 完整性校验和原子替换。
 - `select_print_workbook_files`：选择一个或多个待处理工作簿。
 - `select_print_workbook_directory`：选择文件夹并递归发现 `.xlsx`、`.xlsm` 工作簿。
-- `select_print_output_directory`：选择打印版文件的新存放位置。
+- `select_print_output_directory`：选择上级目录并自动创建模块专用的打印版结果子目录。
 - `run_print_format`：批量执行明细表或申报表打印格式调整，并持续返回文件级进度。
+- `run_declaration_table_workflow`：统一执行申报表导出与打印格式整理，自动模式按导出后整理顺序运行，手动模式整理已选工作簿。
 - `detect_file_archive_apps`：检测 macOS 微信和企业微信的已知下载目录，不读取聊天正文。
-- `select_file_archive_output_directory`：使用 macOS 原生目录选择器选择归档目录。
+- `select_file_archive_output_directory`：选择上级目录并自动创建 `微信文件归档` 子目录。
 - `start_file_archive` / `pause_file_archive` / `stop_file_archive`：启动、暂停/恢复和停止本机文件归档守护任务。
 - `scan_file_archive` / `get_file_archive_status`：刷新来源检测并读取归档状态、计数和最近文件。
 - `list_file_archive_conversations` / `get_file_archive_conversation_bindings`：读取会话清单和本地目录绑定；只接受可靠的非正文元数据来源。
-- `select_file_archive_conversation_directory` / `save_file_archive_conversation_bindings`：为已确认的联系人或群聊绑定导出目录。
+- `select_file_archive_conversation_directory` / `save_file_archive_conversation_bindings`：为已确认的联系人或群聊绑定自动创建的归档子目录。
 
 ## 安全规则
 
@@ -74,7 +76,7 @@ Native Messaging 额外支持：
 - 不把 token 写入项目文件。
 - 不在 OneDrive 项目目录安装依赖、写日志或保存缓存。
 - CLI 导出只允许白名单子命令，使用参数数组调用，不通过 shell 拼接命令。
-- 导出目录必须由用户选择且为现有本机目录。
+- 输出目录由用户选择上级本机目录后由 Native Helper 创建模块专用子目录；输入目录和历史数据目录不自动改造。
 - 打印格式覆盖模式先处理临时副本并验证完整性，再原子替换源文件。
 - 打印版副本使用 `-打印版` 后缀；名称冲突时自动增加序号。
 - 文件夹批处理会跳过临时文件、备份文件和已生成的打印版，最多处理 500 个工作簿。

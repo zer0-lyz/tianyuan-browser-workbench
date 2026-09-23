@@ -19,13 +19,16 @@ const DEFAULT_CONFIG = {
   generateMap: true,
   maxPages: "200",
   outputDirectory: "",
+  historyDirectory: "",
+  historyPath: "",
+  historyRefresh: true,
 };
 
 function elementMap(documentRef) {
   const ids = [
     "openLandPublicity", "backFromLandPublicity", "landPublicityDistrict", "landPublicityCounty", "landPublicityLocation",
     "landPublicityStartDate", "landPublicityEndDate",
-    "landPublicityGenerateMap", "landPublicityOutputDirectory", "chooseLandPublicityOutput", "clearLandPublicityFilters", "runLandPublicity",
+    "landPublicityGenerateMap", "landPublicityOutputDirectory", "chooseLandPublicityOutput", "landPublicityHistoryDirectory", "chooseLandPublicityHistoryDirectory", "loadLandPublicityHistoryCatalog", "landPublicityHistorySelect", "loadLandPublicityHistory", "landPublicityRefreshHistory", "landPublicityHistoryStatus", "clearLandPublicityFilters", "runLandPublicity", "runLandPublicityHistory",
     "reloadLandPublicityRegions", "landPublicityRegionStatus",
     "openLandPublicityHtml", "openLandPublicityExcel", "openLandPublicityMap", "landPublicityProgressText",
     "landPublicityProgressPercent", "landPublicityProgressBar", "landPublicityFetchedCount", "landPublicityFilteredCount",
@@ -81,6 +84,9 @@ function normalizeConfig(value = {}) {
     generateMap: source.generateMap !== false,
     maxPages: "200",
     outputDirectory: String(source.outputDirectory || "").trim(),
+    historyDirectory: String(source.historyDirectory || "").trim(),
+    historyPath: String(source.historyPath || "").trim(),
+    historyRefresh: source.historyRefresh !== false,
   };
 }
 
@@ -126,6 +132,8 @@ export const landPublicityModule = {
     let running = false;
     let regionCatalog = [];
     let regionLoading = null;
+    let historyCatalog = [];
+    let historyCanRefresh = false;
 
     function regionRoots() {
       const province = regionCatalog.find((item) => item.name === "浙江省" || item.code === "330000");
@@ -195,6 +203,9 @@ export const landPublicityModule = {
         generateMap: elements.landPublicityGenerateMap.checked,
         maxPages: "200",
         outputDirectory: elements.landPublicityOutputDirectory.value.trim(),
+        historyDirectory: elements.landPublicityHistoryDirectory.value.trim(),
+        historyPath: elements.landPublicityHistorySelect.value.trim(),
+        historyRefresh: elements.landPublicityRefreshHistory.checked,
       };
       return next;
     }
@@ -209,7 +220,19 @@ export const landPublicityModule = {
       elements.landPublicityEndDate.value = config.endDate || "";
       elements.landPublicityGenerateMap.checked = Boolean(config.generateMap);
       elements.landPublicityOutputDirectory.value = config.outputDirectory || "";
+      elements.landPublicityHistoryDirectory.value = config.historyDirectory || config.outputDirectory || "";
+      elements.landPublicityRefreshHistory.checked = config.historyRefresh !== false;
+      renderHistoryOptions();
+      if (!running) elements.runLandPublicityHistory.disabled = !config.historyPath || !historyCanRefresh;
       elements.landPublicityCounty.disabled = !selectedCityRegion();
+    }
+
+    function renderHistoryOptions() {
+      const select = elements?.landPublicityHistorySelect;
+      if (!select) return;
+      const selected = config.historyPath || "";
+      select.innerHTML = `<option value="">请选择历史抓取清单</option>${historyCatalog.map((item) => `<option value="${escapeHtml(item.path)}">${escapeHtml(item.label || item.name || item.path)}</option>`).join("")}`;
+      select.value = historyCatalog.some((item) => item.path === selected) ? selected : "";
     }
 
     function validateLocal(next) {
@@ -261,12 +284,13 @@ export const landPublicityModule = {
     async function chooseOutputDirectory() {
       try {
         const result = await context.sendNativeMessage({ action: "select_land_publicity_output_directory" }, 130000);
-        const selected = result?.paths?.[0] || "";
+        const selected = result?.outputDirectory || result?.path || result?.paths?.[0] || "";
         if (!result?.ok || !selected) {
           if (!result?.cancelled) setMessage(elements.landPublicityResultMessage, result?.reason || "未选择输出目录", "warn");
           return;
         }
         config.outputDirectory = selected;
+        if (!config.historyDirectory) config.historyDirectory = selected;
         elements.landPublicityOutputDirectory.value = selected;
         await context.storage.save(config);
         const folderMessage = result.directoryName
@@ -278,10 +302,82 @@ export const landPublicityModule = {
       }
     }
 
+    function pathDirectory(value) {
+      const raw = String(value || "");
+      const index = Math.max(raw.lastIndexOf("/"), raw.lastIndexOf("\\"));
+      return index > 0 ? raw.slice(0, index) : raw;
+    }
+
+    async function chooseHistoryDirectory() {
+      try {
+        const result = await context.sendNativeMessage({ action: "select_land_publicity_history_directory" }, 130000);
+        const selected = result?.path || result?.paths?.[0] || "";
+        if (!result?.ok || !selected) {
+          if (!result?.cancelled) setMessage(elements.landPublicityResultMessage, result?.reason || "未选择历史数据目录", "warn");
+          return;
+        }
+        config.historyDirectory = selected;
+        config.historyPath = "";
+        historyCatalog = [];
+        historyCanRefresh = false;
+        renderConfig();
+        await context.storage.save(config);
+        await loadHistoryCatalog();
+      } catch (error) {
+        setMessage(elements.landPublicityResultMessage, `选择历史目录失败：${error?.message || String(error)}`, "error");
+      }
+    }
+
+    async function loadHistoryCatalog() {
+      const directory = elements.landPublicityHistoryDirectory.value.trim() || config.historyDirectory || config.outputDirectory;
+      if (!directory) {
+        setMessage(elements.landPublicityResultMessage, "请先选择历史数据目录", "warn");
+        return;
+      }
+      try {
+        const result = await context.sendNativeMessage({ action: "list_land_publicity_history", directory }, 30000);
+        if (!result?.ok) throw new Error(result?.reason || "LAND_HISTORY_LIST_FAILED");
+        historyCatalog = Array.isArray(result.items) ? result.items : [];
+        config.historyDirectory = directory;
+        historyCanRefresh = Boolean(historyCatalog.find((item) => item.path === config.historyPath)?.canRefresh);
+        renderHistoryOptions();
+        elements.landPublicityHistoryStatus.textContent = historyCatalog.length ? `已找到 ${historyCatalog.length} 份历史数据，可选择后加载。` : "当前目录未找到历史清单或旧结果文件。";
+        elements.landPublicityHistoryStatus.dataset.kind = historyCatalog.length ? "ok" : "warn";
+        await context.storage.save(config);
+      } catch (error) {
+        historyCatalog = [];
+        renderHistoryOptions();
+        elements.landPublicityHistoryStatus.textContent = `历史清单加载失败：${error?.message || String(error)}`;
+        elements.landPublicityHistoryStatus.dataset.kind = "error";
+      }
+    }
+
+    async function loadHistorySelection() {
+      const historyPath = elements.landPublicityHistorySelect.value.trim();
+      if (!historyPath) {
+        setMessage(elements.landPublicityResultMessage, "请先选择历史抓取清单", "warn");
+        return;
+      }
+      try {
+        const result = await context.sendNativeMessage({ action: "load_land_publicity_history", path: historyPath }, 30000);
+        if (!result?.ok) throw new Error(result?.reason || "LAND_HISTORY_LOAD_FAILED");
+        historyCanRefresh = result.canRefresh === true;
+        config = normalizeConfig({ ...config, ...(result.request || {}), outputDirectory: result.outputDirectory || config.outputDirectory, historyDirectory: pathDirectory(historyPath), historyPath, historyRefresh: historyCanRefresh && elements.landPublicityRefreshHistory.checked });
+        renderConfig();
+        setResultButtons(result);
+        renderProgress({ percent: 100, message: `已加载历史数据：${result.recordCount || 0} 条`, fetched: result.fetchedCount || result.recordCount || 0, filtered: result.filteredCount || result.recordCount || 0, written: result.writtenCount || result.recordCount || 0 });
+        setMessage(elements.landPublicityResultMessage, "已加载历史结果；当前操作不会访问网络。需要更新详情时，请在历史数据区勾选并点击“重新抓取历史详情”。", "ok");
+        await context.storage.save(config);
+      } catch (error) {
+        setMessage(elements.landPublicityResultMessage, `历史数据加载失败：${error?.message || String(error)}`, "error");
+      }
+    }
+
     async function clearFilters() {
       if (running) return;
       const outputDirectory = elements.landPublicityOutputDirectory.value.trim() || config.outputDirectory || "";
-      config = normalizeConfig({ outputDirectory });
+      config = normalizeConfig({ outputDirectory, historyDirectory: elements.landPublicityHistoryDirectory.value.trim() || config.historyDirectory });
+      historyCanRefresh = false;
       renderConfig();
       setResultButtons(null);
       renderProgress({ percent: 0, message: "筛选已清空，尚未运行", fetched: 0, filtered: 0, written: 0 });
@@ -293,25 +389,32 @@ export const landPublicityModule = {
       }
     }
 
-    async function run() {
+    async function run(mode = "network") {
       if (running) return;
-      let request;
+      let savedConfig;
       try {
-        request = validateLocal(readConfig());
+        savedConfig = validateLocal(readConfig());
+        if (mode === "history" && !savedConfig.historyPath) throw new Error("请先在历史数据区加载一份历史清单");
+        if (mode === "history" && !savedConfig.historyRefresh) throw new Error("请勾选“重新抓取历史记录详情”后再执行");
       } catch (error) {
         setMessage(elements.landPublicityResultMessage, error?.message || String(error), "error");
         context.setStatus(`土地公示参数无效：${error?.message || String(error)}`, "error");
         return;
       }
-      config = request;
+      const request = mode === "history"
+        ? savedConfig
+        : { ...savedConfig, historyPath: "", historyRefresh: false };
+      config = normalizeConfig(savedConfig);
       renderConfig();
       await context.storage.save(config);
       running = true;
       setResultButtons(null);
       elements.runLandPublicity.disabled = true;
-      renderProgress({ percent: 1, message: "正在准备受控土地公示抓取", fetched: 0, filtered: 0, written: 0 });
-      setMessage(elements.landPublicityResultMessage, "列表 API 参数已校验；正在流式读取阶段进度…", "");
-      context.setStatus("正在抓取浙江土地市场网…", "idle");
+      elements.runLandPublicityHistory.disabled = true;
+      const operationLabel = mode === "history" ? "历史详情重新抓取" : "网络列表抓取";
+      renderProgress({ percent: 1, message: `正在准备${operationLabel}`, fetched: 0, filtered: 0, written: 0 });
+      setMessage(elements.landPublicityResultMessage, mode === "history" ? "已进入历史详情重新抓取；此操作会访问网络，但不会重新读取列表。" : "已进入网络抓取；将按当前筛选条件读取官网列表。", "");
+      context.setStatus(mode === "history" ? "正在重新抓取历史详情…" : "正在抓取浙江土地市场网…", "idle");
       try {
         const result = await context.streamNativeMessage({ action: "run_land_publicity", request }, (progress) => {
           renderProgress(progress);
@@ -326,9 +429,9 @@ export const landPublicityModule = {
         const emptySuggestion = writtenCount === 0
           ? `结果为 0 条。当前筛选条件：${filterConditionSummary(request)}。建议检查官网查询日期、行政区或位置关键词，以及接口是否返回记录。`
           : "";
-        setMessage(elements.landPublicityResultMessage, `已完成：Excel ${writtenCount} 条；实际条件：${filterSummary}。无坐标 ${result.noCoordinateCount || 0} 条。${warningCount ? `有 ${warningCount} 项筛选限制已在结果页说明。` : ""}${emptySuggestion}`, warningCount || emptySuggestion ? "warn" : "ok");
+        setMessage(elements.landPublicityResultMessage, `${mode === "history" ? "历史详情重新抓取完成" : "网络抓取完成"}：Excel ${writtenCount} 条；实际条件：${filterSummary}。无坐标 ${result.noCoordinateCount || 0} 条。${warningCount ? `有 ${warningCount} 项筛选限制已在结果页说明。` : ""}${emptySuggestion}`, warningCount || emptySuggestion ? "warn" : "ok");
         await openResultPath(result.htmlPath, "结果页");
-        context.setStatus("浙江土地市场网抓取完成，Excel/HTML 已回读", "ok");
+        context.setStatus(`${mode === "history" ? "历史详情重新抓取" : "网络抓取"}完成，Excel/HTML 已回读`, "ok");
       } catch (error) {
         renderProgress({ percent: 0, message: `抓取失败：${error?.message || String(error)}` });
         setMessage(elements.landPublicityResultMessage, error?.message || String(error), "error");
@@ -336,6 +439,7 @@ export const landPublicityModule = {
       } finally {
         running = false;
         elements.runLandPublicity.disabled = false;
+        elements.runLandPublicityHistory.disabled = !config.historyPath || !historyCanRefresh;
       }
     }
 
@@ -357,6 +461,9 @@ export const landPublicityModule = {
         context.scope.on(elements.openLandPublicity, "click", () => context.navigate("land-publicity"));
         context.scope.on(elements.backFromLandPublicity, "click", () => context.navigate("home"));
         context.scope.on(elements.chooseLandPublicityOutput, "click", chooseOutputDirectory);
+        context.scope.on(elements.chooseLandPublicityHistoryDirectory, "click", chooseHistoryDirectory);
+        context.scope.on(elements.loadLandPublicityHistoryCatalog, "click", loadHistoryCatalog);
+        context.scope.on(elements.loadLandPublicityHistory, "click", loadHistorySelection);
         context.scope.on(elements.clearLandPublicityFilters, "click", clearFilters);
         context.scope.on(elements.reloadLandPublicityRegions, "click", loadRegionCatalog);
         context.scope.on(elements.landPublicityDistrict, "change", async () => {
@@ -373,11 +480,13 @@ export const landPublicityModule = {
           config.districtExact = Boolean(config.county);
           await context.storage.save({ ...config });
         });
-        context.scope.on(elements.runLandPublicity, "click", run);
+        context.scope.on(elements.runLandPublicity, "click", () => run("network"));
+        context.scope.on(elements.runLandPublicityHistory, "click", () => run("history"));
         context.scope.on(elements.openLandPublicityHtml, "click", () => openResultPath(lastResult?.htmlPath, "结果页"));
         context.scope.on(elements.openLandPublicityExcel, "click", () => openResultPath(lastResult?.excelPath, "Excel"));
         context.scope.on(elements.openLandPublicityMap, "click", () => openResultPath(lastResult?.mapPath, "地图"));
         void loadRegionCatalog();
+        if (config.historyDirectory || config.outputDirectory) void loadHistoryCatalog();
       },
       activate() { renderConfig(); if (!regionCatalog.length) void loadRegionCatalog(); },
       deactivate() {},

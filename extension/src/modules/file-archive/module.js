@@ -263,13 +263,14 @@ export const fileArchiveModule = {
 
     async function chooseOutput() {
       const result = await context.sendNativeMessage({ action: "select_file_archive_output_directory" }, 130000);
-      if (!result?.ok || !result.path) {
+      const selected = result?.outputDirectory || result?.path || result?.paths?.[0] || "";
+      if (!result?.ok || !selected) {
         if (!result?.cancelled) setMessage(result?.reason || "未选择导出目录", "warn");
         return;
       }
-      config.outputDirectory = result.path;
-      elements.fileArchiveOutputPath.value = result.path;
-      setMessage("导出目录已选择，请检查规则后开始监听", "ok");
+      config.outputDirectory = selected;
+      elements.fileArchiveOutputPath.value = selected;
+      setMessage(`已选择并创建归档子文件夹：${result.directoryName || "微信文件归档"}，请检查规则后开始监听`, "ok");
       await context.storage.save(config);
     }
 
