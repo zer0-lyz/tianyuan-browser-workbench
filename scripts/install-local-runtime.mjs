@@ -479,7 +479,7 @@ function findPrintPython() {
       if (!fs.existsSync(candidate)) continue;
       const output = execFileSync(
         candidate,
-        ["-c", "import docx, et_xmlfile, lxml, openpyxl; print(openpyxl.__version__)"],
+        ["-c", "import docx, et_xmlfile, lxml, openpyxl, typing_extensions; print(openpyxl.__version__)"],
         { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
       ).trim();
       if (versionAtLeast(output, [3, 1, 5])) {
@@ -606,7 +606,7 @@ function main() {
   mustExist(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), "connector plugin");
   const printPython = findPrintPython();
   if (!printPython) {
-    throw new Error("PRINT_PYTHON_DEPENDENCIES_NOT_FOUND: install Python with python-docx, lxml, openpyxl>=3.1.5 and et_xmlfile, then rerun.");
+    throw new Error("PRINT_PYTHON_DEPENDENCIES_NOT_FOUND: install Python with python-docx, lxml, openpyxl>=3.1.5, et_xmlfile and typing_extensions, then rerun.");
   }
 
   fs.mkdirSync(runtimeProjectRoot, { recursive: true });

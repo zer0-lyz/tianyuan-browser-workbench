@@ -71,6 +71,20 @@ assert.equal(
 assert.equal(manifest.source, "static-manifest");
 assert.equal(manifest.channel, versionConfig.channel);
 assert.equal(fs.readFileSync(path.join(tempRoot, `tianyuan-workbench-v${version}-macos-arm64.zip`), "utf8"), "mac-full");
+assert.equal(manifest.handoff.windowsCodex.fileName, "WINDOWS_CODEX_HANDOFF.md");
+assert.equal(
+  manifest.handoff.windowsCodex.url,
+  "https://gitee.com/example/tianyuan/raw/main/WINDOWS_CODEX_HANDOFF.md",
+);
+const handoff = fs.readFileSync(path.join(tempRoot, "WINDOWS_CODEX_HANDOFF.md"), "utf8");
+assert.equal(handoff.includes(`Windows Codex 打包发布交接 — v${version}`), true);
+assert.equal(handoff.includes(`构建编号：\`${versionConfig.buildNumber}\``), true);
+assert.equal(handoff.includes(`tianyuan-workbench-v${version}-windows-x64.zip`), true);
+assert.equal(handoff.includes("桌面必须出现“天源工作台-浏览器扩展”入口"), true);
+assert.equal(handoff.includes("测试更新模块"), true);
+assert.equal(handoff.includes("gh release upload"), true);
+assert.equal(handoff.includes("macOS 主线只交付源码和交接要求"), true);
+assert.equal(handoff.includes("完整包目标名"), true);
 
 execFileSync(process.execPath, [
   path.join(repoRoot, "scripts", "generate-update-manifest.mjs"),

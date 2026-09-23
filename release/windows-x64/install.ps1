@@ -64,6 +64,8 @@ $AgentMode = $Agent.IsPresent -or $env:TIANYUAN_AGENT_MODE -eq "1"
 $Warnings = New-Object System.Collections.Generic.List[string]
 $ManualActions = New-Object System.Collections.Generic.List[string]
 $StoppedProcessIds = New-Object System.Collections.Generic.List[int]
+$VisibleExtensionShortcut = ""
+$VisibleExtensionPathNote = ""
 $BrowserExe = $null
 $TycpvProbeFailure = ""
 
@@ -590,7 +592,7 @@ function Find-CompatiblePython {
       continue
     }
 
-    $OpenpyxlOutput = (& $Candidate -c "import docx, et_xmlfile, lxml, openpyxl; v=tuple(int(x) for x in openpyxl.__version__.split('.')[:3]); print(openpyxl.__version__); raise SystemExit(0 if v >= (3, 1, 5) else 1)" 2>$null)
+    $OpenpyxlOutput = (& $Candidate -c "import docx, et_xmlfile, lxml, openpyxl, typing_extensions; v=tuple(int(x) for x in openpyxl.__version__.split('.')[:3]); print(openpyxl.__version__); raise SystemExit(0 if v >= (3, 1, 5) else 1)" 2>$null)
     $OpenpyxlVersion = @($OpenpyxlOutput | Select-Object -First 1)[0]
     $HasPrintDependencies = $LASTEXITCODE -eq 0
 
@@ -634,7 +636,7 @@ function Install-PrintDependencies([string]$Candidate) {
   if ($LASTEXITCODE -ne 0) {
     return $false
   }
-  & $Candidate -c "import docx, et_xmlfile, lxml, openpyxl; raise SystemExit(0 if tuple(int(x) for x in openpyxl.__version__.split('.')[:3]) >= (3, 1, 5) else 1)" *> $null
+  & $Candidate -c "import docx, et_xmlfile, lxml, openpyxl, typing_extensions; raise SystemExit(0 if tuple(int(x) for x in openpyxl.__version__.split('.')[:3]) >= (3, 1, 5) else 1)" *> $null
   return $LASTEXITCODE -eq 0
 }
 
@@ -804,7 +806,7 @@ try {
     Write-Host "已启用工作台便携 Python。"
   }
 
-  & $PythonExe -c "import sys, docx, lxml, openpyxl, et_xmlfile; print('Python', sys.version.split()[0], '| openpyxl', openpyxl.__version__)"
+  & $PythonExe -c "import sys, docx, lxml, openpyxl, et_xmlfile, typing_extensions; print('Python', sys.version.split()[0], '| openpyxl', openpyxl.__version__)"
   if ($LASTEXITCODE -ne 0) {
     throw "最终 Python 环境或表格设置依赖无法运行。"
   }
@@ -874,10 +876,32 @@ try {
   ) {
     throw "INSTALLED_VERSION_METADATA_MISMATCH"
   }
+  try {
+    $VisibleSupportRoot = Join-Path ([Environment]::GetFolderPath('MyDocuments')) "天源工作台"
+    New-Item -ItemType Directory -Path $VisibleSupportRoot -Force | Out-Null
+    $VisibleExtensionPathNote = Join-Path $VisibleSupportRoot "浏览器扩展路径.txt"
+    [IO.File]::WriteAllText(
+      $VisibleExtensionPathNote,
+      ($ExtensionDir + [Environment]::NewLine),
+      [Text.UTF8Encoding]::new($false)
+    )
+    $VisibleExtensionShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) "天源工作台-浏览器扩展.lnk"
+    $Shell = New-Object -ComObject WScript.Shell
+    $Shortcut = $Shell.CreateShortcut($VisibleExtensionShortcut)
+    $Shortcut.TargetPath = $ExtensionDir
+    $Shortcut.Save()
+  }
+  catch {
+    $Warnings.Add("未能创建浏览器扩展可见入口：$(Protect-Message $_.Exception.Message)")
+  }
 
   Write-Step "7/7 执行环境检查"
   $ExtensionContract = $InstallResult.runtimeCompatibility
   $OpenpyxlVersion = (& $PythonExe -c "import openpyxl; print(openpyxl.__version__)").Trim()
+  $PythonDependencyStatus = (& $PythonExe -c "import openpyxl, et_xmlfile, lxml, docx, typing_extensions; print('ok')").Trim()
+  if ($PythonDependencyStatus -ne "ok") {
+    throw "PYTHON_RUNTIME_DEPENDENCIES_INCOMPLETE"
+  }
   $SelfTestJson = $InstallResult.selfTest | ConvertTo-Json -Depth 8 -Compress
   $ConnectorJson = $InstallResult.connector | ConvertTo-Json -Depth 8 -Compress
 
@@ -896,7 +920,7 @@ try {
   $ChromeNativeMessagingOk = [bool]((Get-ItemProperty -Path $ChromeRegistryPath -Name "(default)" -ErrorAction SilentlyContinue).'(default)' -eq $ManifestPath)
   $EdgeNativeMessagingOk = [bool]((Get-ItemProperty -Path $EdgeRegistryPath -Name "(default)" -ErrorAction SilentlyContinue).'(default)' -eq $ManifestPath)
   if ($BrowserExe) {
-    $ManualActions.Add("在 Chrome 或 Edge 扩展管理页加载已解压扩展：$ExtensionDir")
+    $ManualActions.Add("通过桌面“天源工作台-浏览器扩展”入口，在 Chrome 或 Edge 扩展管理页加载：$ExtensionDir")
   }
   $ManualActions.Add("由用户本人在工作台面板输入 MCP token（不发送给 Agent）")
   $ManualActions.Add("由用户本人完成天源 CLI 授权（如面板显示需要授权）")
@@ -921,6 +945,8 @@ try {
       codexConnectorCache = [string]$InstallResult.codexConnectorCachePath
       python = [string]$PythonExe
       cli = [string]$TycpvExe
+      extensionShortcut = $VisibleExtensionShortcut
+      extensionPathNote = $VisibleExtensionPathNote
     }
     components = [ordered]@{
       extension = if (Test-Path -LiteralPath $ExtensionDir) { "ok" } else { "failed" }
@@ -930,6 +956,7 @@ try {
       connector = if ($ConnectorOk) { "ok" } else { "failed" }
       python = "ok"
       openpyxl = "ok"
+      pythonDependencies = "ok"
       cli = if ($TycpvExe) { "ok" } else { "unavailable" }
     }
     connectorHealth = [ordered]@{
@@ -952,6 +979,8 @@ try {
     "构建编号：$PackageBuildNumber"
     "运行指纹：$($ExtensionContract.runtimeBuildId)"
     "扩展目录：$ExtensionDir"
+    "扩展桌面入口：$VisibleExtensionShortcut"
+    "扩展路径说明：$VisibleExtensionPathNote"
     "扩展 ID：$ExtensionId"
     "Native Host：$NativeHostLauncher"
     "Node 运行时：$ManagedNodeExe"
@@ -998,9 +1027,7 @@ try {
   if (-not $AgentMode) {
     Set-Clipboard -Value $ExtensionDir
     Start-Process explorer.exe -ArgumentList ('"' + $ExtensionDir + '"')
-    $lnk = Join-Path ([Environment]::GetFolderPath('Desktop')) "天源工作台-浏览器扩展.lnk"
-    $ws = New-Object -ComObject WScript.Shell; $sc = $ws.CreateShortcut($lnk); $sc.TargetPath = $ExtensionDir; $sc.Save()
-    Write-Host "扩展目录已复制到剪贴板，并在桌面创建快捷方式：$lnk"
+    Write-Host "扩展目录已复制到剪贴板；桌面入口：$VisibleExtensionShortcut"
   }
   if (-not $UpdateMode -and -not $AgentMode -and $BrowserExe) {
     Start-Process "explorer.exe" -ArgumentList "`"$ExtensionDir`""
