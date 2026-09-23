@@ -24,8 +24,9 @@
    - `tianyuan-workbench-v*-windows-x64.zip`
    - 对应的 `.zip.sha256`
    - `update-manifest.json`
-4. 下载和解压暂存目录使用：
-   `%LOCALAPPDATA%\TianyuanWorkbenchInstaller`
+4. 下载和解压暂存目录必须使用短路径：
+   `%TEMP%\TW-install`
+   每次安装前新建空目录，不要叠加旧版本文件。
 5. 使用 `.sha256` 或 `update-manifest.json` 校验 ZIP 的 SHA-256。校验不一致时立即停止，不得绕过。
 6. 必须完整解压 ZIP，不能在压缩包预览窗口中直接运行。
 
@@ -42,11 +43,12 @@
    powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\install.ps1 -Agent
    ```
    轻量更新包要求本机已有完整工作台运行环境；如果缺少 Node、Python/openpyxl 或 CLI，应改用完整安装包。
-4. 等待安装程序全部步骤完成，不要手工重复安装 Node.js、Python、Native Helper、Connector 或 Codex 插件缓存。
-5. 安装失败时读取机器可读结果和文本报告：
+4. 等待安装程序全部步骤完成。成功标准不是“扩展文件已复制”，而是同步并验证完整运行环境：Node.js、Python 及全部业务依赖、Native Helper、Native Messaging Host、Connector Bridge、Connector 插件、Codex 插件缓存和天源 CLI。
+5. Agent 不得跳过缺失依赖；如果轻量包检测到任何运行环境不完整，必须停止轻量安装并改用同版本完整包。
+6. 安装失败时读取机器可读结果和文本报告：
    `%LOCALAPPDATA%\TianyuanWorkbench\安装检查结果.json`
    `%LOCALAPPDATA%\TianyuanWorkbench\安装检查结果.txt`
-6. 不要通过手工复制单个文件、修改来源不明的注册表项目或关闭安全校验来拼接运行环境。
+7. 不要通过手工复制单个文件、修改来源不明的注册表项目或关闭安全校验来拼接运行环境。
 
 ### 4. 验证安装结果
 
@@ -62,7 +64,9 @@
   `%USERPROFILE%\.codex\plugins\cache\personal\tianyuan-browser-connector`
 - Chrome 和 Edge Native Messaging Host 已注册。
 - Connector Bridge 可以启动并返回健康状态。
-- 安装报告没有失败步骤。
+- 实际运行 Python 可以导入 `openpyxl`、`et_xmlfile`、`lxml`、`python-docx` 和 `typing_extensions`。
+- 实际运行 Node.js、Native Helper 和天源 CLI 均可执行只读自检。
+- 安装报告没有失败步骤，JSON 中 `pythonDependencies` 为 `ok`。
 - JSON 中组件状态与 `manualActions` 分开判断；MCP token、CLI 授权和浏览器扩展加载不属于安装失败。
 
 ### 5. 加载浏览器扩展
@@ -70,11 +74,11 @@
 1. 完全退出并重新打开 Chrome 或 Edge。
 2. 打开 `chrome://extensions/` 或 `edge://extensions/`。
 3. 开启开发者模式。
-4. 加载已解压扩展目录：
-   `%LOCALAPPDATA%\TianyuanWorkbench\projects\天源评估系统\extension`
-5. 确认扩展名称为“天源浏览器工作台”，扩展 ID 为：
+4. 优先双击桌面“天源工作台-浏览器扩展”入口定位目录；备用路径记录在“文档\天源工作台\浏览器扩展路径.txt”。
+5. 加载该入口打开的已解压扩展目录，不要求用户手工进入隐藏目录。
+6. 确认扩展名称为“天源浏览器工作台”，扩展 ID 为：
    `lkflndcnklpeaejohaacoaolnmhgigoc`
-6. 如果浏览器安全策略不允许 Agent 点击“加载已解压的扩展程序”，请打开正确的扩展管理页和目录，只提示用户完成这一次点击，不要让用户重新配置其他组件。
+7. 如果浏览器安全策略不允许 Agent 点击“加载已解压的扩展程序”，请打开正确的扩展管理页和目录，只提示用户完成这一次点击，不要让用户重新配置其他组件。
 
 ### 6. 连接配置
 
@@ -112,7 +116,8 @@
 - 最新版本号；
 - 安装包 SHA-256 校验结果；
 - 实际安装模式和耗时；
-- 扩展加载路径；
+- 扩展加载路径、桌面入口和路径说明文件；
+- Node.js、Python 全部依赖、Native Host、Native Messaging、Connector、Codex 缓存和 CLI 的逐项结果；
 - Native Host 注册结果；
 - Connector 安装和运行状态；
 - Helper、MCP、CLI 状态；

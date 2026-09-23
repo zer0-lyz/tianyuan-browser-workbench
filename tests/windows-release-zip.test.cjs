@@ -61,6 +61,20 @@ assert.equal(
   buildScript.includes('/usr/bin/ditto "$ROOT_DIR/native-helper" "$STAGE/native-helper"'),
   true,
 );
+assert.equal(
+  buildScript.includes('STAGE="$BUILD_ROOT/TianyuanWorkbench"'),
+  true,
+  "Windows package root must stay short enough for deep Python dependency paths",
+);
+const liteBuildScript = fs.readFileSync(
+  path.join(repoRoot, "release", "build_windows_x64_lite_release.sh"),
+  "utf8",
+);
+assert.equal(
+  liteBuildScript.includes('STAGE="$BUILD_ROOT/TianyuanWorkbench"'),
+  true,
+  "Windows lite package root must use the same stable short name",
+);
 
 fs.rmSync(tempRoot, { recursive: true, force: true });
 console.log("Windows release ZIP tests passed.");
