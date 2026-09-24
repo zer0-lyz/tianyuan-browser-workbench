@@ -5,7 +5,7 @@ import path from "node:path";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 
-import { alibabaAuctionModule, alibabaPageReady, directCandidateInScope, directMergeListingEvidence, directPageBeforeRequestedRange, directParseDetail, isAlibabaVerificationUrl, normalizeConfig, readAlibabaPageWithManualVerification } from "../extension/src/modules/alibaba-auction/module.js";
+import { alibabaAuctionModule, alibabaPageReady, directCandidateInScope, directMergeListingEvidence, directPageBeforeRequestedRange, directParseDetail, executeCurrentPageMain, executeCurrentTab, isAlibabaVerificationUrl, normalizeConfig, readAlibabaPageWithManualVerification } from "../extension/src/modules/alibaba-auction/module.js";
 import {
   browserPageReady,
   candidateInScope,
@@ -203,6 +203,29 @@ assert.equal(alibabaPageReady({ ...noTitleDetail, detailContentReady: false }, n
 assert.equal(browserPageReady({ ...noTitleDetail, detailContentReady: false }, noTitleDetail.url), false);
 assert.equal(alibabaPageReady({ ...noTitleDetail, detailContentReady: true }, noTitleDetail.url), true);
 assert.equal(browserPageReady({ ...noTitleDetail, detailContentReady: true }, noTitleDetail.url), true);
+
+for (const execute of [executeCurrentTab, executeCurrentPageMain]) {
+  await assert.rejects(
+    execute({ scripting: { executeScript: async () => [{}] } }, 7, () => ({})),
+    (error) => error?.code === "ALIBABA_SCRIPT_EXECUTION_FAILED",
+  );
+  await assert.rejects(
+    execute({ scripting: { executeScript: async () => { throw new Error("injected failure"); } } }, 7, () => ({})),
+    (error) => error?.code === "ALIBABA_SCRIPT_EXECUTION_FAILED",
+  );
+}
+
+for (const url of ["https://login.taobao.com/member/login.jhtml", "https://sec.taobao.com/verify"]) {
+  let executed = false;
+  const result = await import("../extension/src/modules/alibaba-auction/module.js").then(({ synchronizeAlibabaAuctionStatusOnTab }) => synchronizeAlibabaAuctionStatusOnTab({
+    tabs: { get: async (id) => ({ id, url }) },
+    scripting: { executeScript: async () => { executed = true; return [{ result: {} }]; } },
+  }, { id: 9, url }, "finished").catch((error) => error));
+  assert.equal(executed, false);
+  assert.equal(result.code, url.includes("login") ? "ALIBABA_LOGIN_REQUIRED" : "ALIBABA_VERIFICATION_REQUIRED");
+  assert.match(result.message, /完成.*(登录|验证).*点击重试/);
+}
+
 const cardWithUnreliableState = { text: "距结束 00:12:30 2026/06/30 至 2026/07/02" };
 const dateLockedRequest = normalizeRequest({ status: "finished", propertyType: "residential", startDate: "2026-06-01", endDate: "2026-06-30" });
 assert.equal(directCandidateInScope(cardWithUnreliableState, dateLockedRequest), true);
@@ -265,6 +288,7 @@ const replacementChrome = {
       return { id, url: "https://sec.taobao.com/verify" };
     },
     query: async () => [{ id: 2, url: "https://sec.taobao.com/verify" }],
+    update: async (id, changes) => ({ id, ...changes }),
   },
   scripting: {
     executeScript: async ({ target }) => [{ result: replacementValues.shift(), target }],

@@ -47,7 +47,9 @@ test("alibaba auction module is wired for deterministic current-tab scraping", (
   assert.match(moduleSource, /world: "MAIN"/);
   assert.match(moduleSource, /tabs\.create\(\{ url: "https:\/\/sf\.taobao\.com\//);
   assert.match(helperSource, /downloadAttachmentWithBrowser/);
-  assert.match(helperSource, /ALIBABA_BROWSER_TARGET_MISMATCH/);
+  assert.match(helperSource, /ALIBABA_TARGET_MISMATCH/);
+  assert.match(helperSource, /ALIBABA_SCRIPT_EXECUTION_FAILED/);
+  assert.match(helperSource, /safeBrowserPageSummary/);
   assert.match(helperSource, /browserTargetArgs\(page\.target\)/);
   assert.match(helperSource, /context\.target/);
   assert.match(helperSource, /enrichDetailFromAttachments/);
@@ -78,9 +80,12 @@ test("alibaba auction module is wired for deterministic current-tab scraping", (
   assert.match(template, /id="stopAlibabaAuction"/);
   assert.match(template, /id="alibabaAuctionParameterState"/);
   assert.match(template, /确认并应用参数/);
-  assert.match(template, /确认并应用参数[\s\S]*打开并登录[\s\S]*开始抓取[\s\S]*恢复默认/);
+  assert.match(template, /确认并应用参数/);
+  assert.match(template, /打开并登录/);
+  assert.match(template, /开始(?:网络)?抓取/);
+  assert.match(template, /恢复默认/);
   assert.match(template, /id="openAlibabaAuctionSource"[^>]*>打开并登录</);
-  assert.match(template, /id="runAlibabaAuction"[^>]*>开始抓取</);
+  assert.match(template, /id="runAlibabaAuction"[^>]*>开始网络抓取</);
   assert.doesNotMatch(template, /当前页打开并登录|在当前页开始抓取/);
   assert.doesNotMatch(template, /保存参数/);
   assert.match(moduleSource, /parameterSnapshot/);
@@ -139,6 +144,22 @@ test("alibaba auction module is wired for deterministic current-tab scraping", (
   assert.doesNotMatch(template, /<table|alibabaAuctionResultBody/);
   assert.doesNotMatch(helper.LIST_EXTRACT_SCRIPT, /fetch\s*\(/);
   assert.doesNotMatch(helper.DETAIL_EXTRACT_SCRIPT, /cookie|authorization|password|token/i);
+});
+
+test("Alibaba browser failure summaries keep only safe target metadata", () => {
+  const summary = helper.safeBrowserPageSummary({
+    url: "https://sec.taobao.com/verify?token=secret-value",
+    target: "tab-17",
+  }, "", "list");
+  assert.deepEqual(summary, {
+    hostname: "sec.taobao.com",
+    pathname: "/verify",
+    phase: "list",
+    target: "tab-17",
+    loginPage: false,
+    verificationPage: true,
+  });
+  assert.doesNotMatch(JSON.stringify(summary), /secret-value|token/i);
 });
 
 function manifestSource(readPath) {
@@ -312,8 +333,8 @@ class AlibabaFixtureOption extends AlibabaFixtureElement {
 }
 
 class AlibabaFixtureSelect extends AlibabaFixtureElement {
-  constructor(options) {
-    super("select", { id: "J_AuctionStatusSort", className: "pai-select", display: "none" });
+  constructor(options, id = "J_AuctionStatusSort") {
+    super("select", { id, className: "pai-select", display: "none" });
     this.options = options;
   }
 
@@ -344,7 +365,7 @@ class AlibabaFixtureEvent {
   }
 }
 
-function createAlibabaStatusFixture({ updateOnClick = true, placeholderOnAll = true, mountDelayMs = 0 } = {}) {
+function createAlibabaStatusFixture({ updateOnClick = true, placeholderOnAll = true, mountDelayMs = 0, semanticOnly = false } = {}) {
   const documentRef = new AlibabaFixtureElement("document");
   documentRef.body = documentRef;
   const locationRef = {
@@ -372,10 +393,10 @@ function createAlibabaStatusFixture({ updateOnClick = true, placeholderOnAll = t
     for (const child of element.children) linkWindow(child);
   };
   const trigger = new AlibabaFixtureElement("div", {
-    id: "ks-component875",
+    id: semanticOnly ? "" : "ks-component875",
     className: "bf-select bf-menu-button bf-button",
-    role: "button",
-    attributes: { tabindex: "0", "aria-expanded": "false", "aria-haspopup": "ks-component945" },
+    role: semanticOnly ? "combobox" : "button",
+    attributes: { tabindex: "0", "aria-expanded": "false", "aria-haspopup": "ks-component945", ...(semanticOnly ? { "aria-label": "拍卖状态" } : {}) },
   });
   const content = new AlibabaFixtureElement("div", {
     id: "ks-content-ks-component875",
@@ -395,7 +416,7 @@ function createAlibabaStatusFixture({ updateOnClick = true, placeholderOnAll = t
     ["中止", "中止"],
     ["撤回", "撤回"],
   ];
-  const select = new AlibabaFixtureSelect(optionLabels.map(([label, value]) => new AlibabaFixtureOption(label, value)));
+  const select = new AlibabaFixtureSelect(optionLabels.map(([label, value]) => new AlibabaFixtureOption(label, value)), semanticOnly ? "" : "J_AuctionStatusSort");
   select.options[0].selected = true;
   const menuItems = optionLabels.map(([label]) => new AlibabaFixtureElement("div", {
     id: "menu-" + label,
@@ -527,6 +548,26 @@ test("Alibaba status sync waits for a delayed real control mount", async () => {
     assert.equal(result.changed, true);
     assert.deepEqual(result.readback, { triggerLabel: "已结束", selectLabel: "已结束" });
     assert.equal(fixture.select.value, "已结束");
+  } finally {
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+});
+
+test("Alibaba status sync finds a semantic combobox without fixed IDs", async () => {
+  const fixture = createAlibabaStatusFixture({ semanticOnly: true });
+  const previousDocument = globalThis.document;
+  const previousWindow = globalThis.window;
+  try {
+    globalThis.document = fixture.document;
+    globalThis.window = fixture.window;
+    const { synchronizeAlibabaAuctionStatus } = await import(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js"));
+    const result = await synchronizeAlibabaAuctionStatus("finished");
+    assert.equal(result.ok, true);
+    assert.equal(result.label, "已结束");
+    assert.deepEqual(result.readback, { triggerLabel: "已结束", selectLabel: "已结束" });
   } finally {
     if (previousDocument === undefined) delete globalThis.document;
     else globalThis.document = previousDocument;
@@ -684,9 +725,9 @@ test("source category and request validation stay deterministic", async () => {
   assert.equal(Object.hasOwn(normalized, "maxPages"), false);
   assert.equal(Object.hasOwn(normalized, "locationCode"), false);
   assert.equal(helper.normalizeRequest({ status: "all" }).status, "all");
-  assert.equal(directCandidateInScope({ text: "距开始 3 天" }, normalizeConfig({ status: "finished" })), false);
+  assert.equal(directCandidateInScope({ text: "距开始 3 天" }, normalizeConfig({ status: "finished" })), true);
   assert.equal(directCandidateInScope({ text: "成交 2026-09-03" }, normalizeConfig({ status: "finished", startDate: "2026-09-01", endDate: "2026-09-05" })), true);
-  assert.equal(directPageBeforeRequestedRange([{ text: "成交 2026-08-31" }], normalizeConfig({ status: "finished", startDate: "2026-09-01" })), true);
+  assert.equal(directPageBeforeRequestedRange([{ text: "成交 2026-08-31" }], normalizeConfig({ status: "finished", startDate: "2026-09-01" })), false);
   assert.equal(directExtractBuildingAreaFromText("房屋建筑面积为49.04平方米"), 49.04);
   assert.deepEqual(directExtractFloorFieldsFromText("该建筑总层数为7层\n所在层为5层"), { floor: "5", totalFloors: "7层" });
 });
