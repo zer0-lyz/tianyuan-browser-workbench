@@ -1280,8 +1280,21 @@ async function navigateCurrentTab(chromeRef, tab, url) {
 }
 
 async function executeCurrentTab(chromeRef, tabId, func, args = []) {
-  const output = await chromeRef.scripting.executeScript({ target: { tabId }, func, args });
-  return output?.[0]?.result || {};
+  let output;
+  try {
+    output = await chromeRef.scripting.executeScript({ target: { tabId }, func, args });
+  } catch (error) {
+    if (error?.code === "ALIBABA_SCRIPT_EXECUTION_FAILED") throw error;
+    const failure = new Error(`ALIBABA_SCRIPT_EXECUTION_FAILED: ${String(error?.message || error).slice(0, 240)}`);
+    failure.code = "ALIBABA_SCRIPT_EXECUTION_FAILED";
+    throw failure;
+  }
+  if (!Array.isArray(output) || !output.length || output[0]?.result === undefined || output[0]?.result === null) {
+    const failure = new Error("ALIBABA_SCRIPT_EXECUTION_FAILED: executeScript 未返回页面结果。");
+    failure.code = "ALIBABA_SCRIPT_EXECUTION_FAILED";
+    throw failure;
+  }
+  return output[0].result;
 }
 
 async function fetchAlibabaAttachmentBuffers(attachments) {
@@ -1329,13 +1342,26 @@ async function fetchAlibabaAttachmentBuffers(attachments) {
 }
 
 async function executeCurrentPageMain(chromeRef, tabId, func, args = []) {
-  const output = await chromeRef.scripting.executeScript({
-    target: { tabId },
-    world: "MAIN",
-    func,
-    args,
-  });
-  return output?.[0]?.result || [];
+  let output;
+  try {
+    output = await chromeRef.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      func,
+      args,
+    });
+  } catch (error) {
+    if (error?.code === "ALIBABA_SCRIPT_EXECUTION_FAILED") throw error;
+    const failure = new Error(`ALIBABA_SCRIPT_EXECUTION_FAILED: ${String(error?.message || error).slice(0, 240)}`);
+    failure.code = "ALIBABA_SCRIPT_EXECUTION_FAILED";
+    throw failure;
+  }
+  if (!Array.isArray(output) || !output.length || output[0]?.result === undefined || output[0]?.result === null) {
+    const failure = new Error("ALIBABA_SCRIPT_EXECUTION_FAILED: executeScript 未返回页面结果。");
+    failure.code = "ALIBABA_SCRIPT_EXECUTION_FAILED";
+    throw failure;
+  }
+  return output[0].result;
 }
 
 async function fetchAlibabaAttachmentBuffersFromBrowser(chromeRef, attachments) {
@@ -1365,6 +1391,12 @@ async function synchronizeAlibabaAuctionStatus(requestedStatus) {
   const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
   const compact = (value) => clean(value).replace(/\s+/g, "");
   const isTargetLabel = (value) => targetLabels.some((label) => compact(value) === compact(label));
+  const pageText = () => clean(document.body?.innerText || document.body?.textContent || "");
+  const pageHref = () => String(window.location?.href || "");
+  const loginPage = () => /login\.taobao|\/login(?:[/?]|$)|登录淘宝|请登录|会员登录|扫码登录/i.test(`${pageHref()} ${pageText()}`);
+  const verificationPage = () => /(?:^|[./_-])(captcha|verify|validate|punish|security|error)(?:[./?_-]|$)|验证码|滑块|安全验证|访问验证|人机验证|请完成.{0,8}验证|拖动.{0,8}(?:滑块|拼图)/i.test(`${pageHref()} ${pageText()}`);
+  if (loginPage()) return { ok: false, changed: false, errorCode: "ALIBABA_LOGIN_REQUIRED", reason: "请在当前浏览器标签页完成阿里拍卖登录，完成后点击重试。" };
+  if (verificationPage()) return { ok: false, changed: false, errorCode: "ALIBABA_VERIFICATION_REQUIRED", reason: "请在当前浏览器标签页完成阿里拍卖验证，完成后点击重试。" };
   const expectedAuctionStartSegment = desired === "finished" ? "0" : "-1";
   const isVisible = (element) => {
     if (!element || element.closest?.('[aria-hidden="true"]')) return false;
@@ -1397,13 +1429,33 @@ async function synchronizeAlibabaAuctionStatus(requestedStatus) {
     }
     return [...document.querySelectorAll('[role="menu"]')].find((menu) => isVisible(menu)) || null;
   };
+  const semanticText = (element) => clean([
+    element?.getAttribute?.("aria-label"),
+    element?.getAttribute?.("title"),
+    element?.innerText,
+    element?.textContent,
+  ].filter(Boolean).join(" "));
+  const statusSemantic = [...document.querySelectorAll('[aria-label], [title], label, dt, th, span, div')]
+    .find((element) => isVisible(element) && /拍卖状态/.test(compact(semanticText(element))) && semanticText(element).length <= 40);
+  const statusRow = statusSemantic?.closest?.("li, form, fieldset, .form-item, .filter-item, .search-item")
+    || statusSemantic?.parentElement
+    || null;
+  const findSelect = () => document.querySelector("#J_AuctionStatusSort")
+    || [...(statusRow?.querySelectorAll?.("select") || [])][0]
+    || [...document.querySelectorAll("select")].find((element) => /拍卖状态/.test(compact(semanticText(element.parentElement || element))));
+  const triggerSelector = '[role="button"][aria-haspopup], [role="combobox"], button[aria-haspopup], [aria-haspopup]';
+  const findTriggerIn = (root) => [...(root?.querySelectorAll?.(triggerSelector) || [])]
+    .find((element) => isVisible(element));
   const findStatusControls = () => {
-    const select = document.querySelector("#J_AuctionStatusSort");
-    const row = select?.closest?.("li") || select?.parentElement || null;
-    const rowTrigger = [...(row?.querySelectorAll?.('[role="button"][aria-haspopup], [role="combobox"]') || [])]
-      .find((element) => isVisible(element)) || null;
-    const fallbackTrigger = [...document.querySelectorAll('[role="button"][aria-haspopup], [role="combobox"]')]
-      .find((element) => isVisible(element) && (compact(triggerLabel(element)) === "拍卖状态" || isTargetLabel(triggerLabel(element)))) || null;
+    const select = findSelect();
+    const row = select?.closest?.("li") || statusRow || select?.parentElement || null;
+    const rowTrigger = findTriggerIn(row);
+    const fallbackTrigger = [...document.querySelectorAll(triggerSelector)]
+      .find((element) => isVisible(element) && (
+        /拍卖状态/.test(compact(semanticText(element)))
+        || compact(triggerLabel(element)) === "拍卖状态"
+        || isTargetLabel(triggerLabel(element))
+      )) || null;
     const trigger = rowTrigger || fallbackTrigger;
     const menu = findMenu(trigger);
     const nativeOptions = [...(select?.options || [])];
@@ -1413,7 +1465,7 @@ async function synchronizeAlibabaAuctionStatus(requestedStatus) {
   const waitForStatusControls = async () => {
     const startedAt = Date.now();
     let controls = findStatusControls();
-    while ((!controls.select || !controls.trigger || !controls.nativeOption)
+    while ((!controls.select && !controls.trigger) || (controls.select && !controls.nativeOption)
       && Date.now() - startedAt < CONTROL_WAIT_TIMEOUT_MS) {
       await new Promise((resolve) => window.setTimeout(resolve, CONTROL_POLL_INTERVAL_MS));
       controls = findStatusControls();
@@ -1439,9 +1491,10 @@ async function synchronizeAlibabaAuctionStatus(requestedStatus) {
     // visible and native labels to be “已结束”.
     const triggerMatches = !current.hasTrigger
       || isTargetLabel(current.triggerLabel)
-      || (desired === "all" && compact(current.triggerLabel) === "拍卖状态" && isTargetLabel(current.selectLabel));
+      || (desired === "all" && compact(current.triggerLabel) === "拍卖状态"
+        && (!current.hasSelect || isTargetLabel(current.selectLabel)));
     const selectMatches = !current.hasSelect || isTargetLabel(current.selectLabel);
-    return triggerMatches && selectMatches;
+    return (current.hasTrigger || current.hasSelect) && triggerMatches && selectMatches;
   };
   const ensureStatusUrl = () => {
     try {
@@ -1490,10 +1543,10 @@ async function synchronizeAlibabaAuctionStatus(requestedStatus) {
     })(),
   });
   const controls = await waitForStatusControls();
-  if (!controls.select || !controls.trigger) {
+  if (!controls.select && !controls.trigger) {
     return { ok: false, changed: false, errorCode: "ALIBABA_STATUS_CONTROL_NOT_FOUND", reason: "未找到阿里页面的“拍卖状态”控件。请确认列表页已加载完成后重试。" };
   }
-  if (!controls.nativeOption) {
+  if (controls.select && !controls.nativeOption) {
     return { ok: false, changed: false, errorCode: "ALIBABA_STATUS_OPTION_NOT_FOUND", reason: `阿里页面没有找到“${targetLabels[0]}”选项。` };
   }
   const before = state(controls);
@@ -1549,7 +1602,7 @@ async function synchronizeAlibabaAuctionStatus(requestedStatus) {
     while (Date.now() - startedAt < timeoutMs) {
       const currentControls = findStatusControls();
       const currentMenu = currentControls.menu || findMenu(currentControls.trigger || trigger) || menu;
-      const option = [...(currentMenu?.querySelectorAll?.('[role="menuitem"]') || [])]
+      const option = [...(currentMenu?.querySelectorAll?.('[role="menuitem"], [role="option"], li, a, button') || [])]
         .find((item) => targetLabels.some((label) => compact(textOf(item)) === compact(label)));
       if (option && isVisible(currentMenu) && isVisible(option)) return option;
       await new Promise((resolve) => window.setTimeout(resolve, 80));
@@ -1610,6 +1663,7 @@ async function settleAlibabaAuctionStatus(chromeRef, tab, requestedStatus, statu
       error.code = readback?.errorCode || "ALIBABA_STATUS_READBACK_FAILED";
       lastError = error;
     } catch (error) {
+      if (error?.code === "ALIBABA_SCRIPT_EXECUTION_FAILED") throw error;
       lastError = error;
     }
   }
@@ -1623,17 +1677,48 @@ async function synchronizeAlibabaAuctionStatusOnTab(chromeRef, tab, requestedSta
   // need to press “当前页打开并登录” a second time.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const statusSync = await executeCurrentTab(chromeRef, tab.id, synchronizeAlibabaAuctionStatus, [requestedStatus]);
+      let currentTab;
+      try {
+        currentTab = await chromeRef.tabs.get(tab.id);
+      } catch {
+        const failure = new Error("ALIBABA_TAB_REPLACED");
+        failure.code = "ALIBABA_TAB_REPLACED";
+        throw failure;
+      }
+      const currentUrl = String(currentTab?.url || tab?.url || "");
+      if (/login\.taobao|\/login(?:[/?]|$)/i.test(currentUrl)) {
+        const failure = new Error("请在当前浏览器标签页完成阿里拍卖登录，完成后点击重试。");
+        failure.code = "ALIBABA_LOGIN_REQUIRED";
+        throw failure;
+      }
+      if (isAlibabaVerificationUrl(currentUrl)) {
+        const failure = new Error("请在当前浏览器标签页完成阿里拍卖验证，完成后点击重试。");
+        failure.code = "ALIBABA_VERIFICATION_REQUIRED";
+        throw failure;
+      }
+      if (currentUrl && !isAlibabaListPage(currentUrl)) {
+        const failure = new Error("当前标签页不是目标阿里拍卖列表页。");
+        failure.code = "ALIBABA_TARGET_MISMATCH";
+        throw failure;
+      }
+      const statusSync = await executeCurrentTab(chromeRef, currentTab?.id || tab.id, synchronizeAlibabaAuctionStatus, [requestedStatus]);
       if (statusSync?.ok) return settleAlibabaAuctionStatus(chromeRef, tab, requestedStatus, statusSync);
       const failure = new Error(statusSync?.reason || "阿里页面拍卖状态同步失败");
-      failure.code = statusSync?.errorCode || "ALIBABA_STATUS_SYNC_FAILED";
+      failure.code = statusSync?.errorCode || "ALIBABA_STATUS_READBACK_FAILED";
       lastError = failure;
     } catch (error) {
+      if ([
+        "ALIBABA_LOGIN_REQUIRED",
+        "ALIBABA_VERIFICATION_REQUIRED",
+        "ALIBABA_TAB_REPLACED",
+        "ALIBABA_TARGET_MISMATCH",
+        "ALIBABA_SCRIPT_EXECUTION_FAILED",
+      ].includes(error?.code)) throw error;
       lastError = error;
     }
     if (attempt === 0) await new Promise((resolve) => window.setTimeout(resolve, 1000));
   }
-  throw lastError || new Error("ALIBABA_STATUS_SYNC_FAILED");
+  throw lastError || new Error("ALIBABA_STATUS_READBACK_FAILED");
 }
 
 async function getCurrentBrowserTab(chromeRef) {
@@ -1671,7 +1756,7 @@ function alibabaPageReady(value, expectedUrl, pageKind = "detail") {
 async function resolveVerificationTab(chromeRef, tab, expectedUrl) {
   const isAlibabaTab = (candidate) => {
     try {
-      return /(^|\.)sf\.taobao\.com$/i.test(new URL(candidate?.url || "").hostname);
+      return /(^|\.)taobao\.com$/i.test(new URL(candidate?.url || "").hostname);
     } catch {
       return false;
     }
@@ -1693,6 +1778,7 @@ async function resolveVerificationTab(chromeRef, tab, expectedUrl) {
     try {
       originalTab = await chromeRef.tabs.get(tab.id);
       if (matchesExpectedOrVerification(originalTab)) return originalTab;
+      if (isAlibabaTab(originalTab)) return originalTab;
     } catch {
       // The original tab may have been replaced during verification.
     }
@@ -1704,18 +1790,20 @@ async function resolveVerificationTab(chromeRef, tab, expectedUrl) {
     const windowMatch = windowTabs.find(matchesExpectedOrVerification);
     if (windowMatch) return windowMatch;
   } catch {
-    // Fall back to the original tab when tab enumeration is unavailable.
+    // The caller will distinguish a destroyed tab from a target mismatch.
   }
-  return originalTab || activeTabs.find((candidate) => candidate?.id) || null;
+  return null;
 }
 
 async function restoreAlibabaTargetTab(chromeRef, tab, expectedUrl) {
   if (!tab?.id || !expectedUrl || alibabaUrlsReferToSamePage(tab.url, expectedUrl)) return tab;
   try {
     await chromeRef.tabs.update(tab.id, { active: true, url: expectedUrl });
-    return { ...tab, url: expectedUrl };
+    return await chromeRef.tabs.get(tab.id);
   } catch {
-    return tab;
+    const failure = new Error("ALIBABA_TAB_REPLACED");
+    failure.code = "ALIBABA_TAB_REPLACED";
+    throw failure;
   }
 }
 
@@ -1736,11 +1824,24 @@ async function waitForManualVerification(context, tab, extractor, emit, descript
       message: verificationWaitMessage(waitState, pageKind, description, elapsedSeconds),
     });
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-    currentTab = await resolveVerificationTab(context.chrome, currentTab, expectedUrl) || currentTab;
-    if (!currentTab?.id) continue;
+    currentTab = await resolveVerificationTab(context.chrome, currentTab, expectedUrl);
+    if (!currentTab?.id) {
+      const failure = new Error("ALIBABA_TAB_REPLACED");
+      failure.code = "ALIBABA_TAB_REPLACED";
+      throw failure;
+    }
     try {
       const current = await executeCurrentTab(context.chrome, currentTab.id, extractor);
-      if (directPageLooksBlocked(current) === "ALIBABA_LOGIN_REQUIRED") throw new Error("ALIBABA_LOGIN_REQUIRED");
+      const blocked = directPageLooksBlocked(current);
+      if (blocked === "ALIBABA_LOGIN_REQUIRED") {
+        const failure = new Error("请在当前浏览器标签页完成阿里拍卖登录，完成后点击重试。");
+        failure.code = blocked;
+        throw failure;
+      }
+      if (blocked === "ALIBABA_VERIFICATION_REQUIRED") {
+        waitState = "verification";
+        continue;
+      }
       if (!directPageLooksBlocked(current) && expectedUrl && !alibabaUrlsReferToSamePage(current.url, expectedUrl)) {
         waitState = "navigation";
         currentTab = await restoreAlibabaTargetTab(context.chrome, currentTab, expectedUrl);
@@ -1749,8 +1850,8 @@ async function waitForManualVerification(context, tab, extractor, emit, descript
       if (alibabaPageReady(current, expectedUrl, pageKind)) return { value: current, tab: currentTab };
       waitState = pageWaitState(current, expectedUrl, pageKind);
     } catch (error) {
-      if (error?.message === "ALIBABA_LOGIN_REQUIRED") throw error;
-      // Keep polling while the original tab is navigating or is replaced during verification.
+      if (error?.code === "ALIBABA_LOGIN_REQUIRED" || error?.code === "ALIBABA_SCRIPT_EXECUTION_FAILED") throw error;
+      throw error;
     }
   }
   const timeout = new Error("ALIBABA_VERIFICATION_TIMEOUT");
@@ -1761,8 +1862,17 @@ async function waitForManualVerification(context, tab, extractor, emit, descript
 async function readAlibabaPageWithManualVerification(context, tab, extractor, emit, description, control, options = {}) {
   const expectedUrl = String(options.expectedUrl || tab?.url || "");
   const pageKind = options.pageKind || "detail";
-  const currentTab = await resolveVerificationTab(context.chrome, tab, expectedUrl) || tab;
-  if (/login\.taobao\.com|\/login(?:[/?]|$)/i.test(String(currentTab?.url || ""))) throw new Error("ALIBABA_LOGIN_REQUIRED");
+  const currentTab = await resolveVerificationTab(context.chrome, tab, expectedUrl);
+  if (!currentTab?.id) {
+    const failure = new Error("ALIBABA_TAB_REPLACED");
+    failure.code = "ALIBABA_TAB_REPLACED";
+    throw failure;
+  }
+  if (/login\.taobao\.com|\/login(?:[/?]|$)/i.test(String(currentTab?.url || ""))) {
+    const failure = new Error("请在当前浏览器标签页完成阿里拍卖登录，完成后点击重试。");
+    failure.code = "ALIBABA_LOGIN_REQUIRED";
+    throw failure;
+  }
   if (isAlibabaVerificationUrl(currentTab?.url)) {
     return waitForManualVerification(context, currentTab, extractor, emit, description, control, { ...options, expectedUrl, pageKind });
   }
@@ -1771,10 +1881,20 @@ async function readAlibabaPageWithManualVerification(context, tab, extractor, em
     value = await executeCurrentTab(context.chrome, currentTab.id, extractor);
   } catch (error) {
     const latestTab = await resolveVerificationTab(context.chrome, currentTab, expectedUrl);
-    if (!isAlibabaVerificationUrl(latestTab?.url) && !latestTab) throw error;
-    return waitForManualVerification(context, latestTab || currentTab, extractor, emit, description, control, { ...options, expectedUrl, pageKind });
+    if (latestTab && isAlibabaVerificationUrl(latestTab.url)) {
+      return waitForManualVerification(context, latestTab, extractor, emit, description, control, { ...options, expectedUrl, pageKind });
+    }
+    throw error;
   }
-  if (directPageLooksBlocked(value) === "ALIBABA_LOGIN_REQUIRED") throw new Error("ALIBABA_LOGIN_REQUIRED");
+  const blocked = directPageLooksBlocked(value);
+  if (blocked === "ALIBABA_LOGIN_REQUIRED") {
+    const failure = new Error("请在当前浏览器标签页完成阿里拍卖登录，完成后点击重试。");
+    failure.code = blocked;
+    throw failure;
+  }
+  if (blocked === "ALIBABA_VERIFICATION_REQUIRED") {
+    return waitForManualVerification(context, currentTab, extractor, emit, description, control, { ...options, expectedUrl, pageKind });
+  }
   if (!alibabaPageReady(value, expectedUrl, pageKind)) {
     return waitForManualVerification(context, currentTab, extractor, emit, description, control, { ...options, expectedUrl, pageKind });
   }
@@ -1985,11 +2105,17 @@ async function runCurrentTabScrape(context, request, emit = () => {}, control = 
       });
     } catch (error) {
       const reason = String(error?.message || error);
-      if (reason === "ALIBABA_SCRAPE_STOPPED") {
-        return { ok: false, phase: "stopped", errorCode: reason, reason, stopped: true, candidates: candidates.length, results, skipped, security: { credentialsReturned: false } };
+      const errorCode = String(error?.code || reason);
+      if (errorCode === "ALIBABA_SCRAPE_STOPPED") {
+        return { ok: false, phase: "stopped", errorCode, reason, stopped: true, candidates: candidates.length, results, skipped, security: { credentialsReturned: false } };
       }
-      if (["ALIBABA_LOGIN_REQUIRED", "ALIBABA_VERIFICATION_REQUIRED", "ALIBABA_VERIFICATION_TIMEOUT"].includes(reason)) {
-        return { ok: false, phase: "failed", errorCode: reason, reason: reason === "ALIBABA_LOGIN_REQUIRED" ? "阿里拍卖页面需要登录，请先在当前浏览器完成登录后重试。" : "阿里拍卖页面出现验证，请在当前浏览器完成验证后重试。", candidates: candidates.length, results, skipped, security: { credentialsReturned: false } };
+      if (["ALIBABA_LOGIN_REQUIRED", "ALIBABA_VERIFICATION_REQUIRED", "ALIBABA_VERIFICATION_TIMEOUT", "ALIBABA_TAB_REPLACED", "ALIBABA_TARGET_MISMATCH", "ALIBABA_SCRIPT_EXECUTION_FAILED"].includes(errorCode)) {
+        const message = errorCode === "ALIBABA_LOGIN_REQUIRED"
+          ? "请在当前浏览器标签页完成阿里拍卖登录，完成后点击重试。"
+          : errorCode === "ALIBABA_VERIFICATION_REQUIRED" || errorCode === "ALIBABA_VERIFICATION_TIMEOUT"
+            ? "请在当前浏览器标签页完成阿里拍卖验证，完成后点击重试。"
+            : reason;
+        return { ok: false, phase: "failed", errorCode, reason: message, candidates: candidates.length, results, skipped, security: { credentialsReturned: false } };
       }
       skipped += 1;
       progress({ phase: "verifying", percent: Math.min(98, 35 + Math.round(((index + 1) / candidates.length) * 63)), message: `详情读取失败，已跳过 ${skipped} 条。`, fetched: candidates.length, verified: results.length, skipped, current: candidate.title });
@@ -2468,6 +2594,16 @@ export const alibabaAuctionModule = {
         const requestConfig = requireAppliedParameters({ requireOutput: true });
         if (!requestConfig) return { ok: false, errorCode: "ALIBABA_PARAMETERS_NOT_APPLIED", reason: "参数有改动，需重新应用。" };
         let tab = await getCurrentBrowserTab(context.chrome);
+        if (/login\.taobao|\/login(?:[/?]|$)/i.test(String(tab.url || ""))) {
+          const failure = new Error("请在当前浏览器标签页完成阿里拍卖登录，完成后点击重试。");
+          failure.code = "ALIBABA_LOGIN_REQUIRED";
+          throw failure;
+        }
+        if (isAlibabaVerificationUrl(tab.url)) {
+          const failure = new Error("请在当前浏览器标签页完成阿里拍卖验证，完成后点击重试。");
+          failure.code = "ALIBABA_VERIFICATION_REQUIRED";
+          throw failure;
+        }
         if (!isAlibabaListPage(tab.url)) return { ok: false, skipped: true };
         const settled = await synchronizeAlibabaAuctionStatusOnTab(context.chrome, tab, requestConfig.status);
         tab = settled.tab;
@@ -2476,7 +2612,7 @@ export const alibabaAuctionModule = {
       } catch (error) {
         const errorCode = error?.code && error.code !== error?.message ? `${error.code}：` : "";
         setMessage(elements.alibabaAuctionParameterMessage, `网页状态同步失败：${errorCode}${error?.message || String(error)}`, "error");
-        return { ok: false, errorCode: error?.code || "ALIBABA_STATUS_SYNC_FAILED", reason: error?.message || String(error) };
+        return { ok: false, errorCode: error?.code || "ALIBABA_STATUS_READBACK_FAILED", reason: error?.message || String(error) };
       }
     }
 
@@ -2757,5 +2893,7 @@ export {
   propertyTypeLabel,
   synchronizeAlibabaAuctionStatus,
   synchronizeAlibabaAuctionStatusOnTab,
+  executeCurrentTab,
+  executeCurrentPageMain,
   usableDistricts,
 };

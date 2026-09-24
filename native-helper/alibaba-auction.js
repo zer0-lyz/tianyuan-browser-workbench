@@ -1209,9 +1209,9 @@ function browserUrlsMatch(actual, expected) {
 function isAlibabaVerificationUrl(value) {
   try {
     const url = new URL(String(value || ""));
-    const state = `${url.hostname} ${url.pathname} ${url.search} ${url.hash}`;
+    const state = `${url.pathname} ${url.search} ${url.hash}`;
     return /(?:^|\.)taobao\.com/i.test(url.hostname)
-      && /(?:^|[./_-])(captcha|verify|validate|punish|security|login|error)(?:[./?_-]|$)/i.test(state);
+      && /captcha|verify|validate|punish|security|login|error/i.test(state);
   } catch {
     return false;
   }
@@ -1245,9 +1245,17 @@ function browserPageReady(value, expectedUrl, pageKind = "detail") {
 
 async function evaluateBrowserPage(session, target, script) {
   const targetArgs = browserTargetArgs(target);
-  return parseJsonOutput((await runOpenCli([
-    "browser", session, "eval", script, ...targetArgs,
-  ], { timeout: 30000 })).stdout);
+  try {
+    const result = await runOpenCli([
+      "browser", session, "eval", script, ...targetArgs,
+    ], { timeout: 30000 });
+    return parseJsonOutput(result.stdout);
+  } catch (error) {
+    if (error?.code === "ALIBABA_SCRIPT_EXECUTION_FAILED") throw error;
+    const failure = new Error(`ALIBABA_SCRIPT_EXECUTION_FAILED: ${safeError(error)}`);
+    failure.code = "ALIBABA_SCRIPT_EXECUTION_FAILED";
+    throw failure;
+  }
 }
 
 async function readBrowserPageWithManualVerification(session, page, script, expectedUrl, pageKind, emit = () => {}, description = "读取页面", options = {}) {
@@ -1255,21 +1263,26 @@ async function readBrowserPageWithManualVerification(session, page, script, expe
   const startedAt = Date.now();
   const initialTargetArgs = page ? browserTargetArgs(page.target) : [];
   let target = String(page?.target || "").trim();
+  if (/login\.taobao|\/login(?:[/?]|$)/i.test(String(page?.url || ""))) {
+    const failure = new Error("请在当前浏览器标签页完成阿里拍卖登录，完成后点击重试。");
+    failure.code = "ALIBABA_LOGIN_REQUIRED";
+    throw failure;
+  }
   let waitState = isAlibabaVerificationUrl(page?.url) ? "verification" : "page_loading";
   while (Date.now() - startedAt < timeoutMs) {
     try {
       const value = await evaluateBrowserPage(session, target, script);
       const blocked = pageLooksBlocked(value);
       if (blocked === "ALIBABA_LOGIN_REQUIRED") {
-        const error = new Error(blocked);
+        const error = new Error("请在当前浏览器标签页完成阿里拍卖登录，完成后点击重试。");
         error.code = blocked;
         throw error;
       }
       if (browserPageReady(value, expectedUrl, pageKind)) return { value, target };
       waitState = pageWaitState(value, expectedUrl, pageKind);
     } catch (error) {
-      if (error?.code === "ALIBABA_LOGIN_REQUIRED") throw error;
-      // Keep polling while the verification page redirects or the browser target is replaced.
+      if (error?.code === "ALIBABA_LOGIN_REQUIRED" || error?.code === "ALIBABA_SCRIPT_EXECUTION_FAILED") throw error;
+      throw error;
     }
     emit({
       phase: waitState === "verification" ? "verification_required" : waitState === "detail_loading" ? "loading_detail" : "opening",
@@ -1278,7 +1291,7 @@ async function readBrowserPageWithManualVerification(session, page, script, expe
     });
     await runOpenCli(["browser", session, "wait", "time", "1", ...(target ? browserTargetArgs(target) : initialTargetArgs)], { timeout: 10000 }).catch(() => {});
   }
-  const timeout = new Error("ALIBABA_VERIFICATION_TIMEOUT");
+  const timeout = new Error("请在当前浏览器标签页完成阿里拍卖验证，完成后点击重试。");
   timeout.code = "ALIBABA_VERIFICATION_TIMEOUT";
   throw timeout;
 }
@@ -1296,13 +1309,12 @@ async function openBrowserPage(session, url, options = {}) {
       const target = requestedTarget || openedBrowserTarget(opened.stdout);
       const targetArgs = browserTargetArgs(target);
       await runOpenCli(["browser", session, "wait", "time", "1", ...targetArgs], { timeout: 10000 });
-      const location = parseJsonOutput((await runOpenCli([
-        "browser", session, "eval", BROWSER_LOCATION_SCRIPT, ...targetArgs,
-      ], { timeout: 30000 })).stdout);
-      if (browserUrlsMatch(location.url, expectedUrl) || options.allowVerification) {
+      const location = await evaluateBrowserPage(session, target, BROWSER_LOCATION_SCRIPT);
+      if (browserUrlsMatch(location.url, expectedUrl) || (options.allowVerification && isAlibabaVerificationUrl(location.url))) {
         return { target, url: canonicalUrl(location.url), verificationRequired: isAlibabaVerificationUrl(location.url) };
       }
-      lastError = new Error("ALIBABA_BROWSER_TARGET_MISMATCH");
+      lastError = new Error("ALIBABA_TARGET_MISMATCH");
+      lastError.code = "ALIBABA_TARGET_MISMATCH";
     } catch (error) {
       lastError = error;
     }
@@ -1310,7 +1322,10 @@ async function openBrowserPage(session, url, options = {}) {
       await runOpenCli(["browser", session, "wait", "time", String(attempt + 1)], { timeout: 10000 }).catch(() => {});
     }
   }
-  throw lastError || new Error("ALIBABA_BROWSER_TARGET_MISMATCH");
+  if (lastError) throw lastError;
+  const failure = new Error("ALIBABA_TARGET_MISMATCH");
+  failure.code = "ALIBABA_TARGET_MISMATCH";
+  throw failure;
 }
 
 function canonicalUrl(value) {
@@ -1668,9 +1683,9 @@ function listPageUrl(sourceUrl, page) {
 
 function pageLooksBlocked(value) {
   const text = `${value?.title || ""} ${value?.pageText || ""} ${value?.url || ""}`;
+  if (/login\.taobao|\/login(?:[/?]|$)|登录淘宝|请登录|会员登录|扫码登录/i.test(text)) return "ALIBABA_LOGIN_REQUIRED";
   if (value?.verificationRequired === true) return "ALIBABA_VERIFICATION_REQUIRED";
   if (/验证码|滑块|安全验证|访问验证|人机验证|请完成.{0,8}验证|拖动.{0,8}(?:滑块|拼图)|captcha|punish|security\s*check/i.test(text)) return "ALIBABA_VERIFICATION_REQUIRED";
-  if (/登录淘宝|请登录|login\.taobao/i.test(text)) return "ALIBABA_LOGIN_REQUIRED";
   return "";
 }
 
@@ -1703,6 +1718,20 @@ function safeError(error) {
     .replace(/\s+/g, " ")
     .slice(0, 300);
   return message || "OPENCLI_EXEC_FAILED";
+}
+
+function safeBrowserPageSummary(page, fallbackUrl, phase) {
+  let parsed;
+  try { parsed = new URL(String(page?.url || fallbackUrl || "")); } catch { parsed = null; }
+  const url = parsed ? `${parsed.hostname}${parsed.pathname}` : "";
+  return {
+    hostname: parsed?.hostname || "",
+    pathname: parsed?.pathname || "",
+    phase: String(phase || "").slice(0, 40),
+    target: String(page?.target || "").slice(0, 120),
+    loginPage: /login\.taobao|\/login(?:[/?]|$)/i.test(url),
+    verificationPage: isAlibabaVerificationUrl(page?.url || fallbackUrl),
+  };
 }
 
 function escapeHtml(value) {
@@ -2851,11 +2880,12 @@ async function scrape(requestInput, emit = () => {}) {
   }
   for (let page = 1; page <= SAFE_MAX_PAGES; page += 1) {
     const pageUrl = listPageUrl(request.sourceUrl, page);
+    let listPage;
     try {
-      const page = await openBrowserPage(request.session, pageUrl, { window: "foreground", allowVerification: true });
+      listPage = await openBrowserPage(request.session, pageUrl, { window: "foreground", allowVerification: true });
       const extractedRead = await readBrowserPageWithManualVerification(
         request.session,
-        page,
+        listPage,
         LIST_EXTRACT_SCRIPT,
         pageUrl,
         "list",
@@ -2911,7 +2941,13 @@ async function scrape(requestInput, emit = () => {}) {
       if (!pageItems.length || newItems === 0) break;
     } catch (error) {
       const reason = safeError(error);
-      return { ok: false, phase: "failed", errorCode: reason, reason, candidates: candidates.length, results: [], security: security() };
+      const errorCode = String(error?.code || reason);
+      const userReason = errorCode === "ALIBABA_LOGIN_REQUIRED"
+        ? "请在当前浏览器标签页完成阿里拍卖登录，完成后点击重试。"
+        : errorCode === "ALIBABA_VERIFICATION_REQUIRED" || errorCode === "ALIBABA_VERIFICATION_TIMEOUT"
+          ? "请在当前浏览器标签页完成阿里拍卖验证，完成后点击重试。"
+          : reason;
+      return { ok: false, phase: "failed", errorCode, reason: userReason, diagnostic: reason, page: safeBrowserPageSummary(listPage, pageUrl, "list"), candidates: candidates.length, results: [], security: security() };
     }
   }
 
@@ -2926,8 +2962,9 @@ async function scrape(requestInput, emit = () => {}) {
   for (const candidate of candidates) {
     if (attempted.has(candidate.url)) continue;
     attempted.add(candidate.url);
+    let detailPage;
     try {
-      const detailPage = await openBrowserPage(request.session, candidate.url, { window: "foreground", allowVerification: true });
+      detailPage = await openBrowserPage(request.session, candidate.url, { window: "foreground", allowVerification: true });
       const detailRead = await readBrowserPageWithManualVerification(
         request.session,
         detailPage,
@@ -3002,12 +3039,17 @@ async function scrape(requestInput, emit = () => {}) {
         current: parsed.title || candidate.title,
       });
     } catch (error) {
-      skipped += 1;
       const reason = safeError(error);
       const errorCode = String(error?.code || reason);
-      if (["ALIBABA_LOGIN_REQUIRED", "ALIBABA_VERIFICATION_REQUIRED", "ALIBABA_VERIFICATION_TIMEOUT"].includes(errorCode)) {
-        return { ok: false, phase: "failed", errorCode: reason, reason: reason === "ALIBABA_LOGIN_REQUIRED" ? "阿里拍卖页面需要登录，请先在浏览器完成登录后重试。" : "阿里拍卖页面出现验证，请在浏览器完成验证后重试。", candidates: candidates.length, results, skipped, security: security() };
+      if (["ALIBABA_LOGIN_REQUIRED", "ALIBABA_VERIFICATION_REQUIRED", "ALIBABA_VERIFICATION_TIMEOUT", "ALIBABA_TAB_REPLACED", "ALIBABA_TARGET_MISMATCH", "ALIBABA_SCRIPT_EXECUTION_FAILED"].includes(errorCode)) {
+        const userReason = errorCode === "ALIBABA_LOGIN_REQUIRED"
+          ? "请在当前浏览器标签页完成阿里拍卖登录，完成后点击重试。"
+          : errorCode === "ALIBABA_VERIFICATION_REQUIRED" || errorCode === "ALIBABA_VERIFICATION_TIMEOUT"
+            ? "请在当前浏览器标签页完成阿里拍卖验证，完成后点击重试。"
+            : reason;
+        return { ok: false, phase: "failed", errorCode, reason: userReason, diagnostic: reason, page: safeBrowserPageSummary(detailPage, candidate.url, "detail"), candidates: candidates.length, results, skipped, security: security() };
       }
+      skipped += 1;
       progress({ phase: "verifying", percent: Math.min(98, 35 + Math.round((attempted.size / candidates.length) * 63)), message: `详情读取失败，已跳过 ${skipped} 条。`, fetched: candidates.length, verified: results.length, skipped, current: candidate.title });
       skippedReasons.push({ title: candidate.title, url: candidate.url, reason: `详情读取失败：${reason}` });
     }
@@ -3030,7 +3072,17 @@ async function scrape(requestInput, emit = () => {}) {
 async function openPage(requestInput) {
   const request = normalizeRequest(requestInput);
   await ensureBound(request.session);
-  await openBrowserPage(request.session, request.sourceUrl, { window: "foreground" });
+  const page = await openBrowserPage(request.session, request.sourceUrl, { window: "foreground", allowVerification: true });
+  if (/login\.taobao|\/login(?:[/?]|$)/i.test(String(page.url || ""))) {
+    const failure = new Error("请在当前浏览器标签页完成阿里拍卖登录，完成后点击重试。");
+    failure.code = "ALIBABA_LOGIN_REQUIRED";
+    throw failure;
+  }
+  if (page.verificationRequired) {
+    const failure = new Error("请在当前浏览器标签页完成阿里拍卖验证，完成后点击重试。");
+    failure.code = "ALIBABA_VERIFICATION_REQUIRED";
+    throw failure;
+  }
   return {
     ok: true,
     action: "open_alibaba_auction",
@@ -3081,6 +3133,7 @@ module.exports = {
   validateHistoryPath,
   outputDirectoryFor,
   safeError,
+  safeBrowserPageSummary,
   scrape,
   validateResultPath,
   validateResultOutputPath,
