@@ -3225,7 +3225,9 @@ function runAnjukeProperty(message, emit) {
         resolve(result);
       }
     };
-    const args = [ANJUKE_PROPERTY_SCRIPT, "--request-json", JSON.stringify(request)];
+    const mapAssetsDirectory = anjukeProperty.mapAssetsDir();
+    const runnerRequest = mapAssetsDirectory ? { ...request, mapAssetsDir: mapAssetsDirectory } : { ...request };
+    const args = [ANJUKE_PROPERTY_SCRIPT, "--request-json", JSON.stringify(runnerRequest)];
     const launch = processLauncher.commandLaunchSpec(PYTHON_BIN, args);
     const child = spawn(launch.command, launch.args, {
       cwd: path.dirname(ANJUKE_PROPERTY_SCRIPT),

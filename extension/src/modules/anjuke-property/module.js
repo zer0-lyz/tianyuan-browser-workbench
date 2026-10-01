@@ -2,12 +2,14 @@ import { anjukePropertyTemplate } from "./template.js";
 
 const DEFAULT_PROFILE_PATH = "~/.tianyuan-workbench/dependencies/anjuke-property-profile";
 const DETAIL_DELAY_MS = 2200;
+const CAPTURE_STATUSES = ["ok", "blocked_verification", "not_case", "read_failed"];
 const DEFAULT_CONFIG = {
   currentUrl: "",
   listUrls: [],
   detailUrls: [],
   caseType: "auto",
   maxCases: 10,
+  keyword: "",
   screenshot: false,
   waitVerification: true,
   verificationTimeout: 300,
@@ -19,12 +21,15 @@ const DEFAULT_CONFIG = {
 function elementMap(documentRef) {
   const ids = [
     "openAnjukeProperty", "backFromAnjukeProperty", "anjukePropertyCurrentUrl", "importAnjukePropertyCurrentUrl",
-    "anjukePropertyCaseType", "anjukePropertyMaxCases", "anjukePropertyWaitVerification", "anjukePropertyScreenshot",
-    "runAnjukeProperty", "resetAnjukePropertyParams", "anjukePropertyParameterState", "anjukePropertyParameterMessage",
-    "anjukePropertyOutputDirectory", "chooseAnjukePropertyOutput", "openAnjukePropertyExcel", "openAnjukePropertyCsv",
-    "openAnjukePropertyHtml", "openAnjukePropertyResult", "openAnjukePropertyMap", "clearAnjukePropertyResults", "anjukePropertyResultCount", "anjukePropertyResultStatus",
-    "anjukePropertyProgressPhase", "anjukePropertyProgressPercent", "anjukePropertyProgressBar", "anjukePropertyProgressFetched",
-    "anjukePropertyProgressWritten", "anjukePropertyResultMessage",
+    "anjukePropertyCaseType", "anjukePropertyMaxCases", "anjukePropertyKeyword", "anjukePropertyWaitVerification",
+    "anjukePropertyScreenshot", "applyAnjukePropertyParams", "resetAnjukePropertyParams",
+    "anjukePropertyParameterState", "anjukePropertyParameterMessage", "anjukePropertyOutputDirectory",
+    "chooseAnjukePropertyOutput", "openAnjukePropertySource", "openAnjukePropertyExcel", "openAnjukePropertyCsv",
+    "openAnjukePropertyHtml", "openAnjukePropertyResult", "openAnjukePropertyMap", "pauseAnjukeProperty",
+    "stopAnjukeProperty", "clearAnjukePropertyResults", "anjukePropertyResultCount", "anjukePropertyResultStatus",
+    "anjukePropertyProgressPhase", "anjukePropertyProgressPercent", "anjukePropertyProgressBar",
+    "anjukePropertyProgressFetched", "anjukePropertyProgressWritten", "anjukePropertyProgressSkipped",
+    "anjukePropertyProgressBlocked", "anjukePropertyResultMessage",
   ];
   return Object.fromEntries(ids.map((id) => [id, documentRef.getElementById(id)]));
 }
@@ -100,6 +105,7 @@ function normalizeConfig(value = {}) {
     detailUrls: [],
     caseType: ["auto", "sale", "rent"].includes(source.caseType) ? source.caseType : inferCaseType(currentUrl),
     maxCases: Math.max(1, Math.min(100, Number(source.maxCases || 10))),
+    keyword: String(source.keyword || "").trim().slice(0, 80),
     screenshot: source.screenshot === true,
     waitVerification: source.waitVerification !== false,
     verificationTimeout: Math.max(1, Math.min(900, Number(source.verificationTimeout || 300))),
@@ -115,6 +121,7 @@ function comparableConfig(config) {
     currentUrl: normalized.currentUrl,
     caseType: normalized.caseType,
     maxCases: normalized.maxCases,
+    keyword: normalized.keyword,
     screenshot: normalized.screenshot,
     waitVerification: normalized.waitVerification,
     outputDirectory: normalized.outputDirectory,
@@ -221,13 +228,14 @@ async function captureAnjukeCurrentTab(options = {}) {
 
 function readAnjukeDetailTab() {
   const text = String(document.body?.innerText || document.body?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60000);
+  const html = String(document.documentElement?.outerHTML || "").slice(0, 400000);
   const verificationMarkers = ["验证码", "访问过于频繁", "安全验证", "滑块", "人机验证", "请完成验证", "请拖动滑块", "验证后继续", "风险验证", "人机校验"];
   const verificationSelectors = [
     "iframe[src*='captcha' i]", "iframe[src*='verify' i]", "[id*='captcha' i]", "[class*='captcha' i]",
     "[id*='verify' i]", "[class*='verify' i]", "[class*='slider' i]", ".geetest_panel", ".nc-container", "#nc_1_wrapper",
   ];
   const detailMarkers = ["总价", "售价", "参考售价", "报价", "租金", "建筑面积", "房屋单价", "单价", "户型", "楼层", "朝向", "装修", "房源编号", "写字楼", "商铺"];
-  const source = String(document.documentElement?.outerHTML || "").slice(0, 400000);
+  const source = html;
   const coordinate = (name, minimum, maximum) => {
     const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const match = source.match(new RegExp(`(?:["']?${escapedName}["']?|data-${escapedName})[^0-9-]{0,24}(-?\\d+(?:\\.\\d+)?)`, "i"));
@@ -241,6 +249,7 @@ function readAnjukeDetailTab() {
   return {
     pageUrl: location.href,
     text,
+    html,
     title: String(document.querySelector("h1,.title,.house-title,.main-title")?.innerText || document.title || "").trim().slice(0, 300),
     location: String(document.querySelector(".address,.addr,[class*=address],[class*=addr]")?.innerText || "").trim().slice(0, 300),
     longitude: coordinate("longitude", -180, 180) ?? coordinate("lng", -180, 180) ?? coordinate("lon", -180, 180),
@@ -253,6 +262,10 @@ function readAnjukeDetailTab() {
   };
 }
 
+function readRestoredListingUrl() {
+  return location.href;
+}
+
 export const anjukePropertyModule = {
   manifest: {
     id: "anjuke-property",
@@ -263,7 +276,7 @@ export const anjukePropertyModule = {
     messageNamespace: "anjuke-property",
     entryElementId: "openAnjukeProperty",
     pageElementId: "page-anjuke-property",
-    storageVersion: 2,
+    storageVersion: 3,
     usesLegacyScope: false,
     scope: { companies: false, subjects: false },
   },
@@ -272,12 +285,14 @@ export const anjukePropertyModule = {
     let context;
     let elements;
     let config = { ...DEFAULT_CONFIG };
+    let appliedConfig = null;
     let results = [];
     let paths = { excelPath: "", csvPath: "", htmlDirectory: "", resultHtmlPath: "", mapPath: "" };
     let running = false;
+    let runControl = { paused: false, stopRequested: false, resumeResolvers: [] };
 
     function state() {
-      return { ...config, results, ...paths };
+      return { ...config, results, ...paths, appliedConfig };
     }
 
     function readConfig() {
@@ -285,6 +300,7 @@ export const anjukePropertyModule = {
         currentUrl: elements.anjukePropertyCurrentUrl.value,
         caseType: elements.anjukePropertyCaseType.value,
         maxCases: elements.anjukePropertyMaxCases.value,
+        keyword: elements.anjukePropertyKeyword.value,
         screenshot: elements.anjukePropertyScreenshot.checked,
         waitVerification: elements.anjukePropertyWaitVerification.checked,
         outputDirectory: elements.anjukePropertyOutputDirectory.value,
@@ -292,31 +308,59 @@ export const anjukePropertyModule = {
       });
     }
 
+    function parametersApplied() {
+      return Boolean(appliedConfig) && comparableConfig(config) === comparableConfig(appliedConfig);
+    }
+
     function renderParameterState() {
-      const ready = Boolean(config.currentUrl) && Boolean(config.outputDirectory);
-      elements.anjukePropertyParameterState.textContent = config.currentUrl ? "网址已导入" : "未导入网址";
-      elements.anjukePropertyParameterState.dataset.kind = ready ? "ok" : (config.currentUrl ? "warn" : "pending");
+      if (!config.currentUrl) {
+        elements.anjukePropertyParameterState.textContent = "未导入网址";
+        elements.anjukePropertyParameterState.dataset.kind = "pending";
+        return;
+      }
+      const applied = parametersApplied();
+      elements.anjukePropertyParameterState.textContent = applied ? "参数已应用" : "参数有改动，需重新应用";
+      elements.anjukePropertyParameterState.dataset.kind = applied ? "ok" : "warn";
     }
 
     function renderConfig() {
       elements.anjukePropertyCurrentUrl.value = config.currentUrl;
       elements.anjukePropertyCaseType.value = config.caseType;
       elements.anjukePropertyMaxCases.value = String(config.maxCases);
+      elements.anjukePropertyKeyword.value = config.keyword;
       elements.anjukePropertyScreenshot.checked = config.screenshot;
       elements.anjukePropertyWaitVerification.checked = config.waitVerification;
       elements.anjukePropertyOutputDirectory.value = config.outputDirectory;
       renderParameterState();
     }
 
+    function renderRunButtons() {
+      elements.pauseAnjukeProperty.disabled = !running;
+      elements.stopAnjukeProperty.disabled = !running;
+      elements.pauseAnjukeProperty.textContent = runControl.paused ? "继续抓取" : "暂停抓取";
+      elements.runAnjukeProperty.disabled = running;
+      elements.openAnjukePropertySource.disabled = running;
+      elements.importAnjukePropertyCurrentUrl.disabled = running;
+    }
+
     function renderProgress(payload = {}) {
       const percent = Math.max(0, Math.min(100, Number(payload.percent || 0)));
-      const phases = { opening: "正在启动浏览器", capturing: "正在抓取详情并归档证据", writing: "正在生成输出", completed: "抓取完成", failed: "抓取失败" };
+      const phases = {
+        opening: "正在读取当前安居客标签页",
+        capturing: "正在抓取详情并归档证据",
+        paused: "已暂停",
+        writing: "正在生成输出",
+        completed: "抓取完成",
+        failed: "抓取失败",
+      };
       elements.anjukePropertyProgressPhase.textContent = phases[payload.phase] || "正在处理";
       elements.anjukePropertyProgressPercent.textContent = `${percent}%`;
       elements.anjukePropertyProgressBar.style.width = `${percent}%`;
       elements.anjukePropertyProgressBar.parentElement.setAttribute("aria-valuenow", String(percent));
       elements.anjukePropertyProgressFetched.textContent = String(payload.fetched ?? 0);
       elements.anjukePropertyProgressWritten.textContent = String(payload.written ?? 0);
+      elements.anjukePropertyProgressSkipped.textContent = String(payload.skipped ?? 0);
+      elements.anjukePropertyProgressBlocked.textContent = String(payload.blocked ?? 0);
       if (payload.message) elements.anjukePropertyResultStatus.textContent = payload.message;
     }
 
@@ -328,6 +372,56 @@ export const anjukePropertyModule = {
       elements.openAnjukePropertyResult.disabled = !paths.resultHtmlPath;
       elements.openAnjukePropertyMap.disabled = !paths.mapPath;
       elements.clearAnjukePropertyResults.disabled = !results.length;
+    }
+
+    function outcomeCounts(outcomes = []) {
+      let written = 0;
+      let skipped = 0;
+      let blocked = 0;
+      for (const outcome of outcomes) {
+        if (outcome.captureStatus === "ok") written += 1;
+        else if (outcome.captureStatus === "blocked_verification") blocked += 1;
+        else skipped += 1;
+      }
+      return { fetched: outcomes.length, written, skipped, blocked };
+    }
+
+    function waitWhilePaused() {
+      if (!runControl.paused || runControl.stopRequested) return Promise.resolve();
+      renderProgress({ phase: "paused", message: "抓取已暂停；点击“继续抓取”后从当前进度继续。" });
+      return new Promise((resolve) => runControl.resumeResolvers.push(resolve));
+    }
+
+    function resumeCapture() {
+      runControl.paused = false;
+      const resolvers = runControl.resumeResolvers;
+      runControl.resumeResolvers = [];
+      for (const resolve of resolvers) resolve();
+      renderProgress({ phase: "capturing", percent: Math.max(8, Number(elements.anjukePropertyProgressPercent.textContent.replace("%", "")) || 8), message: "已继续抓取。" });
+    }
+
+    function togglePause() {
+      if (!running) return;
+      if (runControl.paused) {
+        resumeCapture();
+      } else {
+        runControl.paused = true;
+        renderRunButtons();
+        renderProgress({ phase: "paused", message: "抓取已暂停；点击“继续抓取”后从当前进度继续。" });
+        setMessage(elements.anjukePropertyResultMessage, "抓取已暂停，当前详情处理完成后不再继续。", "warn");
+      }
+    }
+
+    function stopCapture() {
+      if (!running) return;
+      runControl.stopRequested = true;
+      runControl.paused = false;
+      const resolvers = runControl.resumeResolvers;
+      runControl.resumeResolvers = [];
+      for (const resolve of resolvers) resolve();
+      renderRunButtons();
+      renderProgress({ phase: "capturing", message: "正在终止抓取；已完成证据会保留并恢复列表页。" });
+      setMessage(elements.anjukePropertyResultMessage, "已请求终止抓取；正在保存已完成结果并恢复列表页。", "warn");
     }
 
     async function importCurrentUrl() {
@@ -345,10 +439,49 @@ export const anjukePropertyModule = {
         config = normalizeConfig({ ...config, currentUrl, caseType: elements.anjukePropertyCaseType.value || inferCaseType(currentUrl) });
         await context.storage.save(state());
         renderConfig();
-        setMessage(elements.anjukePropertyParameterMessage, `已导入当前列表页${isScopedListingUrl(currentUrl) ? "（已带区域条件）" : "（将按页面当前筛选条件）"}：${currentUrl}。现在可以开始抓取。`, "ok");
+        renderParameterState();
+        setMessage(elements.anjukePropertyParameterMessage, `已导入当前列表页${isScopedListingUrl(currentUrl) ? "（已带区域条件）" : "（将按页面当前筛选条件）"}。请确认参数后点击“确认并应用参数”。`, "ok");
       } catch (error) {
         setMessage(elements.anjukePropertyParameterMessage, `导入当前网址失败：${error?.message || String(error)}`, "error");
       }
+    }
+
+    async function openSource() {
+      if (running) return;
+      if (!config.currentUrl) {
+        setMessage(elements.anjukePropertyParameterMessage, "还没有导入列表页网址，请先点击“导入当前网址”。", "warn");
+        return;
+      }
+      try {
+        const [tab] = await context.chrome.tabs.query({ active: true, lastFocusedWindow: true });
+        if (!tab?.id) throw new Error("当前没有可用标签页");
+        await context.chrome.tabs.update(tab.id, { url: config.currentUrl });
+        setMessage(elements.anjukePropertyParameterMessage, "已在当前标签页打开安居客列表页，选好范围后再导入网址。", "ok");
+      } catch (error) {
+        setMessage(elements.anjukePropertyParameterMessage, `打开安居客失败：${error?.message || String(error)}`, "error");
+      }
+    }
+
+    async function applyParameters() {
+      const nextConfig = readConfig();
+      if (!nextConfig.currentUrl) {
+        setMessage(elements.anjukePropertyParameterMessage, "请先点击“导入当前网址”。", "warn");
+        return;
+      }
+      if (!isAnjukeListingUrl(nextConfig.currentUrl)) {
+        setMessage(elements.anjukePropertyParameterMessage, "当前网址不是安居客列表页，无法应用参数；请重新导入列表页。", "warn");
+        return;
+      }
+      if (!nextConfig.outputDirectory) {
+        setMessage(elements.anjukePropertyParameterMessage, "请先选择本机输出目录。", "warn");
+        return;
+      }
+      config = nextConfig;
+      appliedConfig = { ...config };
+      await context.storage.save(state());
+      renderConfig();
+      setMessage(elements.anjukePropertyParameterMessage, "参数已应用；可以开始网络抓取。", "ok");
+      context.setStatus("安居客参数已应用", "ok");
     }
 
     async function chooseOutput() {
@@ -360,26 +493,9 @@ export const anjukePropertyModule = {
       }
       config.outputDirectory = selected;
       renderConfig();
+      renderParameterState();
       await context.storage.save(state());
-      setMessage(elements.anjukePropertyParameterMessage, `已选择专用子文件夹：${result.directoryName || "安居客物业案例"}。`, "ok");
-    }
-
-    function buildRequest() {
-      config = readConfig();
-      renderConfig();
-      if (!config.currentUrl) {
-        setMessage(elements.anjukePropertyParameterMessage, "请先点击“导入当前网址”。", "warn");
-        return null;
-      }
-      if (!isAnjukeListingUrl(config.currentUrl)) {
-        setMessage(elements.anjukePropertyParameterMessage, "当前网址不是安居客列表页，已阻止抓取；请重新导入列表页。", "warn");
-        return null;
-      }
-      if (!config.outputDirectory) {
-        setMessage(elements.anjukePropertyParameterMessage, "请先选择本机输出目录。", "warn");
-        return null;
-      }
-      return { ...config, listUrls: [config.currentUrl], detailUrls: [] };
+      setMessage(elements.anjukePropertyParameterMessage, `已选择专用子文件夹：${result.directoryName || "安居客物业案例"}。参数有改动时请重新应用。`, "ok");
     }
 
     function waitForTabLoaded(tabId, timeoutMs = 60000) {
@@ -404,7 +520,7 @@ export const anjukePropertyModule = {
       });
     }
 
-    async function readCurrentDetail(tabId, detailUrl, request) {
+    async function readDetailOutcome(tabId, request) {
       const deadline = Date.now() + (request.waitVerification ? request.verificationTimeout * 1000 : 10000);
       const contentSettleDeadline = Math.min(deadline, Date.now() + 15000);
       while (Date.now() < deadline) {
@@ -420,7 +536,9 @@ export const anjukePropertyModule = {
           }
         });
         if (verificationPopup) {
-          if (!request.waitVerification) throw new Error("ANJUKE_DETAIL_VERIFICATION_REQUIRED");
+          if (!request.waitVerification || Date.now() >= deadline - 2000) {
+            return { captureStatus: "blocked_verification", errorCode: "ANJUKE_DETAIL_VERIFICATION_REQUIRED", text: "", html: "", title: "", location: "", pageUrl: "" };
+          }
           setMessage(elements.anjukePropertyResultMessage, "安居客验证页面已打开，请完成验证，脚本会继续等待。", "warn");
           await new Promise((resolve) => window.setTimeout(resolve, 2000));
           continue;
@@ -428,24 +546,44 @@ export const anjukePropertyModule = {
         const [result] = await context.chrome.scripting.executeScript({ target: { tabId }, func: readAnjukeDetailTab });
         const detail = result?.result;
         if (detail?.verificationRequired) {
-          if (!request.waitVerification) throw new Error("ANJUKE_DETAIL_VERIFICATION_REQUIRED");
+          if (!request.waitVerification) {
+            return { captureStatus: "blocked_verification", errorCode: "ANJUKE_DETAIL_VERIFICATION_REQUIRED", ...detail };
+          }
           setMessage(elements.anjukePropertyResultMessage, "详情页需要验证，请在当前标签页完成验证，脚本会继续等待。", "warn");
-          renderProgress({ phase: "capturing", percent: 12, fetched: 0, written: 0, message: "等待当前标签页完成详情页验证…" });
+          renderProgress({ phase: "capturing", percent: 12, message: "等待当前标签页完成详情页验证…" });
           await new Promise((resolve) => window.setTimeout(resolve, 2000));
           continue;
         }
-        if (!isAnjukeDetailUrl(detail?.pageUrl)) throw new Error("ANJUKE_DETAIL_ROUTE_INVALID");
+        if (!isAnjukeDetailUrl(detail?.pageUrl)) {
+          return { captureStatus: "not_case", errorCode: "ANJUKE_DETAIL_ROUTE_INVALID", ...detail };
+        }
         if (!detail?.detailAvailable) {
           if (Date.now() < contentSettleDeadline) {
             await new Promise((resolve) => window.setTimeout(resolve, 1200));
             continue;
           }
-          throw new Error(detail?.errorCode || "ANJUKE_DETAIL_PAGE_NOT_CASE");
+          const status = detail?.errorCode === "ANJUKE_DETAIL_VERIFICATION_REQUIRED" ? "blocked_verification" : "not_case";
+          return { captureStatus: status, errorCode: detail?.errorCode || "ANJUKE_DETAIL_PAGE_NOT_CASE", ...detail };
         }
-        if (detail?.text) return { url: detail.pageUrl || detailUrl, ...detail };
+        if (detail?.text || detail?.html) return { captureStatus: "ok", errorCode: "", ...detail };
         await new Promise((resolve) => window.setTimeout(resolve, 1000));
       }
-      throw new Error("ANJUKE_DETAIL_CONTENT_EMPTY");
+      return { captureStatus: "blocked_verification", errorCode: "ANJUKE_DETAIL_VERIFICATION_TIMEOUT", text: "", html: "", title: "", location: "", pageUrl: "" };
+    }
+
+    async function restoreListingPage(tabId, request) {
+      try {
+        await context.chrome.tabs.update(tabId, { url: request.currentUrl });
+        await waitForTabLoaded(tabId, 30000);
+        const [readback] = await context.chrome.scripting.executeScript({
+          target: { tabId },
+          func: readRestoredListingUrl,
+        });
+        const restored = String(readback?.result || "");
+        return restored.startsWith(request.currentUrl) ? "restored" : "restore_failed";
+      } catch {
+        return "restore_failed";
+      }
     }
 
     async function captureCurrentTab(request) {
@@ -460,76 +598,119 @@ export const anjukePropertyModule = {
         const [result] = await context.chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: captureAnjukeCurrentTab,
-          args: [{ maxCases: request.maxCases }],
+          args: [{ maxCases: request.maxCases, keyword: request.keyword }],
         });
         const capture = result?.result;
         if (capture?.ok) {
-          const pages = [];
-          let skippedInvalidCount = 0;
+          const outcomes = [];
+          let stopped = false;
+          let restoreStatus = "skipped";
           try {
             for (const [index, detailUrl] of capture.detailUrls.entries()) {
-              if (index > 0) await new Promise((resolve) => window.setTimeout(resolve, DETAIL_DELAY_MS));
-              await context.chrome.tabs.update(tab.id, { url: detailUrl });
-              await waitForTabLoaded(tab.id);
-              try {
-                pages.push(await readCurrentDetail(tab.id, detailUrl, request));
-              } catch (error) {
-                const reason = String(error?.message || error || "");
-                if (["ANJUKE_DETAIL_ROUTE_INVALID", "ANJUKE_DETAIL_PAGE_NOT_CASE"].some((code) => reason.startsWith(code))) {
-                  skippedInvalidCount += 1;
-                  renderProgress({ phase: "capturing", percent: 8 + Math.round((index + 1) / capture.detailUrls.length * 80), fetched: capture.detailUrls.length, written: pages.length, message: "已跳过非案例页面，继续检查详情 " + (index + 1) + "/" + capture.detailUrls.length });
-                  continue;
-                }
-                throw error;
+              await waitWhilePaused();
+              if (runControl.stopRequested) {
+                stopped = true;
+                break;
               }
-              renderProgress({ phase: "capturing", percent: 8 + Math.round((index + 1) / capture.detailUrls.length * 80), fetched: capture.detailUrls.length, written: pages.length, message: "已读取当前标签页详情 " + (index + 1) + "/" + capture.detailUrls.length });
+              if (index > 0) await new Promise((resolve) => window.setTimeout(resolve, DETAIL_DELAY_MS));
+              let outcome;
+              try {
+                await context.chrome.tabs.update(tab.id, { url: detailUrl });
+                await waitForTabLoaded(tab.id);
+                outcome = await readDetailOutcome(tab.id, request);
+              } catch (error) {
+                outcome = { captureStatus: "read_failed", errorCode: String(error?.message || error || "ANJUKE_DETAIL_READ_FAILED").slice(0, 120) };
+              }
+              outcomes.push({ url: detailUrl, ...outcome });
+              const counts = outcomeCounts(outcomes);
+              renderProgress({
+                phase: "capturing",
+                percent: 8 + Math.round((index + 1) / capture.detailUrls.length * 80),
+                fetched: capture.detailUrls.length,
+                written: counts.written,
+                skipped: counts.skipped,
+                blocked: counts.blocked,
+                message: `已处理详情 ${index + 1}/${capture.detailUrls.length}；有效 ${counts.written}，跳过 ${counts.skipped}，验证阻断 ${counts.blocked}。`,
+              });
             }
-            if (!pages.length) throw new Error("ANJUKE_NO_VALID_DETAIL_CASES");
-            return { tab, capture: { pages, skippedInvalidCount } };
           } finally {
-            await context.chrome.tabs.update(tab.id, { url: request.currentUrl }).catch(() => {});
+            renderProgress({ phase: "writing", percent: 92, message: "正在恢复安居客列表页…" });
+            restoreStatus = await restoreListingPage(tab.id, request);
+            if (restoreStatus === "restore_failed") {
+              setMessage(elements.anjukePropertyResultMessage, "列表页恢复失败，请手动返回安居客列表页。", "warn");
+            }
           }
+          const runStatus = stopped
+            ? "stopped"
+            : (outcomes.length && outcomes.every((item) => item.captureStatus === "ok") ? "complete" : "partial");
+          return { tab, capture: { outcomes, runStatus, restoreStatus } };
         }
         if (!capture?.verificationRequired || Date.now() >= deadline) {
           throw new Error(capture?.reason || capture?.errorCode || "ANJUKE_CURRENT_TAB_CAPTURE_FAILED");
         }
         setMessage(elements.anjukePropertyResultMessage, "请在当前安居客标签页完成验证，脚本会继续等待，不会关闭页面。", "warn");
-        renderProgress({ phase: "capturing", percent: 5, fetched: 0, written: 0, message: "等待当前标签页完成安居客验证…" });
+        renderProgress({ phase: "capturing", percent: 5, fetched: 0, written: 0, skipped: 0, blocked: 0, message: "等待当前标签页完成安居客验证…" });
         await new Promise((resolve) => window.setTimeout(resolve, 2000));
       }
     }
 
     async function run() {
       if (running) return;
-      const request = buildRequest();
-      if (!request) return;
+      if (!parametersApplied()) {
+        setMessage(elements.anjukePropertyParameterMessage, "参数有改动，请先点击“确认并应用参数”。", "warn");
+        return;
+      }
       running = true;
-      renderProgress({ phase: "opening", percent: 1, fetched: 0, written: 0, message: "正在读取当前安居客标签页…" });
+      runControl = { paused: false, stopRequested: false, resumeResolvers: [] };
+      renderRunButtons();
+      renderProgress({ phase: "opening", percent: 1, fetched: 0, written: 0, skipped: 0, blocked: 0, message: "正在读取当前安居客标签页…" });
       setMessage(elements.anjukePropertyResultMessage, "抓取将在当前浏览器标签页中执行；遇到验证会等待人工完成。", "warn");
       context.setStatus("安居客脚本正在运行", "busy");
       try {
-        const { tab, capture } = await captureCurrentTab(request);
-        renderProgress({ phase: "capturing", percent: 8, fetched: capture.pages.length, written: 0, message: "当前标签页已读取 " + capture.pages.length + " 个详情案例，正在生成输出…" });
-        const result = await context.streamNativeMessage({
-          action: "run_anjuke_property",
-          request: { ...request, tabId: tab.id, skippedInvalidCount: capture.skippedInvalidCount || 0, capturedPages: capture.pages },
-        }, (progress) => renderProgress(progress));
+        const { tab, capture } = await captureCurrentTab({ ...appliedConfig, listUrls: [appliedConfig.currentUrl], detailUrls: [] });
+        const counts = outcomeCounts(capture.outcomes);
+        renderProgress({ phase: "writing", percent: 94, ...counts, message: `已处理 ${counts.fetched} 个候选，正在生成输出与证据索引…` });
+        const request = {
+          ...appliedConfig,
+          listUrls: [appliedConfig.currentUrl],
+          detailUrls: [],
+          tabId: tab.id,
+          candidateOutcomes: capture.outcomes,
+          runStatus: capture.runStatus,
+          restoreStatus: capture.restoreStatus || "skipped",
+        };
+        const result = await context.streamNativeMessage({ action: "run_anjuke_property", request }, (progress) => renderProgress(progress));
         if (!result?.ok) throw new Error(result?.reason || result?.errorCode || "ANJUKE_CAPTURE_FAILED");
         results = Array.isArray(result.results) ? result.results : [];
         paths = parseResultPaths(result);
-        config = normalizeConfig({ ...config, ...request });
-        renderProgress({ phase: "completed", percent: 100, fetched: results.length, written: results.length, message: "抓取完成，输出文件回读通过。" });
+        config = normalizeConfig({ ...config, ...appliedConfig });
+        renderProgress({ phase: "completed", percent: 100, ...counts, message: result.status === "partial" || result.status === "stopped" ? "部分完成：结果与证据索引已保留。" : "抓取完成，输出文件回读通过。" });
         await context.storage.save(state());
         renderConfig();
         renderResults();
-        setMessage(elements.anjukePropertyResultMessage, `已完成 ${results.length} 条；结果表格、地图、Excel、CSV、JSON 和原始 HTML 已写入本机。${result.skippedInvalidCount ? `已排除 ${result.skippedInvalidCount} 个非案例页面。` : ""}`, result.skippedInvalidCount ? "warn" : "ok");
-        context.setStatus(`安居客抓取完成：${results.length} 条`, "ok");
+        const skippedNote = counts.skipped ? `跳过 ${counts.skipped} 条` : "";
+        const blockedNote = counts.blocked ? `验证阻断 ${counts.blocked} 条` : "";
+        const restoreNote = result.restoreStatus === "restore_failed" ? "；列表页恢复失败，请手动返回。" : "";
+        const headline = result.status === "stopped"
+          ? `已终止：保留 ${results.length} 条已完成结果。`
+          : result.status === "partial"
+            ? `部分完成：有效 ${results.length} 条。`
+            : `已完成 ${results.length} 条。`;
+        const details = [skippedNote, blockedNote].filter(Boolean).join("，");
+        setMessage(
+          elements.anjukePropertyResultMessage,
+          `${headline}${details ? `（${details}）` : ""}结果页、地图、Excel、CSV、JSON、证据索引和原始 HTML 已写入本机。${restoreNote}`,
+          result.status === "complete" ? (counts.skipped || counts.blocked ? "warn" : "ok") : "warn",
+        );
+        context.setStatus(`安居客抓取${result.status === "complete" ? "完成" : "部分完成"}：${results.length} 条`, result.status === "complete" ? "ok" : "warn");
       } catch (error) {
         renderProgress({ phase: "failed", percent: 0, message: "抓取失败" });
         setMessage(elements.anjukePropertyResultMessage, `抓取未完成：${error?.message || String(error)}`, "error");
         context.setStatus("安居客抓取失败", "error");
       } finally {
         running = false;
+        runControl = { paused: false, stopRequested: false, resumeResolvers: [] };
+        renderRunButtons();
       }
     }
 
@@ -554,25 +735,32 @@ export const anjukePropertyModule = {
         elements = elementMap(context.document);
         const stored = await context.storage.load({});
         config = normalizeConfig({ ...stored, userDataDir: stored.userDataDir || DEFAULT_PROFILE_PATH });
+        appliedConfig = stored?.appliedConfig && typeof stored.appliedConfig === "object" ? normalizeConfig({ ...stored.appliedConfig, userDataDir: config.userDataDir }) : null;
         results = Array.isArray(stored?.results) ? stored.results : [];
         paths = { excelPath: String(stored?.excelPath || ""), csvPath: String(stored?.csvPath || ""), htmlDirectory: String(stored?.htmlDirectory || ""), resultHtmlPath: String(stored?.resultHtmlPath || ""), mapPath: String(stored?.mapPath || "") };
         renderConfig();
         renderResults();
+        renderRunButtons();
         context.scope.on(elements.openAnjukeProperty, "click", () => context.navigate("anjuke-property"));
         context.scope.on(elements.backFromAnjukeProperty, "click", () => context.navigate("home"));
         context.scope.on(elements.importAnjukePropertyCurrentUrl, "click", importCurrentUrl);
+        context.scope.on(elements.openAnjukePropertySource, "click", openSource);
         context.scope.on(elements.chooseAnjukePropertyOutput, "click", chooseOutput);
+        context.scope.on(elements.applyAnjukePropertyParams, "click", applyParameters);
         context.scope.on(elements.runAnjukeProperty, "click", run);
+        context.scope.on(elements.pauseAnjukeProperty, "click", togglePause);
+        context.scope.on(elements.stopAnjukeProperty, "click", stopCapture);
         context.scope.on(elements.openAnjukePropertyExcel, "click", () => openPath(paths.excelPath, "Excel"));
         context.scope.on(elements.openAnjukePropertyCsv, "click", () => openPath(paths.csvPath, "CSV"));
-        context.scope.on(elements.openAnjukePropertyHtml, "click", () => openPath(paths.htmlDirectory, "原始网页目录"));
-        context.scope.on(elements.openAnjukePropertyResult, "click", () => openPath(paths.resultHtmlPath, "结果表格"));
+        context.scope.on(elements.openAnjukePropertyHtml, "click", () => openPath(paths.htmlDirectory, "证据目录"));
+        context.scope.on(elements.openAnjukePropertyResult, "click", () => openPath(paths.resultHtmlPath, "结果页"));
         context.scope.on(elements.openAnjukePropertyMap, "click", () => openPath(paths.mapPath, "地图"));
         context.scope.on(elements.resetAnjukePropertyParams, "click", async () => {
           config = normalizeConfig({ ...DEFAULT_CONFIG, outputDirectory: config.outputDirectory, userDataDir: config.userDataDir });
+          appliedConfig = null;
           await context.storage.save(state());
           renderConfig();
-          setMessage(elements.anjukePropertyParameterMessage, "已清除当前网址，请重新导入安居客当前页面。", "warn");
+          setMessage(elements.anjukePropertyParameterMessage, "已恢复默认参数；请重新导入安居客列表页并应用。", "warn");
         });
         context.scope.on(elements.clearAnjukePropertyResults, "click", async () => {
           results = [];
@@ -581,7 +769,7 @@ export const anjukePropertyModule = {
           renderResults();
           setMessage(elements.anjukePropertyResultMessage, "已清空本地结果记录，原始文件未自动删除。", "ok");
         });
-        for (const id of ["anjukePropertyCaseType", "anjukePropertyMaxCases", "anjukePropertyWaitVerification", "anjukePropertyScreenshot"]) {
+        for (const id of ["anjukePropertyCaseType", "anjukePropertyMaxCases", "anjukePropertyKeyword", "anjukePropertyWaitVerification", "anjukePropertyScreenshot"]) {
           context.scope.on(elements[id], "input", () => {
             config = readConfig();
             renderParameterState();
@@ -592,7 +780,7 @@ export const anjukePropertyModule = {
           });
         }
       },
-      activate() { renderConfig(); renderResults(); },
+      activate() { renderConfig(); renderResults(); renderRunButtons(); },
       deactivate() {},
       dispose() {},
     };
