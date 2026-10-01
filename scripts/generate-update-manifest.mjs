@@ -28,6 +28,54 @@ const githubBaseUrl = String(
 ).trim().replace(/\/+$/, "");
 const versionConfig = JSON.parse(fs.readFileSync(path.join(repoRoot, "extension", "version.json"), "utf8"));
 
+/**
+ * Gitee Release attachment URLs contain an internal numeric attachment id, so
+ * they cannot be reconstructed by joining a base URL with the file name. When
+ * large packages are published as Gitee Release attachments (anonymous raw
+ * downloads are blocked for big files), the real browser_download_url values
+ * must be provided through TIANYUAN_GITEE_ASSET_URL_MAP as a JSON object of
+ * fileName -> attachment URL. Unmapped files keep the base-URL join behavior.
+ */
+function parseGiteeAssetUrlMap(rawValue) {
+  const raw = String(rawValue || "").trim();
+  if (!raw) return {};
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`TIANYUAN_GITEE_ASSET_URL_MAP_INVALID:${error?.message || "not-json"}`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("TIANYUAN_GITEE_ASSET_URL_MAP_INVALID:not-an-object");
+  }
+  const result = {};
+  for (const [fileName, value] of Object.entries(parsed)) {
+    const url = String(value || "").trim();
+    if (!fileName || !url) continue;
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      throw new Error(`TIANYUAN_GITEE_ASSET_URL_MAP_INVALID:${fileName}`);
+    }
+    if (parsedUrl.protocol !== "https:"
+      || !["gitee.com", "raw.giteeusercontent.com"].includes(parsedUrl.hostname)) {
+      throw new Error(`TIANYUAN_GITEE_ASSET_URL_MAP_HOST_FORBIDDEN:${fileName}`);
+    }
+    result[fileName] = parsedUrl.href;
+  }
+  return result;
+}
+
+const giteeAssetUrlMap = parseGiteeAssetUrlMap(process.env.TIANYUAN_GITEE_ASSET_URL_MAP);
+
+function mirrorAssetUrl(mirror, fileName) {
+  if (mirror?.source === "gitee" && giteeAssetUrlMap[fileName]) {
+    return giteeAssetUrlMap[fileName];
+  }
+  return assetUrl(mirror?.baseUrl, fileName);
+}
+
 function sha256(targetPath) {
   return createHash("sha256").update(fs.readFileSync(targetPath)).digest("hex");
 }
@@ -160,17 +208,19 @@ function releaseAsset(patterns, key, options = {}) {
   const digest = sha256(targetPath);
   fs.writeFileSync(path.join(distRoot, `${fileName}.sha256`), `${digest}  ${fileName}\n`);
   const downloadCandidates = releaseMirrors
-    .map(({ source, baseUrl }, index) => ({
-      id: `${source}-${fileName}`,
-      url: assetUrl(baseUrl, fileName),
-      source,
+    .map((mirror, index) => ({
+      id: `${mirror.source}-${fileName}`,
+      url: mirrorAssetUrl(mirror, fileName),
+      source: mirror.source,
       priority: index + 1,
       name: fileName,
       size: fs.statSync(targetPath).size,
       sha256: digest,
     }))
     .filter((candidate) => candidate.url);
-  const primaryUrl = assetUrl(primaryBaseUrl, fileName);
+  const primaryUrl = releaseMirrors.length
+    ? mirrorAssetUrl(releaseMirrors[0], fileName)
+    : "";
   return {
     fileName,
     ...(primaryUrl ? { url: primaryUrl } : {}),
@@ -292,7 +342,10 @@ const windowsHandoff = `# Windows Codex 打包发布交接 — v${versionConfig.
 \`$env:TIANYUAN_GITEE_BASE_URL='https://gitee.com/<owner>/tianyuan-browser-workbench-releases/raw/main'\`
 \`$env:TIANYUAN_GITHUB_BASE_URL='https://github.com/${versionConfig.repository}/releases/download/v${versionConfig.productVersion}'\`
 \`$env:TIANYUAN_GITEE_RELEASE_URL='https://gitee.com/<owner>/tianyuan-browser-workbench-releases'\`
+\`$env:TIANYUAN_GITEE_ASSET_URL_MAP='<JSON对象: 文件名 -> Gitee Release 附件真实直链>'\`
 \`node scripts/generate-update-manifest.mjs\`
+
+Gitee raw 匿名下载对大文件会被拒绝（\`large file require login for access\`）。超过约 10MB 的安装包必须作为 Gitee Release 附件上传，并把发行版页面实际返回的 \`browser_download_url\`（含附件数字 ID，不要自行拼接）逐个写入 \`TIANYUAN_GITEE_ASSET_URL_MAP\`；该映射只对 Gitee 候选生效，未映射文件仍按 \`TIANYUAN_GITEE_BASE_URL\` 拼接，且必须同时设置 \`TIANYUAN_GITEE_BASE_URL\`。manifest、SHA 文件等小文件继续走 raw 镜像，不得重新压缩。
 
 核对 \`update-manifest.json\` 中 build、源码 commit、运行指纹、Windows 包文件名、大小和 SHA-256 与真实文件一致；Gitee 与 GitHub 候选必须使用同一文件名、同一 ZIP 字节和同一 SHA-256。
 
@@ -300,7 +353,7 @@ const windowsHandoff = `# Windows Codex 打包发布交接 — v${versionConfig.
 
 1. 确认 \`gh auth status\` 已通过；不得把 GitHub token 写入仓库、日志或交接文件。
 2. 如 \`v${versionConfig.productVersion}\` 已存在，使用 \`gh release upload v${versionConfig.productVersion} ... --clobber\` 更新 Windows 资产；不存在时先创建同名 Release。
-3. 必须上传完整包、轻量包、两个 SHA 文件、\`update-manifest.json\` 和 \`WINDOWS_CODEX_HANDOFF.md\`；Gitee raw 镜像也必须复制同一份 ZIP、SHA 文件和 manifest，不得重新压缩。
+3. 必须上传完整包、轻量包、两个 SHA 文件、\`update-manifest.json\` 和 \`WINDOWS_CODEX_HANDOFF.md\`；Gitee 侧除 raw 镜像（manifest、SHA 文件等小文件）外，必须把安装包作为 Gitee Release 附件上传，并回读附件真实直链用于生成清单，不得重新压缩。
 4. 上传后使用 \`gh release view v${versionConfig.productVersion} --json url,assets\` 回读资产，并重新下载公开的 \`update-manifest.json\`，确认 build 为 \`${versionConfig.buildNumber}\`。
 
 ## 必须回传
