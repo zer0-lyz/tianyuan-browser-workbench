@@ -8,6 +8,7 @@ TYCPV_PKG="$ROOT_DIR/runtime/tycpv-setup-0.1.0-macos-arm64.pkg"
 PYTHON_PKG="$ROOT_DIR/runtime/python-3.14.6-macos11.pkg"
 PYTHON_BOOTSTRAP="/Library/Frameworks/Python.framework/Versions/3.14/bin/python3"
 WHEEL_DIR="$ROOT_DIR/runtime/python-wheels"
+LXML_WHEEL_MANIFEST="$WHEEL_DIR/lxml-wheels.json"
 
 # 更新器/浏览器链路下载的压缩包会被 macOS 打上 quarantine 标记，
 # 包内 wheel 解包后的二进制会继承该标记，导致 dlopen 被系统策略拒绝。
@@ -79,19 +80,26 @@ python_has_print_dependencies() {
   "$1" -c 'import docx, et_xmlfile, lxml, openpyxl, typing_extensions' >/dev/null 2>&1
 }
 
-python_wheels_compatible() {
-  "$1" - "$WHEEL_DIR" <<'PY'
+python_lxml_wheel_available() {
+  # Since 0.14.32 the lite package no longer bundles the ~8.5 MB lxml
+  # universal2 wheels. Availability means: the pinned wheel manifest lists a
+  # wheel that matches this interpreter's ABI and platform, so step 4 can
+  # fetch and verify it when the managed environment is incomplete.
+  "$1" - "$LXML_WHEEL_MANIFEST" <<'PY'
+import json
 import pathlib
-import re
 import sys
 
-wheel_dir = pathlib.Path(sys.argv[1])
-candidate = f"cp{sys.version_info.major}{sys.version_info.minor}"
-lxml_wheels = sorted(wheel_dir.glob("lxml-*.whl"))
-if not lxml_wheels:
+try:
+    entries = json.loads(pathlib.Path(sys.argv[1]).read_text())
+except Exception:
     raise SystemExit(1)
+candidate = f"cp{sys.version_info.major}{sys.version_info.minor}"
 
-def compatible(name):
+def compatible(entry):
+    name = str(entry.get("fileName", ""))
+    if not name.endswith(".whl"):
+        return False
     parts = name[:-4].split("-")
     if len(parts) < 5:
         return False
@@ -111,8 +119,87 @@ def compatible(name):
         for tag in platform_tags
     )
 
-raise SystemExit(0 if any(compatible(item.name) for item in lxml_wheels) else 1)
+urls_ok = all(
+    isinstance(entry.get("sha256"), str) and len(entry["sha256"]) == 64 and entry.get("urls")
+    for entry in entries
+)
+raise SystemExit(0 if urls_ok and any(compatible(entry) for entry in entries) else 1)
 PY
+}
+
+lxml_wheel_field() {
+  # Print manifest fields of the first wheel compatible with $1's ABI.
+  # "urls" prints one URL per line; other fields print a single value.
+  "$1" - "$LXML_WHEEL_MANIFEST" "$2" <<'PY'
+import json
+import pathlib
+import sys
+
+entries = json.loads(pathlib.Path(sys.argv[1]).read_text())
+field = sys.argv[2]
+candidate = f"cp{sys.version_info.major}{sys.version_info.minor}"
+
+def compatible(entry):
+    name = str(entry.get("fileName", ""))
+    parts = name[:-4].split("-")
+    if len(parts) < 5:
+        return False
+    python_tags = set(parts[-3].split("."))
+    abi_tags = set(parts[-2].split("."))
+    platform_tags = set(parts[-1].split("."))
+    if candidate not in python_tags and "py3" not in python_tags:
+        return False
+    if candidate not in abi_tags and "abi3" not in abi_tags and "none" not in abi_tags:
+        return False
+    if "none" in abi_tags:
+        return True
+    return any(
+        tag == "any"
+        or "universal2" in tag
+        or ("macosx" in tag and "arm64" in tag)
+        for tag in platform_tags
+    )
+
+for entry in entries:
+    if compatible(entry):
+        value = entry.get(field)
+        if isinstance(value, list):
+            for item in value:
+                print(item)
+        elif value is not None:
+            print(value)
+        break
+PY
+}
+
+ensure_lxml_wheel() {
+  # Guarantee the pinned lxml wheel for $1's ABI inside the staged wheel dir.
+  # Primary channel is the Gitee raw mirror, fallback is the GitHub release
+  # asset; both must match the manifest SHA-256 before the file is accepted.
+  local venv_python="$1"
+  local file_name digest candidate_path url
+  file_name="$(lxml_wheel_field "$venv_python" fileName | head -n 1)"
+  digest="$(lxml_wheel_field "$venv_python" sha256 | head -n 1)"
+  [[ -n "$file_name" && -n "$digest" ]] || return 1
+  candidate_path="$WHEEL_DIR/$file_name"
+  if [[ -f "$candidate_path" ]] \
+    && echo "$digest  $candidate_path" | /usr/bin/shasum -a 256 -c - >/dev/null 2>&1; then
+    return 0
+  fi
+  rm -f "$candidate_path" "$candidate_path.tmp"
+  while IFS= read -r url; do
+    [[ -n "$url" ]] || continue
+    if curl -fsSL --retry 2 --connect-timeout 15 -o "$candidate_path.tmp" "$url" 2>/dev/null \
+      && [[ -s "$candidate_path.tmp" ]] \
+      && echo "$digest  $candidate_path.tmp" | /usr/bin/shasum -a 256 -c - >/dev/null 2>&1; then
+      mv "$candidate_path.tmp" "$candidate_path"
+      xattr -dr com.apple.quarantine "$candidate_path" 2>/dev/null || true
+      echo "已获取 $file_name（SHA-256 校验通过）。"
+      return 0
+    fi
+    rm -f "$candidate_path.tmp"
+  done < <(lxml_wheel_field "$venv_python" urls)
+  return 1
 }
 
 configured_python_candidates() {
@@ -164,7 +251,7 @@ select_python_runtime() {
     version="$(python_version "$candidate" || true)"
     [[ -n "$version" ]] || continue
     python_can_create_venv "$candidate" || continue
-    python_wheels_compatible "$candidate" || continue
+    python_lxml_wheel_available "$candidate" || continue
     PYTHON_BIN="$candidate"
     PYTHON_VERSION="$version"
     return 0
@@ -206,7 +293,7 @@ fi
 echo "3/6 安装或检查 Python..."
 if ! select_python_runtime; then
   if [[ "$UPDATE_MODE" == "1" ]]; then
-    fail "UPDATE_PYTHON_RUNTIME_UNAVAILABLE: 未找到可复用且与包内 lxml wheel ABI 兼容的 Python；当前版本未改变。请先运行完整安装包，或安装带 venv/ensurepip 的 Python 3.9+ 后重试。"
+    fail "UPDATE_PYTHON_RUNTIME_UNAVAILABLE: 未找到可复用的托管运行环境，也没有能创建 venv 且可补齐匹配 lxml 组件的 Python；当前版本未改变。请先运行完整安装包，或安装带 venv/ensurepip 的 Python 3.9+ 后重试。"
   fi
   [[ -f "$PYTHON_PKG" ]] || fail "缺少 Python 安装包。"
   echo "需要输入当前 Mac 的管理员密码来安装 Python。"
@@ -220,16 +307,25 @@ mkdir -p "$WORKBENCH_ROOT"
 if [[ ! -x "$VENV_DIR/bin/python3" ]]; then
   "$PYTHON_BIN" -m venv "$VENV_DIR" || fail "无法创建 Python 环境。"
 fi
-"$VENV_DIR/bin/python3" -m pip install \
-  --disable-pip-version-check \
-  --no-index \
-  --find-links "$WHEEL_DIR" \
-  "openpyxl==3.1.5" \
-  "et_xmlfile==2.0.0" \
-  "python-docx==1.2.0" \
-  "lxml==6.1.0" \
-  "typing_extensions==4.16.0" || fail "离线安装打印格式依赖失败。"
 xattr -dr com.apple.quarantine "$VENV_DIR" 2>/dev/null || true
+if python_has_print_dependencies "$VENV_DIR/bin/python3"; then
+  # 0.14.32 起轻量更新包不再捆绑 lxml wheel：依赖完整的托管环境直接复用，
+  # 不产生任何下载；只有环境不完整时才按固定 SHA-256 补齐缺失组件。
+  echo "本机打印格式运行环境完整，直接复用。"
+else
+  ensure_lxml_wheel "$VENV_DIR/bin/python3" \
+    || fail "UPDATE_LXML_WHEEL_UNAVAILABLE: 无法获取与当前 Python 匹配的 lxml 组件（已尝试 Gitee 主通道与 GitHub 备用通道，SHA-256 校验均未通过或下载失败）；当前版本未改变。请检查网络后重试，或使用完整安装包。"
+  "$VENV_DIR/bin/python3" -m pip install \
+    --disable-pip-version-check \
+    --no-index \
+    --find-links "$WHEEL_DIR" \
+    "openpyxl==3.1.5" \
+    "et_xmlfile==2.0.0" \
+    "python-docx==1.2.0" \
+    "lxml==6.1.0" \
+    "typing_extensions==4.16.0" || fail "离线安装打印格式依赖失败。"
+  xattr -dr com.apple.quarantine "$VENV_DIR" 2>/dev/null || true
+fi
 
 echo "5/6 同步扩展、Helper、Bridge 和 Connector..."
 write_status "installing" 88 "正在同步全部工作台组件"
