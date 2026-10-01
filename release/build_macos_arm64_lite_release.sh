@@ -35,7 +35,12 @@ mkdir -p "$STAGE/runtime/python-wheels" "$STAGE/scripts" "$DIST_DIR" "$WHEEL_CAC
 
 # Keep pure-Python dependencies independent of the builder interpreter. The
 # binary lxml wheel is fetched once per supported CPython ABI so a macOS 3.9
-# machine is never offered a cp314-only package.
+# machine is never offered a cp314-only package. Since 0.14.32 the lite
+# package itself no longer bundles the ~8.5 MB lxml universal2 wheels: the
+# installer reuses the already-installed runtime environment, and only fetches
+# a pinned lxml wheel when the local environment is incomplete. The wheels are
+# still downloaded here to pin their SHA-256 and to publish them as release
+# assets for that fetch path.
 python3 -m pip download \
   --quiet \
   --disable-pip-version-check \
@@ -82,7 +87,53 @@ cp "$STAGE/native-helper/runtime-compat.json" "$STAGE/extension/runtime-compat.j
 cp "$ROOT_DIR/scripts/install-local-runtime.mjs" "$STAGE/scripts/install-local-runtime.mjs"
 cp "$ROOT_DIR/scripts/runtime-fingerprint.mjs" "$STAGE/scripts/runtime-fingerprint.mjs"
 cp "$ROOT_DIR/scripts/print-runtime-build-id.mjs" "$STAGE/scripts/print-runtime-build-id.mjs"
-cp "$WHEEL_CACHE"/openpyxl-3.1.5-*.whl "$WHEEL_CACHE"/et_xmlfile-2.0.0-*.whl "$WHEEL_CACHE"/python_docx-1.2.0-*.whl "$WHEEL_CACHE"/typing_extensions-*.whl "$WHEEL_CACHE"/lxml-6.1.0-*-macosx_*.whl "$STAGE/runtime/python-wheels/"
+cp "$WHEEL_CACHE"/openpyxl-3.1.5-*.whl "$WHEEL_CACHE"/et_xmlfile-2.0.0-*.whl "$WHEEL_CACHE"/python_docx-1.2.0-*.whl "$WHEEL_CACHE"/typing_extensions-*.whl "$STAGE/runtime/python-wheels/"
+
+# Publish the pinned lxml wheels next to the package (not inside it) so the
+# installer can fetch exactly these bytes when a machine lacks them, and so
+# the release channels can carry the same file for SHA-256 verification.
+GITEE_RAW_BASE="${TIANYUAN_GITEE_RAW_BASE:-https://gitee.com/zer0_y/tianyuan-browser-workbench-releases/raw/master}"
+GITHUB_DOWNLOAD_BASE="${TIANYUAN_GITHUB_DOWNLOAD_BASE:-https://github.com/zer0-lyz/tianyuan-browser-workbench-releases/releases/download/v${VERSION}}"
+python3 - "$WHEEL_CACHE" "$MACOS_PYTHON_TARGETS" "$STAGE/runtime/python-wheels/lxml-wheels.json" "$GITEE_RAW_BASE" "$GITHUB_DOWNLOAD_BASE" <<'PY'
+import hashlib
+import json
+import pathlib
+import sys
+
+wheel_cache = pathlib.Path(sys.argv[1])
+targets = sys.argv[2].split()
+output = pathlib.Path(sys.argv[3])
+gitee_raw_base = sys.argv[4].rstrip("/")
+github_download_base = sys.argv[5].rstrip("/")
+
+entries = []
+for target in targets:
+    matches = sorted(wheel_cache.glob(f"lxml-6.1.0-cp{target}-cp{target}-macosx_*.whl"))
+    if not matches:
+        raise SystemExit(f"missing lxml 6.1.0 wheel for cp{target} in wheel cache")
+    wheel = matches[-1]
+    digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    entries.append({
+        "fileName": wheel.name,
+        "pythonTarget": f"cp{target}",
+        "size": wheel.stat().st_size,
+        "sha256": digest,
+        "urls": [
+            f"{gitee_raw_base}/{wheel.name}",
+            f"{github_download_base}/{wheel.name}",
+        ],
+    })
+output.write_text(json.dumps(entries, indent=2) + "\n")
+PY
+for PYTHON_TARGET in $MACOS_PYTHON_TARGETS; do
+  LXML_WHEEL_FILE="$(ls "$WHEEL_CACHE"/lxml-6.1.0-cp${PYTHON_TARGET}-cp${PYTHON_TARGET}-macosx_*.whl | tail -1)"
+  LXML_WHEEL_BASE="$(basename "$LXML_WHEEL_FILE")"
+  cp -f "$LXML_WHEEL_FILE" "$DIST_DIR/$LXML_WHEEL_BASE"
+  (
+    cd "$DIST_DIR"
+    /usr/bin/shasum -a 256 "$LXML_WHEEL_BASE" > "$LXML_WHEEL_BASE.sha256"
+  )
+done
 cp "$ROOT_DIR/release/macos-arm64/安装.command" "$STAGE/安装.command"
 cp "$ROOT_DIR/release/macos-arm64/卸载.command" "$STAGE/卸载.command"
 cp "$ROOT_DIR/release/macos-arm64/安装使用说明.md" "$STAGE/安装使用说明.md"

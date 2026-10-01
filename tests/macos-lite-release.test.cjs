@@ -51,11 +51,12 @@ const archivePath = output.trim().split(/\r?\n/).find((line) => line.endsWith(".
 assert.ok(archivePath, output);
 assert.equal(fs.existsSync(archivePath), true);
 assert.match(path.basename(archivePath), /macos-arm64-lite/);
-// Supporting both the system Python 3.9 path and the packaged Python 3.14
-// path requires two lxml universal2 wheels (about 8.5 MB compressed each).
-// Keep a meaningful lite-package ceiling without retaining the obsolete
-// single-ABI 10 MB limit.
-assert.ok(fs.statSync(archivePath).size < 25 * 1024 * 1024);
+// Since 0.14.32 the lite package reuses the machine's installed runtime and
+// no longer bundles the two ~8.5 MB lxml universal2 wheels. It must stay far
+// below the Gitee anonymous raw download limit while still carrying the
+// pinned wheel manifest used to repair incomplete environments.
+assert.ok(fs.statSync(archivePath).size > 512 * 1024, "lite package is unexpectedly small");
+assert.ok(fs.statSync(archivePath).size < 5 * 1024 * 1024, "lite package must stay below the Gitee anonymous raw limit");
 
 const entries = JSON.parse(execFileSync("python3", [
   "-c",
@@ -68,8 +69,8 @@ const entries = JSON.parse(execFileSync("python3", [
 ], { encoding: "utf8" }));
 const hasName = (suffix) => entries.some((entry) => entry.endsWith(suffix));
 const lxmlWheels = entries.filter((entry) => /\/lxml-.*-macosx_.*\.whl$/.test(entry));
-assert.ok(lxmlWheels.some((entry) => /-cp39-/.test(entry)), "lite package must carry an lxml wheel compatible with Python 3.9");
-assert.ok(lxmlWheels.some((entry) => /-cp314-/.test(entry)), "lite package must carry an lxml wheel compatible with Python 3.14");
+assert.deepEqual(lxmlWheels, [], "lite package must not bundle lxml wheels");
+assert.equal(hasName("/runtime/python-wheels/lxml-wheels.json"), true, "lite package must carry the pinned lxml wheel manifest");
 
 assert.equal(hasName("/安装.command"), true);
 assert.equal(hasName("/native-helper/update_checker.js"), true);
@@ -78,6 +79,28 @@ assert.equal(hasName("/scripts/runtime-fingerprint.mjs"), true);
 assert.equal(entries.some((entry) => entry.includes("/runtime/python-wheels/openpyxl-")), true);
 assert.equal(entries.some((entry) => entry.endsWith("/runtime/tycpv-setup-0.1.0-macos-arm64.pkg")), false);
 assert.equal(entries.some((entry) => entry.endsWith("/runtime/python-3.14.6-macos11.pkg")), false);
+
+const wheelManifest = JSON.parse(execFileSync("/usr/bin/unzip", [
+  "-p",
+  archivePath,
+  "*/runtime/python-wheels/lxml-wheels.json",
+], { encoding: "utf8" }));
+assert.equal(Array.isArray(wheelManifest), true);
+assert.equal(wheelManifest.length, 2);
+const seenTargets = new Set();
+for (const entry of wheelManifest) {
+  assert.match(entry.fileName, /^lxml-6\.1\.0-cp\d+-cp\d+-macosx_.*\.whl$/);
+  assert.match(entry.pythonTarget, /^cp\d+$/);
+  seenTargets.add(entry.pythonTarget);
+  assert.match(entry.sha256, /^[0-9a-f]{64}$/);
+  assert.ok(entry.size > 1024 * 1024, "lxml wheel asset must be a real binary wheel");
+  assert.deepEqual(entry.urls.length, 2);
+  assert.equal(entry.urls[0], `https://gitee.com/zer0_y/tianyuan-browser-workbench-releases/raw/master/${entry.fileName}`);
+  assert.match(entry.urls[0], /^https:\/\/gitee\.com\//);
+  assert.match(entry.urls[1], /^https:\/\/github\.com\/zer0-lyz\/tianyuan-browser-workbench-releases\/releases\/download\//);
+  assert.ok(entry.urls[1].endsWith(`/${entry.fileName}`));
+}
+assert.deepEqual([...seenTargets].sort(), ["cp314", "cp39"], "both CPython 3.9 and 3.14 must stay supported");
 
 const versionText = execFileSync("/usr/bin/unzip", [
   "-p",
