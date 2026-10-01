@@ -465,6 +465,140 @@ async function run() {
     /UPDATE_CHECK_TIMEOUT/,
   );
 
+  // When the authoritative GitHub manifest cannot be fetched but the GitHub
+  // API succeeds, the version-matched mirror manifest may still contribute
+  // its Gitee download candidate: the API confirmed the identical package
+  // (name, size, SHA-256), so the mirror only adds a URL, never a version.
+  const apiPackageName = "tianyuan-workbench-v0.16.0-windows-x64.zip";
+  const apiAssetDigest = "d".repeat(64);
+  const apiEndpoint = "https://api.github.com/repos/zer0-lyz/tianyuan-browser-workbench-releases/releases/latest";
+  const mergedGiteeUrl = "https://gitee.com/example/tianyuan/raw/main/tianyuan-workbench-v0.16.0-windows-x64.zip";
+  const mirrorMergeResult = await checkGithubUpdate({
+    currentVersion: "0.15.0",
+    currentBuildNumber: 1,
+    platform: "win32",
+    architecture: "x64",
+    updateManifestUrls: [
+      "https://gitee.com/example/tianyuan/raw/main/update-manifest.json",
+      "https://github.com/example/releases/latest/download/update-manifest.json",
+    ],
+  }, {
+    fetchImpl: async (requestUrl) => {
+      const url = String(requestUrl);
+      if (url === "https://gitee.com/example/tianyuan/raw/main/update-manifest.json") {
+        return response(200, {
+          source: "gitee",
+          productVersion: "0.16.0",
+          buildNumber: 2,
+          runtimeBuildId: "release-build",
+          releaseUrl: "https://gitee.com/example/tianyuan",
+          assets: {
+            "windows-x64": {
+              fileName: apiPackageName,
+              url: apiPackageName,
+              size: 1234,
+              sha256: apiAssetDigest,
+            },
+          },
+        });
+      }
+      if (url.startsWith("https://github.com/example/releases/latest/download/")) {
+        throw new Error("This operation was aborted");
+      }
+      if (url === apiEndpoint) {
+        return response(200, {
+          tag_name: "v0.16.0",
+          name: "v0.16.0",
+          body: "release body",
+          prerelease: false,
+          assets: [
+            {
+              id: "asset-1",
+              name: apiPackageName,
+              browser_download_url: `https://github.com/example/releases/download/v0.16.0/${apiPackageName}`,
+              url: "https://api.github.com/repos/example/releases/assets/asset-1",
+              size: 1234,
+              digest: `sha256:${apiAssetDigest}`,
+              updated_at: "2026-10-02T00:00:00Z",
+            },
+          ],
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+  });
+  assert.equal(mirrorMergeResult.updateAvailable, true);
+  assert.equal(mirrorMergeResult.latestVersion, "0.16.0");
+  assert.equal(mirrorMergeResult.preferredDownloadChannel, "gitee");
+  assert.equal(mirrorMergeResult.downloadCandidates[0].source, "gitee");
+  assert.equal(mirrorMergeResult.downloadCandidates[0].url, mergedGiteeUrl);
+  assert.equal(mirrorMergeResult.downloadCandidates[0].sha256, apiAssetDigest);
+  assert.equal(mirrorMergeResult.downloadCandidates[1].source, "github-api");
+  assert.equal(mirrorMergeResult.downloadCandidates[2].source, "github-release");
+  for (const candidate of mirrorMergeResult.downloadCandidates) {
+    assert.equal(candidate.sha256, apiAssetDigest);
+    assert.equal(candidate.size, 1234);
+  }
+
+  // A stale mirror (same version, different package digest) must not inject
+  // its candidate; the API-path candidates stay authoritative.
+  const staleMirrorResult = await checkGithubUpdate({
+    currentVersion: "0.15.0",
+    currentBuildNumber: 1,
+    platform: "win32",
+    architecture: "x64",
+    updateManifestUrls: [
+      "https://gitee.com/example/tianyuan/raw/main/update-manifest.json",
+      "https://github.com/example/releases/latest/download/update-manifest.json",
+    ],
+  }, {
+    fetchImpl: async (requestUrl) => {
+      const url = String(requestUrl);
+      if (url === "https://gitee.com/example/tianyuan/raw/main/update-manifest.json") {
+        return response(200, {
+          source: "gitee",
+          productVersion: "0.16.0",
+          buildNumber: 2,
+          assets: {
+            "windows-x64": {
+              fileName: apiPackageName,
+              url: apiPackageName,
+              size: 9999,
+              sha256: "e".repeat(64),
+            },
+          },
+        });
+      }
+      if (url.startsWith("https://github.com/example/releases/latest/download/")) {
+        throw new Error("This operation was aborted");
+      }
+      if (url === apiEndpoint) {
+        return response(200, {
+          tag_name: "v0.16.0",
+          name: "v0.16.0",
+          body: "release body",
+          prerelease: false,
+          assets: [
+            {
+              id: "asset-1",
+              name: apiPackageName,
+              browser_download_url: `https://github.com/example/releases/download/v0.16.0/${apiPackageName}`,
+              url: "https://api.github.com/repos/example/releases/assets/asset-1",
+              size: 1234,
+              digest: `sha256:${apiAssetDigest}`,
+              updated_at: "2026-10-02T00:00:00Z",
+            },
+          ],
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+  });
+  assert.equal(staleMirrorResult.updateAvailable, true);
+  assert.equal(staleMirrorResult.latestVersion, "0.16.0");
+  assert.equal(staleMirrorResult.downloadCandidates.some((candidate) => candidate.source === "gitee"), false);
+  assert.equal(staleMirrorResult.preferredDownloadChannel, "github-api");
+
   console.log("GitHub update checker tests passed.");
 }
 
