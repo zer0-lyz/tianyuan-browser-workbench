@@ -170,6 +170,86 @@ for (const key of ["windows-x64", "macos-arm64"]) {
 }
 assert.equal(dualManifest.releaseUrl, "https://gitee.com/example/tianyuan");
 
+const macAttachmentUrl = `https://gitee.com/example/tianyuan/releases/download/v${version}/114514/tianyuan-workbench-v${version}-macos-arm64-lite.zip`;
+execFileSync(process.execPath, [
+  path.join(repoRoot, "scripts", "generate-update-manifest.mjs"),
+], {
+  cwd: repoRoot,
+  env: {
+    ...process.env,
+    TIANYUAN_RELEASE_OUTPUT_DIR: tempRoot,
+    TIANYUAN_RELEASE_BASE_URL: "",
+    TIANYUAN_GITEE_BASE_URL: "https://gitee.com/example/tianyuan/raw/main",
+    TIANYUAN_GITHUB_BASE_URL: `https://github.com/example/releases/download/v${version}`,
+    TIANYUAN_GITEE_RELEASE_URL: "https://gitee.com/example/tianyuan",
+    TIANYUAN_GITEE_ASSET_URL_MAP: JSON.stringify({
+      [`tianyuan-workbench-v${version}-macos-arm64-lite.zip`]: macAttachmentUrl,
+    }),
+    TIANYUAN_WINDOWS_PACKAGE_MODE: "lite",
+    TIANYUAN_MACOS_PACKAGE_MODE: "lite",
+  },
+  stdio: ["ignore", "pipe", "pipe"],
+});
+const attachmentManifest = JSON.parse(
+  fs.readFileSync(path.join(tempRoot, "update-manifest.json"), "utf8"),
+);
+for (const key of ["windows-x64", "macos-arm64"]) {
+  const asset = attachmentManifest.assets[key];
+  assert.equal(asset.downloadCandidates.length, 2);
+  assert.equal(asset.downloadCandidates[0].source, "gitee");
+  assert.equal(asset.downloadCandidates[1].source, "github-release");
+  assert.equal(asset.downloadCandidates[0].priority, 1);
+  assert.equal(asset.downloadCandidates[1].priority, 2);
+  assert.equal(asset.downloadCandidates[0].sha256, asset.sha256);
+  assert.equal(asset.downloadCandidates[1].sha256, asset.sha256);
+}
+// Mapped macOS asset uses the real Gitee Release attachment URL (which
+// contains an internal numeric attachment id) for both the primary URL and
+// the Gitee candidate, while the unmapped Windows asset keeps the base-URL
+// join behavior.
+assert.equal(
+  attachmentManifest.assets["macos-arm64"].url,
+  macAttachmentUrl,
+);
+assert.equal(
+  attachmentManifest.assets["macos-arm64"].downloadCandidates[0].url,
+  macAttachmentUrl,
+);
+assert.equal(
+  attachmentManifest.assets["windows-x64"].url,
+  `https://gitee.com/example/tianyuan/raw/main/${attachmentManifest.assets["windows-x64"].fileName}`,
+);
+assert.equal(
+  attachmentManifest.assets["windows-x64"].downloadCandidates[0].url,
+  `https://gitee.com/example/tianyuan/raw/main/${attachmentManifest.assets["windows-x64"].fileName}`,
+);
+assert.throws(() => execFileSync(process.execPath, [
+  path.join(repoRoot, "scripts", "generate-update-manifest.mjs"),
+], {
+  cwd: repoRoot,
+  env: {
+    ...process.env,
+    TIANYUAN_RELEASE_OUTPUT_DIR: tempRoot,
+    TIANYUAN_GITEE_BASE_URL: "https://gitee.com/example/tianyuan/raw/main",
+    TIANYUAN_GITEE_ASSET_URL_MAP: "{not-json",
+  },
+  stdio: ["ignore", "pipe", "pipe"],
+}));
+assert.throws(() => execFileSync(process.execPath, [
+  path.join(repoRoot, "scripts", "generate-update-manifest.mjs"),
+], {
+  cwd: repoRoot,
+  env: {
+    ...process.env,
+    TIANYUAN_RELEASE_OUTPUT_DIR: tempRoot,
+    TIANYUAN_GITEE_BASE_URL: "https://gitee.com/example/tianyuan/raw/main",
+    TIANYUAN_GITEE_ASSET_URL_MAP: JSON.stringify({
+      "evil.zip": "https://evil.example.com/evil.zip",
+    }),
+  },
+  stdio: ["ignore", "pipe", "pipe"],
+}));
+
 execFileSync(process.execPath, [
   path.join(repoRoot, "scripts", "generate-update-manifest.mjs"),
 ], {
