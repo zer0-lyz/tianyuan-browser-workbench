@@ -26,6 +26,9 @@ PYTHON_PKG="$CACHE_DIR/python-3.14.6-macos11.pkg"
 PYTHON_URL="https://www.python.org/ftp/python/3.14.6/python-3.14.6-macos11.pkg"
 PYTHON_SHA256="d3c9fff52214847e4fab03e9eaf53dd2a8e51e3534aa0b61f201b749f86bef28"
 WHEEL_CACHE="$CACHE_DIR/python-wheels"
+MACOS_PYTHON_TARGETS="${TIANYUAN_MACOS_PYTHON_TARGETS:-39 314}"
+PIP_DOWNLOAD_TIMEOUT="${PIP_DOWNLOAD_TIMEOUT:-30}"
+PIP_DOWNLOAD_RETRIES="${PIP_DOWNLOAD_RETRIES:-2}"
 
 # 运行指纹统一由 scripts/runtime-fingerprint.mjs 计算，这里只调用封装脚本。
 RUNTIME_BUILD_ID="$(node "$ROOT_DIR/scripts/print-runtime-build-id.mjs" "$ROOT_DIR")"
@@ -44,11 +47,29 @@ echo "$PYTHON_SHA256  $PYTHON_PKG" | /usr/bin/shasum -a 256 -c -
 python3 -m pip download \
   --quiet \
   --disable-pip-version-check \
+  --timeout "$PIP_DOWNLOAD_TIMEOUT" \
+  --retries "$PIP_DOWNLOAD_RETRIES" \
+  --only-binary=:all: \
   --dest "$WHEEL_CACHE" \
   "openpyxl==3.1.5" \
   "et_xmlfile==2.0.0" \
   "python-docx==1.2.0" \
-  "lxml==6.1.0"
+  "typing_extensions==4.16.0"
+for PYTHON_TARGET in $MACOS_PYTHON_TARGETS; do
+  python3 -m pip download \
+    --quiet \
+    --disable-pip-version-check \
+    --timeout "$PIP_DOWNLOAD_TIMEOUT" \
+    --retries "$PIP_DOWNLOAD_RETRIES" \
+    --only-binary=:all: \
+    --no-deps \
+    --platform macosx_11_0_arm64 \
+    --implementation cp \
+    --python-version "$PYTHON_TARGET" \
+    --abi "cp${PYTHON_TARGET}" \
+    --dest "$WHEEL_CACHE" \
+    "lxml==6.1.0"
+done
 
 /usr/bin/ditto "$ROOT_DIR/extension" "$STAGE/extension"
 /usr/bin/ditto "$ROOT_DIR/native-helper" "$STAGE/native-helper"
@@ -77,7 +98,9 @@ cp "$ROOT_DIR/release/macos-arm64/卸载.command" "$STAGE/卸载.command"
 cp "$ROOT_DIR/release/macos-arm64/安装使用说明.md" "$STAGE/安装使用说明.md"
 chmod +x "$STAGE/安装.command" "$STAGE/卸载.command" "$STAGE/native-helper/install_native_host.sh"
 find "$STAGE" -type f \( -name ".DS_Store" -o -name "._*" \) -delete
-find "$STAGE" -type d -name "__MACOSX" -prune -exec rm -rf {} +
+while IFS= read -r -d '' MACOSX_DIR; do
+  find "$MACOSX_DIR" -depth -delete
+done < <(find "$STAGE" -type d -name "__MACOSX" -print0)
 
 cat > "$STAGE/VERSION.txt" <<EOF
 name=天源浏览器工作台

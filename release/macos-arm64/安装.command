@@ -6,6 +6,7 @@ WORKBENCH_ROOT="$HOME/.tianyuan-workbench"
 VENV_DIR="$WORKBENCH_ROOT/python"
 TYCPV_PKG="$ROOT_DIR/runtime/tycpv-setup-0.1.0-macos-arm64.pkg"
 PYTHON_PKG="$ROOT_DIR/runtime/python-3.14.6-macos11.pkg"
+PYTHON_BOOTSTRAP="/Library/Frameworks/Python.framework/Versions/3.14/bin/python3"
 WHEEL_DIR="$ROOT_DIR/runtime/python-wheels"
 
 # 更新器/浏览器链路下载的压缩包会被 macOS 打上 quarantine 标记，
@@ -24,18 +25,25 @@ write_status() {
   local phase="$1"
   local percent="$2"
   local message="$3"
+  local error_code="${4:-}"
   [[ -n "$UPDATE_STATUS_PATH" && -x "$NODE_BIN" ]] || return 0
-  "$NODE_BIN" - "$UPDATE_STATUS_PATH" "$phase" "$percent" "$message" <<'NODE'
+  "$NODE_BIN" - "$UPDATE_STATUS_PATH" "$phase" "$percent" "$message" "$error_code" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
-const [target, phase, percent, message] = process.argv.slice(2);
+const [target, phase, percent, message, errorCode] = process.argv.slice(2);
+const normalizedPhase = ["preparing", "stopping_services", "waiting_for_file_release"].includes(phase)
+  ? "installing"
+  : (phase === "restarting_services" ? "verifying_install" : (phase === "test_complete" ? "complete" : phase));
 fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
 fs.writeFileSync(target, `${JSON.stringify({
   ok: phase !== "failed",
   action: "workbench_update",
   phase,
+  normalizedPhase,
   percent: Number(percent),
   message,
+  ...(errorCode ? { errorCode } : {}),
+  ...(phase === "failed" ? { currentVersionUnchanged: true, nextAction: "请查看诊断摘要后运行完整安装包或重试" } : {}),
   updatedAt: new Date().toISOString(),
   security: { credentialsReturned: false, tokenUsed: false },
 }, null, 2)}\n`, { mode: 0o600 });
@@ -50,11 +58,125 @@ pause() {
 }
 
 fail() {
-  write_status "failed" 0 "$1"
+  local message="$1"
+  local error_code="${message%%:*}"
+  [[ "$error_code" == "$message" ]] && error_code="UPDATE_INSTALL_FAILED"
+  write_status "failed" 0 "$message" "$error_code"
   echo "安装失败：$1" >&2
   pause
   exit 1
 }
+
+python_version() {
+  "$1" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")' 2>/dev/null
+}
+
+python_can_create_venv() {
+  "$1" -c 'import ensurepip, venv' >/dev/null 2>&1
+}
+
+python_has_print_dependencies() {
+  "$1" -c 'import docx, et_xmlfile, lxml, openpyxl, typing_extensions' >/dev/null 2>&1
+}
+
+python_wheels_compatible() {
+  "$1" - "$WHEEL_DIR" <<'PY'
+import pathlib
+import re
+import sys
+
+wheel_dir = pathlib.Path(sys.argv[1])
+candidate = f"cp{sys.version_info.major}{sys.version_info.minor}"
+lxml_wheels = sorted(wheel_dir.glob("lxml-*.whl"))
+if not lxml_wheels:
+    raise SystemExit(1)
+
+def compatible(name):
+    parts = name[:-4].split("-")
+    if len(parts) < 5:
+        return False
+    python_tags = set(parts[-3].split("."))
+    abi_tags = set(parts[-2].split("."))
+    platform_tags = set(parts[-1].split("."))
+    if candidate not in python_tags and "py3" not in python_tags:
+        return False
+    if candidate not in abi_tags and "abi3" not in abi_tags and "none" not in abi_tags:
+        return False
+    if "none" in abi_tags:
+        return True
+    return any(
+        tag == "any"
+        or "universal2" in tag
+        or ("macosx" in tag and "arm64" in tag)
+        for tag in platform_tags
+    )
+
+raise SystemExit(0 if any(compatible(item.name) for item in lxml_wheels) else 1)
+PY
+}
+
+configured_python_candidates() {
+  local config_path configured
+  for config_path in \
+    "$WORKBENCH_ROOT/runtime-config.json" \
+    "$WORKBENCH_ROOT/native-helper/runtime-config.json"; do
+    [[ -f "$config_path" ]] || continue
+    configured=""
+    if [[ -x "$NODE_BIN" ]]; then
+      configured="$($NODE_BIN - "$config_path" <<'NODE'
+const fs = require("node:fs");
+try {
+  const value = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+  process.stdout.write(String(value.pythonBin || value.pythonPath || ""));
+} catch {}
+NODE
+)"
+    fi
+    [[ -n "$configured" ]] && printf '%s\n' "$configured"
+  done
+}
+
+select_python_runtime() {
+  local candidate version
+  # A previously created managed environment is the safest update path. It
+  # does not require the system to have the Python version used at build time.
+  if [[ -x "$VENV_DIR/bin/python3" ]] \
+    && python_has_print_dependencies "$VENV_DIR/bin/python3"; then
+    PYTHON_BIN="$VENV_DIR/bin/python3"
+    PYTHON_VERSION="$(python_version "$PYTHON_BIN")"
+    return 0
+  fi
+
+  local -a candidates=()
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] && candidates+=("$candidate")
+  done < <(configured_python_candidates)
+  if [[ -x "$PYTHON_BOOTSTRAP" ]]; then candidates+=("$PYTHON_BOOTSTRAP"); fi
+  candidate="$(command -v python3 || true)"
+  [[ -n "$candidate" ]] && candidates+=("$candidate")
+  [[ -x "/usr/bin/python3" ]] && candidates+=("/usr/bin/python3")
+
+  local seen=$'\n'
+  for candidate in "${candidates[@]}"; do
+    [[ -x "$candidate" ]] || continue
+    [[ "$seen" == *$'\n'"$candidate"$'\n'* ]] && continue
+    seen+="$candidate"$'\n'
+    version="$(python_version "$candidate" || true)"
+    [[ -n "$version" ]] || continue
+    python_can_create_venv "$candidate" || continue
+    python_wheels_compatible "$candidate" || continue
+    PYTHON_BIN="$candidate"
+    PYTHON_VERSION="$version"
+    return 0
+  done
+  return 1
+}
+
+if [[ "${TIANYUAN_INSTALLER_SELF_TEST:-0}" == "1" ]]; then
+  [[ -n "$PYTHON_BOOTSTRAP" ]]
+  echo "installer self-test passed"
+  exit 0
+fi
 
 [[ "$(uname -s)" == "Darwin" ]] || fail "此安装包仅支持 macOS。"
 [[ "$(uname -m)" == "arm64" ]] || fail "此安装包仅支持 Apple Silicon。"
@@ -82,19 +204,21 @@ fi
 [[ -x "$NODE_BIN" ]] || fail "未找到 Node.js 运行时。"
 
 echo "3/6 安装或检查 Python..."
-PYTHON_BOOTSTRAP="/Library/Frameworks/Python.framework/Versions/3.14/bin/python3"
-if [[ ! -x "$PYTHON_BOOTSTRAP" ]]; then
-  [[ "$UPDATE_MODE" != "1" ]] || fail "本机缺少 Python，请手动运行安装包完成首次安装。"
+if ! select_python_runtime; then
+  if [[ "$UPDATE_MODE" == "1" ]]; then
+    fail "UPDATE_PYTHON_RUNTIME_UNAVAILABLE: 未找到可复用且与包内 lxml wheel ABI 兼容的 Python；当前版本未改变。请先运行完整安装包，或安装带 venv/ensurepip 的 Python 3.9+ 后重试。"
+  fi
   [[ -f "$PYTHON_PKG" ]] || fail "缺少 Python 安装包。"
   echo "需要输入当前 Mac 的管理员密码来安装 Python。"
   sudo /usr/sbin/installer -pkg "$PYTHON_PKG" -target / || fail "Python 安装失败。"
+  select_python_runtime || fail "UPDATE_PYTHON_RUNTIME_UNAVAILABLE: Python 安装后仍没有与包内 wheel ABI 兼容的运行时。"
 fi
-[[ -x "$PYTHON_BOOTSTRAP" ]] || fail "Python 3.14 安装后仍不可用。"
+echo "使用 Python $PYTHON_VERSION：$PYTHON_BIN"
 
 echo "4/6 准备本机 Python 环境..."
 mkdir -p "$WORKBENCH_ROOT"
 if [[ ! -x "$VENV_DIR/bin/python3" ]]; then
-  "$PYTHON_BOOTSTRAP" -m venv "$VENV_DIR" || fail "无法创建 Python 环境。"
+  "$PYTHON_BIN" -m venv "$VENV_DIR" || fail "无法创建 Python 环境。"
 fi
 "$VENV_DIR/bin/python3" -m pip install \
   --disable-pip-version-check \

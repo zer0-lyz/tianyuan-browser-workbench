@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -68,6 +69,10 @@ assert.equal(
   manifest.assets["windows-x64"].url,
   `https://gitee.com/example/tianyuan/raw/main/tianyuan-workbench-v${version}-windows-x64.zip`,
 );
+assert.equal(
+  manifest.releaseUrl,
+  "https://gitee.com/example/tianyuan",
+);
 assert.equal(manifest.source, "static-manifest");
 assert.equal(manifest.channel, versionConfig.channel);
 assert.equal(fs.readFileSync(path.join(tempRoot, `tianyuan-workbench-v${version}-macos-arm64.zip`), "utf8"), "mac-full");
@@ -120,6 +125,83 @@ execFileSync(process.execPath, [
     liteManifest.assets["macos-arm64"].fileName,
     `tianyuan-workbench-v${version}-macos-arm64-lite.zip`,
   );
+
+execFileSync(process.execPath, [
+  path.join(repoRoot, "scripts", "generate-update-manifest.mjs"),
+], {
+  cwd: repoRoot,
+  env: {
+    ...process.env,
+    TIANYUAN_RELEASE_OUTPUT_DIR: tempRoot,
+    TIANYUAN_RELEASE_BASE_URL: "",
+    TIANYUAN_GITEE_BASE_URL: "https://gitee.com/example/tianyuan/raw/main",
+    TIANYUAN_GITHUB_BASE_URL: `https://github.com/example/releases/download/v${version}`,
+    TIANYUAN_GITEE_RELEASE_URL: "https://gitee.com/example/tianyuan",
+    TIANYUAN_WINDOWS_PACKAGE_MODE: "lite",
+    TIANYUAN_MACOS_PACKAGE_MODE: "lite",
+  },
+  stdio: ["ignore", "pipe", "pipe"],
+});
+const dualManifest = JSON.parse(
+  fs.readFileSync(path.join(tempRoot, "update-manifest.json"), "utf8"),
+);
+for (const key of ["windows-x64", "macos-arm64"]) {
+  const asset = dualManifest.assets[key];
+  assert.equal(asset.fileName.includes("-lite.zip"), true);
+  assert.equal(asset.downloadCandidates.length, 2);
+  assert.equal(asset.downloadCandidates[0].source, "gitee");
+  assert.equal(asset.downloadCandidates[1].source, "github-release");
+  assert.equal(asset.downloadCandidates[0].name, asset.fileName);
+  assert.equal(asset.downloadCandidates[1].name, asset.fileName);
+  assert.equal(asset.downloadCandidates[0].size, asset.size);
+  assert.equal(asset.downloadCandidates[1].size, asset.size);
+  assert.equal(asset.downloadCandidates[0].sha256, asset.sha256);
+  assert.equal(asset.downloadCandidates[1].sha256, asset.sha256);
+  assert.equal(
+    asset.url,
+    `https://gitee.com/example/tianyuan/raw/main/${asset.fileName}`,
+  );
+  assert.equal(
+    asset.downloadCandidates[1].url,
+    `https://github.com/example/releases/download/v${version}/${asset.fileName}`,
+  );
+  const bytes = fs.readFileSync(path.join(tempRoot, asset.fileName));
+  assert.equal(createHash("sha256").update(bytes).digest("hex"), asset.sha256);
+}
+assert.equal(dualManifest.releaseUrl, "https://gitee.com/example/tianyuan");
+
+execFileSync(process.execPath, [
+  path.join(repoRoot, "scripts", "generate-update-manifest.mjs"),
+], {
+  cwd: repoRoot,
+  env: {
+    ...process.env,
+    TIANYUAN_RELEASE_OUTPUT_DIR: tempRoot,
+    TIANYUAN_RELEASE_BASE_URL: `https://github.com/example/releases/download/v${version}`,
+    TIANYUAN_GITEE_BASE_URL: "",
+    TIANYUAN_GITHUB_BASE_URL: "",
+    TIANYUAN_RELEASE_URL: "",
+    TIANYUAN_RELEASE_PAGE_URL: "",
+    TIANYUAN_GITEE_RELEASE_URL: "",
+    TIANYUAN_GITHUB_RELEASE_URL: "",
+    TIANYUAN_WINDOWS_PACKAGE_MODE: "full",
+    TIANYUAN_MACOS_PACKAGE_MODE: "full",
+  },
+  stdio: ["ignore", "pipe", "pipe"],
+});
+const legacyManifest = JSON.parse(
+  fs.readFileSync(path.join(tempRoot, "update-manifest.json"), "utf8"),
+);
+assert.equal(
+  legacyManifest.assets["windows-x64"].url,
+  `https://github.com/example/releases/download/v${version}/${legacyManifest.assets["windows-x64"].fileName}`,
+);
+assert.equal(legacyManifest.assets["windows-x64"].downloadCandidates.length, 1);
+assert.equal(legacyManifest.assets["windows-x64"].downloadCandidates[0].source, "github-release");
+assert.equal(
+  legacyManifest.releaseUrl,
+  `https://github.com/example/releases/tag/v${version}`,
+);
 
 fs.rmSync(tempRoot, { recursive: true, force: true });
 console.log("Update manifest tests passed.");

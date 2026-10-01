@@ -99,6 +99,7 @@ function assetPlatformMatches(name, key) {
 function normalizeGithubAsset(asset) {
   if (!asset || typeof asset !== "object") return null;
   return {
+    id: String(asset.id || "").trim(),
     name: String(asset.name || ""),
     url: String(asset.browser_download_url || ""),
     apiUrl: String(asset.url || ""),
@@ -106,6 +107,114 @@ function normalizeGithubAsset(asset) {
     sha256: sha256FromDigest(asset.digest),
     updatedAt: asset.updated_at || null,
   };
+}
+
+function safeChannelReason(value) {
+  return String(value || "")
+    .replace(/bearer\s+\S+/gi, "Bearer [REDACTED]")
+    .replace(/(authorization|cookie|password|token|验证码)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]")
+    .replace(/https?:\/\/[^\s]+/gi, "[URL]")
+    .slice(0, 120);
+}
+
+function channelStatus(channel, status, reason = "") {
+  return {
+    channel: String(channel || "unknown"),
+    status: ["ok", "failed", "not_attempted", "unavailable"].includes(status)
+      ? status
+      : "unavailable",
+    ...(reason ? { reason: safeChannelReason(reason) } : {}),
+  };
+}
+
+function channelSourceForManifestUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    if (url.hostname === "github.com") return "github-release";
+    if (url.hostname === "api.github.com") return "github-api";
+    return url.hostname === "gitee.com" || url.hostname === "raw.giteeusercontent.com"
+      ? "gitee"
+      : "manifest";
+  } catch {
+    return "manifest";
+  }
+}
+
+function createSourceHealth(entries = [], preferredDownloadChannel = "") {
+  const normalized = Array.isArray(entries) ? entries.filter(Boolean) : [];
+  const byChannel = (channel) => {
+    for (let index = normalized.length - 1; index >= 0; index -= 1) {
+      if (normalized[index].channel === channel) return normalized[index];
+    }
+    return channelStatus(channel, "not_attempted");
+  };
+  return {
+    githubRelease: byChannel("github-release"),
+    githubApi: byChannel("github-api"),
+    manifest: byChannel("manifest"),
+    gitee: byChannel("gitee"),
+    checked: normalized.map((entry) => ({ ...entry })),
+    preferredDownloadChannel: String(preferredDownloadChannel || ""),
+  };
+}
+
+function safeCandidateId(source, value) {
+  const suffix = String(value || "asset")
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64) || "asset";
+  return `${String(source || "download").replace(/[^A-Za-z0-9._-]+/g, "-")}-${suffix}`;
+}
+
+/**
+ * Return a stable, public-only candidate list for one release asset.
+ * Older manifests only contain asset.url, while GitHub API assets contain
+ * both browser_download_url and the API asset endpoint. Keep both forms so a
+ * caller can switch channels without manufacturing a URL or exposing a token.
+ */
+function buildDownloadCandidates(asset, {
+  preferredDownloadChannel = "",
+  source = "manifest",
+} = {}) {
+  if (!asset || typeof asset !== "object") return [];
+  const name = String(asset.name || asset.fileName || "asset");
+  const directUrl = String(asset.url || "").trim();
+  const apiUrl = String(asset.apiUrl || "").trim();
+  const candidates = [];
+  const directSource = String(source || "manifest").trim() || "manifest";
+  if (directUrl) {
+    candidates.push({
+      id: safeCandidateId(directSource, name),
+      url: directUrl,
+      headers: {},
+      source: directSource,
+      priority: preferredDownloadChannel === directSource ? 10 : 20,
+      name,
+      size: Number(asset.size || 0),
+      sha256: String(asset.sha256 || "").replace(/^sha256:/i, "").toLowerCase(),
+    });
+  }
+  if (apiUrl) {
+    candidates.push({
+      id: safeCandidateId("github-api", asset.id || name),
+      url: apiUrl,
+      headers: { accept: "application/octet-stream" },
+      source: "github-api",
+      priority: preferredDownloadChannel === "github-api" ? 5 : 30,
+      name,
+      size: Number(asset.size || 0),
+      sha256: String(asset.sha256 || "").replace(/^sha256:/i, "").toLowerCase(),
+    });
+  }
+  const seen = new Set();
+  return candidates
+    .filter((candidate) => {
+      if (seen.has(candidate.url)) return false;
+      seen.add(candidate.url);
+      return true;
+    })
+    .sort((left, right) => left.priority - right.priority)
+    .map((candidate, index) => ({ ...candidate, priority: index + 1 }));
 }
 
 function selectGithubAsset(assets, key, requestedName = "") {
@@ -129,16 +238,26 @@ function selectChecksumAsset(assets, packageName) {
 }
 
 function configuredManifestUrls(input = {}) {
-  const urls = [];
-  if (Array.isArray(input.updateManifestUrls)) urls.push(...input.updateManifestUrls);
-  if (process.env.TIANYUAN_UPDATE_MANIFEST_URLS) {
-    urls.push(...process.env.TIANYUAN_UPDATE_MANIFEST_URLS.split(","));
-  }
-  try {
-    const config = JSON.parse(fs.readFileSync(UPDATE_SOURCES_FILE, "utf8"));
-    if (Array.isArray(config.manifestUrls)) urls.push(...config.manifestUrls);
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
+  let urls = [];
+  if (Array.isArray(input.updateManifestUrls)) {
+    urls = input.updateManifestUrls;
+  } else if (process.env.TIANYUAN_GITEE_MANIFEST_URL) {
+    urls = [
+      process.env.TIANYUAN_GITEE_MANIFEST_URL,
+      ...(process.env.TIANYUAN_UPDATE_MANIFEST_URLS
+        ? process.env.TIANYUAN_UPDATE_MANIFEST_URLS.split(",")
+        : []),
+    ];
+  } else if (process.env.TIANYUAN_UPDATE_MANIFEST_URLS) {
+    urls = process.env.TIANYUAN_UPDATE_MANIFEST_URLS.split(",");
+  } else {
+    try {
+      const config = JSON.parse(fs.readFileSync(UPDATE_SOURCES_FILE, "utf8"));
+      if (config.giteeManifestUrl) urls.push(config.giteeManifestUrl);
+      if (Array.isArray(config.manifestUrls)) urls.push(...config.manifestUrls);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
   }
   return [...new Set(urls
     .map((item) => String(item || "").trim())
@@ -146,7 +265,12 @@ function configuredManifestUrls(input = {}) {
 }
 
 function validateManifestUrl(value) {
-  const url = new URL(String(value || ""));
+  let url;
+  try {
+    url = new URL(String(value || ""));
+  } catch {
+    throw new Error("UPDATE_MANIFEST_URL_FORBIDDEN");
+  }
   if (url.protocol !== "https:" || !ALLOWED_MANIFEST_HOSTS.has(url.hostname)) {
     throw new Error("UPDATE_MANIFEST_URL_FORBIDDEN");
   }
@@ -188,17 +312,41 @@ function normalizeManifestAsset(asset, manifestUrl, manifest = null) {
   const url = directUrl
     ? new URL(directUrl, manifestUrl).href
     : githubManifestAssetUrl(manifest, manifestUrl, fileName);
-  return {
+  const normalized = {
+    id: String(asset.id || "").trim(),
     name: fileName,
     url,
-    apiUrl: "",
+    apiUrl: String(asset.apiUrl || "").trim(),
     size: Number(asset.size || 0),
     sha256: String(asset.sha256 || "").replace(/^sha256:/i, "").toLowerCase(),
     updatedAt: asset.updatedAt || null,
   };
+  if (Array.isArray(asset.downloadCandidates)) {
+    normalized.downloadCandidates = asset.downloadCandidates
+      .filter((candidate) => candidate && typeof candidate === "object")
+      .map((candidate, index) => ({
+        id: safeCandidateId(candidate.source || "manifest", candidate.id || fileName || index),
+        url: candidate.url
+          ? new URL(String(candidate.url).trim(), manifestUrl).href
+          : "",
+        headers: candidate.headers && typeof candidate.headers === "object"
+          ? { ...candidate.headers }
+          : {},
+        source: String(candidate.source || "manifest"),
+        priority: Number(candidate.priority || index + 1),
+        name: fileName,
+        size: Number(candidate.size || normalized.size || 0),
+        sha256: String(candidate.sha256 || normalized.sha256 || "")
+          .replace(/^sha256:/i, "").toLowerCase(),
+      }))
+      .filter((candidate) => candidate.url)
+      .sort((left, right) => left.priority - right.priority)
+      .map((candidate, index) => ({ ...candidate, priority: index + 1 }));
+  }
+  return normalized;
 }
 
-function resultFromManifest(manifest, manifestUrl, input) {
+function resultFromManifest(manifest, manifestUrl, input, sourceHealth = null) {
   const currentVersion = String(input.currentVersion || "").trim();
   const currentBuildNumber = Number(input.currentBuildNumber || 0);
   const latestVersion = String(manifest?.productVersion || "").trim().replace(/^v/i, "");
@@ -218,6 +366,15 @@ function resultFromManifest(manifest, manifestUrl, input) {
   const key = platformKey(input.platform, input.architecture);
   const requestedAsset = manifest?.assets?.[key] || null;
   const packageAsset = normalizeManifestAsset(requestedAsset, manifestUrl, manifest);
+  const preferredDownloadChannel = packageAsset?.downloadCandidates?.length
+    ? String(packageAsset.downloadCandidates[0].source || "manifest")
+    : channelSourceForManifestUrl(manifestUrl);
+  const downloadCandidates = packageAsset?.downloadCandidates?.length
+    ? packageAsset.downloadCandidates
+    : buildDownloadCandidates(packageAsset, {
+      preferredDownloadChannel,
+      source: channelSourceForManifestUrl(manifestUrl),
+    });
   const minimumSupportedVersion = String(manifest?.minimumSupportedVersion || "").trim();
   const mandatory = Boolean(
     manifest?.mandatory
@@ -228,6 +385,10 @@ function resultFromManifest(manifest, manifestUrl, input) {
     action: "check_github_update",
     repository: manifest?.repository || DEFAULT_REPOSITORY,
     source: manifest?.source || "manifest",
+    sourceHealth: sourceHealth || createSourceHealth([
+      channelStatus(channelSourceForManifestUrl(manifestUrl), "ok"),
+    ], preferredDownloadChannel),
+    preferredDownloadChannel,
     manifestUrl,
     currentVersion,
     currentBuildNumber,
@@ -249,6 +410,7 @@ function resultFromManifest(manifest, manifestUrl, input) {
     notes: releaseNotes(manifest?.releaseNotes),
     platform: key,
     asset: packageAsset,
+    downloadCandidates,
     checksumAsset: null,
     manifestFound: true,
     checkedAt: new Date().toISOString(),
@@ -256,26 +418,166 @@ function resultFromManifest(manifest, manifestUrl, input) {
   };
 }
 
+function withManifestSourceHealth(update, health = []) {
+  if (!update) return null;
+  const preferred = update.preferredDownloadChannel || "";
+  return {
+    ...update,
+    sourceHealth: createSourceHealth(health, preferred),
+    preferredDownloadChannel: preferred,
+    downloadCandidates: update.asset?.downloadCandidates?.length
+      ? update.asset.downloadCandidates
+      : buildDownloadCandidates(update.asset, {
+        preferredDownloadChannel: preferred,
+        source: channelSourceForManifestUrl(update.manifestUrl),
+      }),
+  };
+}
+
+function isFresherManifestResult(candidate, current) {
+  if (!current) return true;
+  try {
+    const versionComparison = compareSemver(candidate.latestVersion, current.latestVersion);
+    if (versionComparison !== 0) return versionComparison > 0;
+  } catch {
+    return false;
+  }
+  const candidateBuild = Number(candidate.latestBuildNumber || 0);
+  const currentBuild = Number(current.latestBuildNumber || 0);
+  if (candidateBuild !== currentBuild) return candidateBuild > currentBuild;
+  return Boolean(candidate.updateAvailable) && !Boolean(current.updateAvailable);
+}
+
 async function checkManifestSources(input = {}, options = {}) {
+  const health = [];
+  let mirrorUpdate = null;
   for (const sourceUrl of configuredManifestUrls(input)) {
     const manifestUrl = validateManifestUrl(sourceUrl);
+    const channel = channelSourceForManifestUrl(manifestUrl);
     try {
       const result = await fetchJson(manifestUrl, {
         ...options,
         accept: "application/json",
       });
-      if (!result.found || !result.payload) continue;
+      if (!result.found || !result.payload) {
+        health.push(channelStatus(channel, "unavailable", `HTTP_${result.status || 404}`));
+        continue;
+      }
+      health.push(channelStatus(channel, "ok"));
       const update = resultFromManifest(result.payload, manifestUrl, input);
-      // GitHub's latest-release manifest is authoritative even when it says
-      // the current installation is already up to date. Returning here avoids
-      // an unnecessary API fallback that can exceed the browser-side timeout.
-      if (update.updateAvailable || isAuthoritativeLatestManifestUrl(manifestUrl)) return update;
-    } catch {
+      // Only the GitHub latest-release manifest is authoritative. A Gitee or
+      // other mirror result is retained as a fallback while the canonical
+      // GitHub Release/API channels are still checked.
+      if (isAuthoritativeLatestManifestUrl(manifestUrl)) {
+        return {
+          update: withManifestSourceHealth(update, health),
+          mirrorUpdate,
+          health,
+        };
+      }
+      if (isFresherManifestResult(update, mirrorUpdate)) mirrorUpdate = update;
+    } catch (error) {
+      health.push(channelStatus(channel, "failed", error?.message || error));
       continue;
     }
   }
   // A stale mirror must not mask the authoritative GitHub release check.
-  return null;
+  return {
+    update: null,
+    mirrorUpdate: withManifestSourceHealth(mirrorUpdate, health),
+    health,
+  };
+}
+
+function mirrorFallback(update, entries, reason = "") {
+  if (!update) return null;
+  return {
+    ...update,
+    sourceHealth: createSourceHealth(entries, update.preferredDownloadChannel || ""),
+    ...(reason ? {
+      fallback: {
+        channel: update.preferredDownloadChannel || channelSourceForManifestUrl(update.manifestUrl),
+        reason: safeChannelReason(reason),
+      },
+    } : {}),
+  };
+}
+
+function updateManifestSourceHealth(update, status, reason = "") {
+  const checked = Array.isArray(update?.sourceHealth?.checked)
+    ? update.sourceHealth.checked.filter((entry) => entry?.channel !== "github-api")
+    : [];
+  return {
+    ...update,
+    sourceHealth: createSourceHealth([
+      ...checked,
+      channelStatus("github-api", status, reason),
+    ], update?.preferredDownloadChannel || ""),
+  };
+}
+
+async function enrichManifestWithApiCandidate(update, input, options = {}) {
+  const candidates = Array.isArray(update?.downloadCandidates)
+    ? update.downloadCandidates
+    : [];
+  if (!update || (!update.updateAvailable && !update.repairRequired)) return update;
+  if (candidates.some((candidate) => candidate?.source === "github-api")) return update;
+  const packageName = String(update.asset?.name || update.asset?.fileName || "").trim();
+  if (!packageName) return update;
+
+  const endpoint = `${GITHUB_API_BASE}/repos/${DEFAULT_REPOSITORY}/releases/latest`;
+  let releaseResult;
+  try {
+    releaseResult = await fetchJson(endpoint, {
+      ...options,
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+    });
+  } catch (error) {
+    return updateManifestSourceHealth(update, "failed", error?.message || error);
+  }
+  if (!releaseResult.found) {
+    return updateManifestSourceHealth(
+      update,
+      "unavailable",
+      `HTTP_${releaseResult.status || 404}`,
+    );
+  }
+
+  const key = platformKey(input.platform, input.architecture);
+  const apiAsset = selectGithubAsset(releaseResult.payload?.assets, key, packageName);
+  if (!apiAsset || apiAsset.name !== packageName || !apiAsset.apiUrl) {
+    return updateManifestSourceHealth(update, "unavailable", "ASSET_NOT_FOUND");
+  }
+
+  const nextPriority = candidates.reduce(
+    (highest, candidate) => Math.max(highest, Number(candidate?.priority || 0)),
+    0,
+  ) + 1;
+  const apiCandidate = {
+    id: safeCandidateId("github-api", apiAsset.id || packageName),
+    url: apiAsset.apiUrl,
+    headers: { accept: "application/octet-stream" },
+    source: "github-api",
+    priority: nextPriority,
+    name: packageName,
+    size: Number(update.asset?.size || apiAsset.size || 0),
+    sha256: String(update.asset?.sha256 || apiAsset.sha256 || "")
+      .replace(/^sha256:/i, "")
+      .toLowerCase(),
+  };
+  return updateManifestSourceHealth({
+    ...update,
+    asset: {
+      ...update.asset,
+      id: String(update.asset?.id || apiAsset.id || ""),
+      apiUrl: apiAsset.apiUrl,
+      size: Number(update.asset?.size || apiAsset.size || 0),
+      sha256: String(update.asset?.sha256 || apiAsset.sha256 || "")
+        .replace(/^sha256:/i, "")
+        .toLowerCase(),
+    },
+    downloadCandidates: [...candidates, apiCandidate],
+  }, "ok");
 }
 
 async function fetchJson(url, { fetchImpl = globalThis.fetch, timeoutMs = DEFAULT_TIMEOUT_MS, accept = "application/vnd.github+json" } = {}) {
@@ -327,17 +629,57 @@ async function checkGithubUpdateInternal(input = {}, options = {}) {
   const currentVersion = String(input.currentVersion || "").trim();
   const currentBuildNumber = Number(input.currentBuildNumber || 0);
   if (!parseSemver(currentVersion)) throw new Error("CURRENT_VERSION_INVALID");
-  const manifestUpdate = await checkManifestSources(input, {
+  const manifestCheck = await checkManifestSources(input, {
     ...options,
     timeoutMs: MANIFEST_TIMEOUT_MS,
   });
-  if (manifestUpdate) return manifestUpdate;
+  if (manifestCheck?.update) {
+    return await enrichManifestWithApiCandidate(manifestCheck.update, input, options);
+  }
   const endpoint = `${GITHUB_API_BASE}/repos/${repository}/releases/latest`;
-  const releaseResult = await fetchJson(endpoint, {
-    ...options,
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-  });
+  let releaseResult;
+  try {
+    releaseResult = await fetchJson(endpoint, {
+      ...options,
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+    });
+  } catch (error) {
+    const checked = [
+      ...(manifestCheck?.health || []),
+      channelStatus("github-api", "failed", error?.message || error),
+    ];
+    const fallback = mirrorFallback(manifestCheck?.mirrorUpdate, checked, error?.message || error);
+    if (fallback) return fallback;
+    const health = createSourceHealth(checked, "");
+    return {
+      ok: false,
+      action: "check_github_update",
+      repository,
+      currentVersion,
+      currentBuildNumber,
+      releasePublished: false,
+      updateAvailable: false,
+      mandatory: false,
+      reason: safeChannelReason(error?.message || error || "GITHUB_UPDATE_CHECK_FAILED"),
+      source: "github-api",
+      sourceHealth: health,
+      preferredDownloadChannel: "",
+      checkedAt: new Date().toISOString(),
+      security: { credentialsReturned: false, tokenUsed: false },
+    };
+  }
   if (!releaseResult.found) {
+    const checked = [
+      ...(manifestCheck?.health || []),
+      channelStatus("github-api", "unavailable", `HTTP_${releaseResult.status || 404}`),
+    ];
+    const fallback = mirrorFallback(
+      manifestCheck?.mirrorUpdate,
+      checked,
+      `HTTP_${releaseResult.status || 404}`,
+    );
+    if (fallback) return fallback;
+    const health = createSourceHealth(checked, "");
     return {
       ok: true,
       action: "check_github_update",
@@ -348,6 +690,9 @@ async function checkGithubUpdateInternal(input = {}, options = {}) {
       updateAvailable: false,
       mandatory: false,
       reason: "GITHUB_RELEASE_NOT_PUBLISHED",
+      source: "github-api",
+      sourceHealth: health,
+      preferredDownloadChannel: "",
       checkedAt: new Date().toISOString(),
       security: { credentialsReturned: false, tokenUsed: false },
     };
@@ -359,7 +704,16 @@ async function checkGithubUpdateInternal(input = {}, options = {}) {
     timeoutMs: OPTIONAL_MANIFEST_TIMEOUT_MS,
   });
   const latestVersion = String(manifest?.productVersion || release.tag_name || "").trim().replace(/^v/i, "");
-  if (!parseSemver(latestVersion)) throw new Error("LATEST_VERSION_INVALID");
+  if (!parseSemver(latestVersion)) {
+    const reason = "LATEST_VERSION_INVALID";
+    const checked = [
+      ...(manifestCheck?.health || []),
+      channelStatus("github-api", "failed", reason),
+    ];
+    const fallback = mirrorFallback(manifestCheck?.mirrorUpdate, checked, reason);
+    if (fallback) return fallback;
+    throw new Error(reason);
+  }
   const latestBuildNumber = Number(manifest?.buildNumber || 0);
   const versionComparison = compareSemver(latestVersion, currentVersion);
   const buildUpdate = versionComparison === 0
@@ -375,6 +729,19 @@ async function checkGithubUpdateInternal(input = {}, options = {}) {
   const requestedAsset = manifest?.assets?.[key] || null;
   const packageAsset = selectGithubAsset(release.assets, key, requestedAsset?.fileName);
   const checksumAsset = selectChecksumAsset(release.assets, packageAsset?.name);
+  const githubReleaseStatus = (manifestCheck?.health || [])
+    .find((entry) => entry.channel === "github-release");
+  const preferredDownloadChannel = githubReleaseStatus && githubReleaseStatus.status !== "ok"
+    ? "github-api"
+    : "github-release";
+  const downloadCandidates = buildDownloadCandidates(packageAsset, {
+    preferredDownloadChannel,
+    source: "github-release",
+  });
+  const sourceHealth = createSourceHealth([
+    ...(manifestCheck?.health || []),
+    channelStatus("github-api", "ok"),
+  ], preferredDownloadChannel);
   const latestRuntimeBuildId = String(manifest?.runtimeBuildId || "").trim();
   const currentRuntimeBuildId = String(input.currentRuntimeBuildId || "").trim();
   const currentRuntimeBuildKind = normalizeRuntimeBuildKind(input.currentRuntimeBuildKind);
@@ -400,6 +767,9 @@ async function checkGithubUpdateInternal(input = {}, options = {}) {
     repairRequired,
     mandatory,
     minimumSupportedVersion: minimumSupportedVersion || null,
+    source: "github-api",
+    sourceHealth,
+    preferredDownloadChannel,
     channel: manifest?.channel || (release.prerelease ? "beta" : "stable"),
     releaseName: String(release.name || release.tag_name || latestVersion),
     releaseUrl: String(release.html_url || ""),
@@ -410,6 +780,7 @@ async function checkGithubUpdateInternal(input = {}, options = {}) {
       ...packageAsset,
       sha256: String(requestedAsset?.sha256 || packageAsset.sha256 || "").replace(/^sha256:/i, "").toLowerCase(),
     } : null,
+    downloadCandidates,
     checksumAsset,
     manifestFound: Boolean(manifest),
     checkedAt: new Date().toISOString(),
@@ -441,6 +812,8 @@ module.exports = {
   compareSemver,
   platformKey,
   selectGithubAsset,
+  buildDownloadCandidates,
+  createSourceHealth,
   isAuthoritativeLatestManifestUrl,
   checkGithubUpdate,
 };

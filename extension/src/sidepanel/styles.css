@@ -293,7 +293,7 @@ input[readonly] {
   gap: 5px;
   align-items: center;
   justify-content: space-between;
-  min-height: 30px;
+  min-height: 44px;
   padding: 4px 6px;
   border-color: var(--line);
   border-radius: 7px;
@@ -1572,6 +1572,11 @@ pre {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .connection-pill {
+    min-height: 44px;
+    padding: 6px 7px;
+  }
+
   .module-card {
     min-height: 88px;
   }
@@ -1605,5 +1610,16 @@ pre {
 @media (max-width: 360px) {
   .module-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

@@ -11,6 +11,7 @@ function createMacOSAdapter(options = {}) {
   const runFileSync = options.execFileSync || execFileSync;
   const homeDir = options.homeDir || os.homedir();
   const runtimeRoot = path.join(homeDir, ".tianyuan-workbench");
+  const supportedLitePythonAbis = ["3.9", "3.14"];
 
   function runAppleScript(script, timeout = 120000) {
     return new Promise((resolve) => {
@@ -188,6 +189,125 @@ function createMacOSAdapter(options = {}) {
     });
   }
 
+  function pythonRuntimePreflight({ update } = {}) {
+    const packageName = String(update?.asset?.name || "");
+    // Full packages carry a Python installer. Lite updates must be able to
+    // reuse or create a local environment before the large archive is fetched.
+    if (!/-lite(?:[-_.]|$)/i.test(packageName)) return { ok: true, required: false };
+    const configured = [];
+    const addConfigured = (value) => {
+      const candidate = String(value || "").trim();
+      if (candidate && !configured.includes(candidate)) configured.push(candidate);
+    };
+    addConfigured(process.env.TIANYUAN_PYTHON_BIN);
+    addConfigured(path.join(runtimeRoot, "python", "bin", "python3"));
+    for (const configPath of [
+      path.join(runtimeRoot, "runtime-config.json"),
+      path.join(runtimeRoot, "native-helper", "runtime-config.json"),
+    ]) {
+      try {
+        const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+        addConfigured(config.pythonBin || config.pythonPath);
+      } catch {
+        // An absent config is expected on first install.
+      }
+    }
+    addConfigured("/Library/Frameworks/Python.framework/Versions/3.14/bin/python3");
+    try {
+      addConfigured(runFileSync("which", ["python3"], { encoding: "utf8" }).trim());
+    } catch {
+      // Continue with the explicit /usr/bin/python3 fallback.
+    }
+    addConfigured("/usr/bin/python3");
+    const incompatibleVersions = [];
+    const requiredImports = "import docx, et_xmlfile, lxml, openpyxl, typing_extensions";
+    const versionScript = "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')";
+    const venvScript = "import ensurepip, venv";
+    const managedPython = path.join(runtimeRoot, "python", "bin", "python3");
+    for (const candidate of configured) {
+      if (!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) continue;
+      let version = "";
+      try {
+        version = String(runFileSync(candidate, ["-c", versionScript], {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+          timeout: 5000,
+        }) || "").trim();
+      } catch {
+        continue;
+      }
+      if (!version) continue;
+
+      let dependenciesReady = false;
+      try {
+        runFileSync(candidate, ["-c", requiredImports], {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+          timeout: 5000,
+        });
+        dependenciesReady = true;
+      } catch {
+        // A bare interpreter may still create the managed venv from package wheels.
+      }
+      const isManagedPython = candidate === managedPython;
+      if (dependenciesReady && isManagedPython) {
+        return {
+          ok: true,
+          required: true,
+          pythonBin: candidate,
+          version,
+          pythonAbi: version.split(".").slice(0, 2).join("."),
+          dependenciesReady: true,
+        };
+      }
+
+      const pythonAbi = version.split(".").slice(0, 2).join(".");
+      if (!supportedLitePythonAbis.includes(pythonAbi)) {
+        incompatibleVersions.push(version);
+        continue;
+      }
+      try {
+        runFileSync(candidate, ["-c", venvScript], {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+          timeout: 5000,
+        });
+        return {
+          ok: true,
+          required: true,
+          pythonBin: candidate,
+          version,
+          pythonAbi,
+          dependenciesReady: false,
+          canCreateVenv: true,
+        };
+      } catch {
+        // Try the next locally available candidate without exposing paths.
+      }
+    }
+    if (incompatibleVersions.length) {
+      return {
+        ok: false,
+        required: true,
+        reason: "UPDATE_PYTHON_RUNTIME_ABI_UNSUPPORTED",
+        errorCode: "UPDATE_PYTHON_RUNTIME_ABI_UNSUPPORTED",
+        stage: "preflight",
+        supportedPythonAbis: supportedLitePythonAbis,
+        detectedPythonVersions: [...new Set(incompatibleVersions)],
+        currentVersionUnchanged: true,
+        nextAction: "请使用已安装完整依赖的 Python，或安装 Python 3.9/3.14 后重试",
+      };
+    }
+    return {
+      ok: false,
+      required: true,
+      reason: "UPDATE_PYTHON_RUNTIME_UNAVAILABLE",
+      stage: "preflight",
+      currentVersionUnchanged: true,
+      nextAction: "请先运行 macOS 完整安装包，或安装带 venv/ensurepip 的 Python 3.9+ 后重试",
+    };
+  }
+
   function launchWorkbenchInstaller({
     installerPath,
     statusPath,
@@ -300,6 +420,7 @@ function createMacOSAdapter(options = {}) {
     diagnostics,
     listenerPids,
     extractZip,
+    preflightUpdate: pythonRuntimePreflight,
     launchWorkbenchInstaller,
     resolveCredentialReference,
     terminateProcess,

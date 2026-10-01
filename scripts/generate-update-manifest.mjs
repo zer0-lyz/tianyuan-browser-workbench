@@ -13,7 +13,19 @@ const workbenchRoot = process.env.TIANYUAN_WORKBENCH_ROOT
   || path.join(os.homedir(), ".tianyuan-workbench");
 const distRoot = process.env.TIANYUAN_RELEASE_OUTPUT_DIR
   || path.join(workbenchRoot, "releases");
-const releaseBaseUrl = String(process.env.TIANYUAN_RELEASE_BASE_URL || "").trim().replace(/\/+$/, "");
+const legacyReleaseBaseUrl = String(process.env.TIANYUAN_RELEASE_BASE_URL || "").trim().replace(/\/+$/, "");
+const giteeBaseUrl = String(
+  process.env.TIANYUAN_GITEE_BASE_URL
+  || (/^https:\/\/(?:gitee\.com|raw\.giteeusercontent\.com)(?:\/|$)/i.test(legacyReleaseBaseUrl)
+    ? legacyReleaseBaseUrl
+    : ""),
+).trim().replace(/\/+$/, "");
+const githubBaseUrl = String(
+  process.env.TIANYUAN_GITHUB_BASE_URL
+  || (/^https:\/\/github\.com(?:\/|$)/i.test(legacyReleaseBaseUrl)
+    ? legacyReleaseBaseUrl
+    : ""),
+).trim().replace(/\/+$/, "");
 const versionConfig = JSON.parse(fs.readFileSync(path.join(repoRoot, "extension", "version.json"), "utf8"));
 
 function sha256(targetPath) {
@@ -25,6 +37,71 @@ function releasePageUrl(baseUrl) {
   // that the extension opens lives at /releases/tag/<tag>. Keep asset URLs on
   // the download path and point releaseUrl at the browsable page.
   return String(baseUrl).replace("/releases/download/", "/releases/tag/");
+}
+
+function repositoryHomeUrl(baseUrl) {
+  try {
+    const url = new URL(String(baseUrl || ""));
+    if (url.hostname !== "gitee.com" && url.hostname !== "raw.giteeusercontent.com") return "";
+    const match = url.pathname.match(/^\/([^/]+)\/([^/]+)(?:\/raw(?:\/.*)?|\/blob(?:\/.*)?|\/.*)?$/i);
+    if (!match) return "";
+    return url.hostname === "raw.giteeusercontent.com"
+      ? `https://gitee.com/${match[1]}/${match[2]}`
+      : `${url.origin}/${match[1]}/${match[2]}`;
+  } catch {
+    return "";
+  }
+}
+
+function sourceForBaseUrl(baseUrl) {
+  try {
+    const hostname = new URL(String(baseUrl || "")).hostname;
+    if (hostname === "gitee.com" || hostname === "raw.giteeusercontent.com") return "gitee";
+    if (hostname === "github.com") return "github-release";
+  } catch {
+    // The updater will reject unsupported download hosts; retain a neutral
+    // source label here so the manifest generator remains backwards-compatible.
+  }
+  return "manifest";
+}
+
+function assetUrl(baseUrl, fileName) {
+  return baseUrl ? `${baseUrl}/${encodeURIComponent(fileName)}` : "";
+}
+
+function mirrorBases() {
+  const result = [];
+  const seen = new Set();
+  for (const [source, baseUrl] of [
+    ["gitee", giteeBaseUrl],
+    ["github-release", githubBaseUrl],
+    [sourceForBaseUrl(legacyReleaseBaseUrl), legacyReleaseBaseUrl],
+  ]) {
+    if (!baseUrl || seen.has(baseUrl)) continue;
+    seen.add(baseUrl);
+    result.push({ source, baseUrl });
+  }
+  return result;
+}
+
+const releaseMirrors = mirrorBases();
+const primaryBaseUrl = releaseMirrors[0]?.baseUrl || "";
+const explicitReleaseUrl = String(
+  process.env.TIANYUAN_RELEASE_URL
+  || process.env.TIANYUAN_RELEASE_PAGE_URL
+  || process.env.TIANYUAN_GITEE_RELEASE_URL
+  || process.env.TIANYUAN_GITHUB_RELEASE_URL
+  || "",
+).trim().replace(/\/+$/, "");
+
+function resolvedReleaseUrl() {
+  if (explicitReleaseUrl) return explicitReleaseUrl;
+  if (githubBaseUrl) return releasePageUrl(githubBaseUrl);
+  if (legacyReleaseBaseUrl && sourceForBaseUrl(legacyReleaseBaseUrl) === "github-release") {
+    return releasePageUrl(legacyReleaseBaseUrl);
+  }
+  if (giteeBaseUrl) return repositoryHomeUrl(giteeBaseUrl);
+  return "";
 }
 
 function runtimeBuildId() {
@@ -82,11 +159,24 @@ function releaseAsset(patterns, key, options = {}) {
   }
   const digest = sha256(targetPath);
   fs.writeFileSync(path.join(distRoot, `${fileName}.sha256`), `${digest}  ${fileName}\n`);
+  const downloadCandidates = releaseMirrors
+    .map(({ source, baseUrl }, index) => ({
+      id: `${source}-${fileName}`,
+      url: assetUrl(baseUrl, fileName),
+      source,
+      priority: index + 1,
+      name: fileName,
+      size: fs.statSync(targetPath).size,
+      sha256: digest,
+    }))
+    .filter((candidate) => candidate.url);
+  const primaryUrl = assetUrl(primaryBaseUrl, fileName);
   return {
     fileName,
-    ...(releaseBaseUrl ? { url: `${releaseBaseUrl}/${encodeURIComponent(fileName)}` } : {}),
+    ...(primaryUrl ? { url: primaryUrl } : {}),
     sha256: digest,
     size: fs.statSync(targetPath).size,
+    ...(downloadCandidates.length ? { downloadCandidates } : {}),
   };
 }
 
@@ -107,7 +197,10 @@ if (macos) assets["macos-arm64"] = macos;
 const payload = {
   schemaVersion: 1,
   repository: versionConfig.repository,
-  ...(releaseBaseUrl ? { source: "static-manifest", releaseUrl: releasePageUrl(releaseBaseUrl) } : {}),
+  ...(primaryBaseUrl ? {
+    source: "static-manifest",
+    releaseUrl: resolvedReleaseUrl(),
+  } : {}),
   productVersion: versionConfig.productVersion,
   chromeVersion: versionConfig.chromeVersion,
   channel: versionConfig.channel,
@@ -123,7 +216,7 @@ const payload = {
   handoff: {
     windowsCodex: {
       fileName: windowsHandoffFileName,
-      ...(releaseBaseUrl ? { url: `${releaseBaseUrl}/${windowsHandoffFileName}` } : {}),
+      ...(primaryBaseUrl ? { url: assetUrl(primaryBaseUrl, windowsHandoffFileName) } : {}),
       sourceRepository: "zer0-lyz/tianyuan-browser-workbench",
       sourceCommit: commit,
     },
@@ -134,9 +227,8 @@ fs.mkdirSync(distRoot, { recursive: true });
 const outputPath = path.join(distRoot, "update-manifest.json");
 fs.writeFileSync(outputPath, `${JSON.stringify(payload, null, 2)}\n`);
 const windowsAsset = assets["windows-x64"] || null;
-const releaseUrl = releaseBaseUrl
-  ? releasePageUrl(releaseBaseUrl)
-  : `https://github.com/${versionConfig.repository}/releases`;
+const releaseUrl = resolvedReleaseUrl()
+  || `https://github.com/${versionConfig.repository}/releases`;
 const windowsHandoffPath = path.join(distRoot, windowsHandoffFileName);
 const windowsFullName = `tianyuan-workbench-v${versionConfig.productVersion}-windows-x64.zip`;
 const windowsLiteName = `tianyuan-workbench-v${versionConfig.productVersion}-windows-x64-lite.zip`;
@@ -197,16 +289,18 @@ const windowsHandoff = `# Windows Codex 打包发布交接 — v${versionConfig.
 然后在源码根目录生成最终清单和本交接文件：
 
 \`$env:TIANYUAN_RELEASE_OUTPUT_DIR='<输出目录>'\`
-\`$env:TIANYUAN_RELEASE_BASE_URL='https://github.com/${versionConfig.repository}/releases/download/v${versionConfig.productVersion}'\`
+\`$env:TIANYUAN_GITEE_BASE_URL='https://gitee.com/<owner>/tianyuan-browser-workbench-releases/raw/main'\`
+\`$env:TIANYUAN_GITHUB_BASE_URL='https://github.com/${versionConfig.repository}/releases/download/v${versionConfig.productVersion}'\`
+\`$env:TIANYUAN_GITEE_RELEASE_URL='https://gitee.com/<owner>/tianyuan-browser-workbench-releases'\`
 \`node scripts/generate-update-manifest.mjs\`
 
-核对 \`update-manifest.json\` 中 build、源码 commit、运行指纹、Windows 包文件名、大小和 SHA-256 与真实文件一致。
+核对 \`update-manifest.json\` 中 build、源码 commit、运行指纹、Windows 包文件名、大小和 SHA-256 与真实文件一致；Gitee 与 GitHub 候选必须使用同一文件名、同一 ZIP 字节和同一 SHA-256。
 
 ### 5. 上传 GitHub Release
 
 1. 确认 \`gh auth status\` 已通过；不得把 GitHub token 写入仓库、日志或交接文件。
 2. 如 \`v${versionConfig.productVersion}\` 已存在，使用 \`gh release upload v${versionConfig.productVersion} ... --clobber\` 更新 Windows 资产；不存在时先创建同名 Release。
-3. 必须上传完整包、轻量包、两个 SHA 文件、\`update-manifest.json\` 和 \`WINDOWS_CODEX_HANDOFF.md\`。
+3. 必须上传完整包、轻量包、两个 SHA 文件、\`update-manifest.json\` 和 \`WINDOWS_CODEX_HANDOFF.md\`；Gitee raw 镜像也必须复制同一份 ZIP、SHA 文件和 manifest，不得重新压缩。
 4. 上传后使用 \`gh release view v${versionConfig.productVersion} --json url,assets\` 回读资产，并重新下载公开的 \`update-manifest.json\`，确认 build 为 \`${versionConfig.buildNumber}\`。
 
 ## 必须回传

@@ -20,6 +20,85 @@ const ALLOWED_DOWNLOAD_HOSTS = new Set([
   "raw.giteeusercontent.com",
 ]);
 
+function safeChannelValue(value, fallback = "unknown") {
+  const normalized = String(value || fallback)
+    .replace(/bearer\s+\S+/gi, "Bearer [REDACTED]")
+    .replace(/(authorization|cookie|password|token|验证码)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]")
+    .replace(/https?:\/\/[^\s]+/gi, "[URL]")
+    .replace(/[^A-Za-z0-9._:-]+/g, "-")
+    .slice(0, 120);
+  return normalized || fallback;
+}
+
+function normalizeDownloadCandidates(update) {
+  const asset = update?.asset && typeof update.asset === "object" ? update.asset : {};
+  const candidates = Array.isArray(update?.downloadCandidates)
+    ? update.downloadCandidates
+    : [
+      asset.url
+        ? {
+          id: "legacy-direct",
+          url: asset.url,
+          headers: {},
+          source: "github-release",
+          priority: update?.preferredDownloadChannel === "github-release" ? 1 : 20,
+        }
+        : null,
+      asset.apiUrl
+        ? {
+          id: "legacy-api",
+          url: asset.apiUrl,
+          headers: { accept: "application/octet-stream" },
+          source: "github-api",
+          priority: update?.preferredDownloadChannel === "github-api" ? 1 : 30,
+        }
+        : null,
+    ];
+  const seen = new Set();
+  return candidates
+    .filter((candidate) => candidate && typeof candidate === "object" && String(candidate.url || "").trim())
+    .map((candidate, index) => ({
+      id: safeChannelValue(candidate.id || `${candidate.source || "download"}-${index}`),
+      url: String(candidate.url).trim(),
+      headers: candidate.headers && typeof candidate.headers === "object"
+        ? { ...candidate.headers }
+        : {},
+      source: safeChannelValue(candidate.source || "download"),
+      priority: Number(candidate.priority || index + 1),
+      name: String(candidate.name || asset.name || "workbench-update.zip"),
+      size: Number(candidate.size || asset.size || 0),
+      sha256: String(candidate.sha256 || asset.sha256 || "")
+        .replace(/^sha256:/i, "").toLowerCase(),
+    }))
+    .filter((candidate) => {
+      if (seen.has(candidate.url)) return false;
+      seen.add(candidate.url);
+      return true;
+    })
+    .sort((left, right) => left.priority - right.priority)
+    .map((candidate, index) => ({ ...candidate, priority: index + 1 }));
+}
+
+function sanitizeChannelAttempts(attempts = []) {
+  return (Array.isArray(attempts) ? attempts : []).map((attempt) => ({
+    id: safeChannelValue(attempt.id),
+    source: safeChannelValue(attempt.source),
+    status: String(attempt.status || "failed"),
+    attempts: Number(attempt.attempts || 0),
+    ...(attempt.reason ? { reason: safeReason(attempt.reason) } : {}),
+  }));
+}
+
+function canonicalUpdatePhase(value) {
+  const phase = String(value || "idle");
+  if (phase === "test_complete") return "complete";
+  if (["preparing", "stopping_services", "waiting_for_file_release", "restarting_services"].includes(phase)) {
+    return phase === "restarting_services" ? "verifying_install" : "installing";
+  }
+  if (phase === "rollback") return "failed";
+  return phase;
+}
+
 function security() {
   return { credentialsReturned: false, tokenUsed: false };
 }
@@ -38,8 +117,11 @@ function updateErrorDetails(error) {
   if (error?.stage) details.stage = String(error.stage).slice(0, 80);
   if (error?.zipPath) details.zipPath = String(error.zipPath).slice(0, 500);
   if (error?.destination) details.destination = String(error.destination).slice(0, 500);
-  if (error?.reason) details.reason = safeReason(error.reason);
+  if (error?.reason) details.underlyingReason = safeReason(error.reason);
   if (error?.exitCode !== undefined && error?.exitCode !== null) details.exitCode = error.exitCode;
+  if (error?.downloadChannel) details.downloadChannel = safeChannelValue(error.downloadChannel);
+  if (error?.channelAttempts) details.channelAttempts = sanitizeChannelAttempts(error.channelAttempts);
+  if (error?.nextAction) details.nextAction = String(error.nextAction).slice(0, 180);
   return details;
 }
 
@@ -61,7 +143,12 @@ function readJson(targetPath, fallback = null) {
 }
 
 function allowedDownloadUrl(value) {
-  const url = new URL(String(value || ""));
+  let url;
+  try {
+    url = new URL(String(value || ""));
+  } catch {
+    throw new Error("UPDATE_DOWNLOAD_URL_FORBIDDEN");
+  }
   if (url.protocol !== "https:" || !ALLOWED_DOWNLOAD_HOSTS.has(url.hostname)) {
     throw new Error("UPDATE_DOWNLOAD_URL_FORBIDDEN");
   }
@@ -259,6 +346,7 @@ function createWorkbenchUpdater({
       ok: payload.ok !== false,
       action: "workbench_update",
       phase: payload.phase || "idle",
+      normalizedPhase: canonicalUpdatePhase(payload.phase || "idle"),
       percent: Number(payload.percent || 0),
       updatedAt: new Date().toISOString(),
       ...payload,
@@ -272,48 +360,112 @@ function createWorkbenchUpdater({
     testMode = false,
   } = {}) {
     const modeLabel = testMode ? "测试" : "更新";
-    const downloadOptions = {
-      fetchImpl,
-      attempts: downloadAttempts,
-      retryDelayMs: downloadRetryDelayMs,
-      onRetry: ({ nextAttempt }) => status({
-        updateId,
-        mode: testMode ? "test" : "install",
-        phase: "downloading",
-        percent: Math.min(45, 15 + nextAttempt * 8),
-        latestVersion: update.latestVersion,
-        message: `${modeLabel}下载中断，正在进行第 ${nextAttempt} 次重试`,
-      }),
-    };
-    let download;
-    try {
-      download = await downloadFile(
-        update.asset.url,
-        packagePath,
-        downloadOptions,
-      );
-    } catch (primaryError) {
-      if (!update.asset.apiUrl) throw primaryError;
-      status({
-        updateId,
-        mode: testMode ? "test" : "install",
-        phase: "downloading",
-        percent: 45,
-        latestVersion: update.latestVersion,
-        message: "主下载通道失败，正在切换 GitHub 备用通道",
-      });
-      download = await downloadFile(update.asset.apiUrl, packagePath, {
-        ...downloadOptions,
-        headers: { accept: "application/octet-stream" },
-      });
+    const candidates = normalizeDownloadCandidates(update);
+    if (!candidates.length) {
+      const error = new Error("UPDATE_ASSET_NOT_FOUND");
+      error.code = "UPDATE_ASSET_NOT_FOUND";
+      error.stage = "preflight";
+      throw error;
+    }
+    const channelAttempts = [];
+    let download = null;
+    let selectedCandidate = null;
+    let lastError = null;
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = candidates[index];
+      const attempt = {
+        id: candidate.id,
+        source: candidate.source,
+        status: "trying",
+        attempts: 0,
+      };
+      channelAttempts.push(attempt);
+      if (index > 0) {
+        status({
+          updateId,
+          mode: testMode ? "test" : "install",
+          phase: "downloading",
+          percent: Math.min(45, 15 + index * 8),
+          latestVersion: update.latestVersion,
+          kind: "recovered",
+          recoverable: true,
+          channelAttempts: sanitizeChannelAttempts(channelAttempts),
+          message: `已自动切换到 ${candidate.source} 下载通道`,
+        });
+      }
+      try {
+        download = await downloadFile(candidate.url, packagePath, {
+          fetchImpl,
+          attempts: downloadAttempts,
+          retryDelayMs: downloadRetryDelayMs,
+          headers: candidate.headers,
+          onRetry: ({ nextAttempt, error }) => {
+            attempt.attempts = nextAttempt;
+            status({
+              updateId,
+              mode: testMode ? "test" : "install",
+              phase: "downloading",
+              percent: Math.min(45, 15 + nextAttempt * 8),
+              latestVersion: update.latestVersion,
+              downloadChannel: candidate.source,
+              channelAttempts: sanitizeChannelAttempts(channelAttempts),
+              message: `${modeLabel}下载中断，正在进行第 ${nextAttempt} 次重试`,
+              detail: safeReason(error),
+            });
+          },
+        });
+        attempt.status = "succeeded";
+        attempt.attempts = Number(download.attempts || 1);
+        selectedCandidate = candidate;
+        break;
+      } catch (error) {
+        lastError = error;
+        attempt.status = "failed";
+        attempt.attempts = Math.max(1, Number(attempt.attempts || downloadAttempts));
+        attempt.reason = safeReason(error);
+        if (index < candidates.length - 1) {
+          status({
+            updateId,
+            mode: testMode ? "test" : "install",
+            phase: "downloading",
+            percent: Math.min(45, 15 + (index + 1) * 8),
+            latestVersion: update.latestVersion,
+            kind: "warn",
+            recoverable: true,
+            channelAttempts: sanitizeChannelAttempts(channelAttempts),
+            message: `${candidate.source} 下载通道暂不可用，正在自动切换`,
+          });
+        }
+      }
+    }
+    if (!download || !selectedCandidate) {
+      const error = new Error("UPDATE_DOWNLOAD_CHANNELS_FAILED");
+      error.code = "UPDATE_DOWNLOAD_CHANNELS_FAILED";
+      error.stage = "downloading";
+      error.reason = lastError?.message || lastError || "UPDATE_DOWNLOAD_NETWORK_FAILED";
+      error.channelAttempts = channelAttempts;
+      error.nextAction = "检查网络后重试，或从发布页手动下载安装包";
+      throw error;
     }
     if (
       Number(update.asset.size) > 0
       && download.size !== Number(update.asset.size)
     ) {
-      throw new Error("UPDATE_DOWNLOAD_SIZE_MISMATCH");
+      const error = new Error("UPDATE_DOWNLOAD_SIZE_MISMATCH");
+      error.code = "UPDATE_DOWNLOAD_SIZE_MISMATCH";
+      error.stage = "downloading";
+      error.downloadChannel = selectedCandidate.source;
+      error.channelAttempts = channelAttempts;
+      throw error;
     }
-    return download;
+    return {
+      ...download,
+      selectedChannel: selectedCandidate.source,
+      selectedCandidateId: selectedCandidate.id,
+      channelAttempts: sanitizeChannelAttempts(channelAttempts),
+      recovered: channelAttempts.some((attempt) => attempt.status === "failed")
+        && channelAttempts.some((attempt) => attempt.status === "succeeded"),
+    };
   }
 
   async function test(input = {}) {
@@ -337,8 +489,22 @@ function createWorkbenchUpdater({
       }, { fetchImpl });
       if (!update?.ok) throw new Error(update?.reason || "GITHUB_UPDATE_CHECK_FAILED");
       if (!update.releasePublished) throw new Error("GITHUB_RELEASE_NOT_PUBLISHED");
-      if (!update.asset?.url) throw new Error("UPDATE_ASSET_NOT_FOUND");
+      if (!normalizeDownloadCandidates(update).length) throw new Error("UPDATE_ASSET_NOT_FOUND");
 
+      status({
+        updateId,
+        mode: "test",
+        phase: "preflight",
+        percent: 12,
+        latestVersion: update.latestVersion,
+        preferredDownloadChannel: update.preferredDownloadChannel || "",
+        downloadCandidates: normalizeDownloadCandidates(update).map((candidate) => ({
+          id: candidate.id,
+          source: candidate.source,
+          priority: candidate.priority,
+        })),
+        message: "正在预检下载通道和校验信息",
+      });
       const expected = await expectedSha256(update, { fetchImpl });
       testRoot = createStagingRoot("test");
       const packagePath = path.join(
@@ -392,10 +558,14 @@ function createWorkbenchUpdater({
         phase: "test_complete",
         percent: 100,
         latestVersion: update.latestVersion,
+        downloadChannel: download.selectedChannel,
+        channelAttempts: download.channelAttempts,
+        recovered: download.recovered,
         downloadedBytes: download.size,
         sha256: actual,
         packageValid: true,
         installed: false,
+        currentVersionUnchanged: true,
         message: "更新模块测试通过：下载、校验、解压均正常，未安装任何组件",
       });
       return {
@@ -410,6 +580,10 @@ function createWorkbenchUpdater({
         mode: "test",
         phase: "failed",
         percent: 0,
+        stage: error?.stage || "preflight",
+        errorCode: error?.code || safeReason(error),
+        currentVersionUnchanged: true,
+        nextAction: error?.nextAction || "检查诊断摘要后重试",
         message: "更新模块测试失败",
         reason,
         ...updateErrorDetails(error),
@@ -420,6 +594,10 @@ function createWorkbenchUpdater({
         updateId,
         mode: "test",
         phase: "failed",
+        stage: error?.stage || "preflight",
+        errorCode: error?.code || reason,
+        currentVersionUnchanged: true,
+        nextAction: error?.nextAction || "检查诊断摘要后重试",
         message: "更新模块测试失败",
         reason,
         ...updateErrorDetails(error),
@@ -439,6 +617,10 @@ function createWorkbenchUpdater({
         updateId,
         phase: "failed",
         reason: "UPDATE_ALREADY_RUNNING",
+        stage: "preflight",
+        errorCode: "UPDATE_ALREADY_RUNNING",
+        currentVersionUnchanged: true,
+        nextAction: "等待当前更新完成后重试",
         security: security(),
       };
     }
@@ -457,11 +639,36 @@ function createWorkbenchUpdater({
       }, { fetchImpl });
       if (!update?.ok) throw new Error(update?.reason || "GITHUB_UPDATE_CHECK_FAILED");
       if (!update.updateAvailable && !update.repairRequired) throw new Error("UPDATE_NOT_REQUIRED");
-      if (!update.asset?.url) throw new Error("UPDATE_ASSET_NOT_FOUND");
+      const candidates = normalizeDownloadCandidates(update);
+      if (!candidates.length) throw new Error("UPDATE_ASSET_NOT_FOUND");
 
+      status({
+        updateId,
+        phase: "preflight",
+        percent: 12,
+        latestVersion: update.latestVersion,
+        preferredDownloadChannel: update.preferredDownloadChannel || "",
+        downloadCandidates: candidates.map((candidate) => ({
+          id: candidate.id,
+          source: candidate.source,
+          priority: candidate.priority,
+        })),
+        message: "正在预检运行环境、下载通道和校验信息",
+      });
+      if (typeof platformAdapter.preflightUpdate === "function") {
+        const preflight = await platformAdapter.preflightUpdate({ update });
+        if (preflight?.ok === false) {
+          const error = new Error(preflight.reason || "UPDATE_PREFLIGHT_FAILED");
+          error.code = preflight.reason || "UPDATE_PREFLIGHT_FAILED";
+          error.stage = preflight.stage || "preflight";
+          error.nextAction = preflight.nextAction || "检查运行环境后重试";
+          error.currentVersionUnchanged = true;
+          throw error;
+        }
+      }
       const expected = await expectedSha256(update, { fetchImpl });
       updateRoot = createStagingRoot("update");
-      const packagePath = path.join(updateRoot, update.asset.name || "workbench-update.zip");
+      const packagePath = path.join(updateRoot, update.asset?.name || candidates[0].name || "workbench-update.zip");
       const extractRoot = path.join(updateRoot, "extracted");
       fs.rmSync(updateRoot, { recursive: true, force: true });
       fs.mkdirSync(updateRoot, { recursive: true, mode: 0o700 });
@@ -473,13 +680,16 @@ function createWorkbenchUpdater({
         latestVersion: update.latestVersion,
         message: "正在下载完整安装包",
       });
-      await downloadPackage(update, packagePath, updateId);
+      const download = await downloadPackage(update, packagePath, updateId);
 
       status({
         updateId,
         phase: "verifying",
         percent: 55,
         latestVersion: update.latestVersion,
+        downloadChannel: download.selectedChannel,
+        channelAttempts: download.channelAttempts,
+        recovered: download.recovered,
         message: "正在校验安装包",
       });
       const actual = await sha256File(packagePath);
@@ -499,7 +709,7 @@ function createWorkbenchUpdater({
 
       status({
         updateId,
-        phase: "preparing",
+        phase: "installing",
         percent: 74,
         latestVersion: update.latestVersion,
         message: "正在准备停止工作台服务",
@@ -520,6 +730,9 @@ function createWorkbenchUpdater({
         phase: "stopping_services",
         percent: 76,
         latestVersion: update.latestVersion,
+        downloadChannel: download.selectedChannel,
+        channelAttempts: download.channelAttempts,
+        recovered: download.recovered,
         installerPid: Number(launch.pid),
         logPath,
         message: "更新程序已启动，正在停止工作台服务",
@@ -544,6 +757,11 @@ function createWorkbenchUpdater({
         updateId,
         phase: "failed",
         percent: 0,
+        stage: error?.stage || "preflight",
+        errorCode: error?.code || safeReason(error),
+        currentVersion: input.currentVersion || null,
+        currentVersionUnchanged: true,
+        nextAction: error?.nextAction || "检查诊断摘要后重试",
         message: "工作台更新失败",
         reason,
         ...updateErrorDetails(error),
@@ -553,6 +771,11 @@ function createWorkbenchUpdater({
         action: "install_workbench_update",
         updateId,
         phase: "failed",
+        stage: error?.stage || "preflight",
+        errorCode: error?.code || reason,
+        currentVersion: input.currentVersion || null,
+        currentVersionUnchanged: true,
+        nextAction: error?.nextAction || "检查诊断摘要后重试",
         message: "工作台更新失败",
         reason,
         ...updateErrorDetails(error),
@@ -571,6 +794,7 @@ function createWorkbenchUpdater({
       ok: true,
       action: "get_workbench_update_status",
       phase: "idle",
+      normalizedPhase: "idle",
       percent: 0,
       updatedAt: null,
       security: security(),
@@ -614,6 +838,9 @@ module.exports = {
   ALLOWED_DOWNLOAD_HOSTS,
   createWorkbenchUpdater,
   downloadFile,
+  canonicalUpdatePhase,
+  normalizeDownloadCandidates,
+  sanitizeChannelAttempts,
   findPackageRoot,
   resolveInstallerPath,
   sha256File,

@@ -830,6 +830,10 @@ function renderRoute(route) {
   currentRoute = safeRoute;
   if (elements.connectionStatusPanel) {
     elements.connectionStatusPanel.open = safeRoute === "home" || safeRoute === "connections";
+    // 首页运行状态按需展开；连接页仍保留完整诊断上下文。
+    if (safeRoute === "home" && elements.connectionStatusPanel.dataset?.userOpened !== "true") {
+      elements.connectionStatusPanel.open = false;
+    }
   }
   const pages = document.querySelectorAll(".route-page");
   for (const page of pages) {

@@ -22,36 +22,55 @@ export const updatesTemplate = `
       <div><dt>目标平台</dt><dd id="updatePlatform">-</dd></div>
       <div><dt>最后检查</dt><dd id="updateCheckedAt">-</dd></div>
     </dl>
-    <div id="updateFeedback" class="inline-feedback">尚未检查 GitHub Release</div>
-    <div id="updateProgressPanel" class="update-progress hidden">
+    <div id="updateFeedback" class="inline-feedback" role="status" aria-live="polite">尚未检查 GitHub Release</div>
+    <div id="updateProgressPanel" class="update-progress hidden" role="status" aria-live="polite">
       <progress id="updateProgressBar" max="100" value="0"></progress>
       <span id="updateProgressText">等待开始</span>
     </div>
-    <div class="button-row">
-      <button id="checkForUpdates" type="button">检查更新</button>
-      <button id="testUpdate" type="button" class="secondary" disabled>测试更新模块</button>
-      <button id="installUpdate" type="button" disabled>更新全部组件</button>
-      <button id="downloadUpdate" type="button" class="secondary" disabled>手动下载安装包</button>
-      <button id="openReleasePage" type="button" class="secondary" disabled>查看发布页</button>
+    <div class="button-row update-primary-actions">
+      <button id="updatePrimaryAction" type="button">检查更新</button>
     </div>
-    <p class="section-description update-test-note">
-      安全自测会下载约 100–130 MB 的当前平台完整包，并验证 SHA-256、解压和文件完整性；不会安装、重启或改变当前版本，测试文件完成后自动删除。
+    <div class="update-legacy-actions hidden" aria-hidden="true">
+      <button id="checkForUpdates" type="button">检查更新</button>
+      <button id="installUpdate" type="button" disabled>更新全部组件</button>
+    </div>
+    <details id="updateMoreActions" class="update-more-actions">
+      <summary>更多操作</summary>
+      <div class="button-row">
+        <button id="testUpdate" type="button" class="secondary" disabled>测试更新模块</button>
+        <button id="downloadUpdate" type="button" class="secondary" disabled>手动下载安装包</button>
+        <button id="openReleasePage" type="button" class="secondary" disabled>查看发布页</button>
+        <button id="copyUpdateDiagnostics" type="button" class="secondary">复制诊断摘要</button>
+      </div>
+    </details>
+    <p id="updateTestNote" class="section-description update-test-note">
+      安全自测会下载当前平台安装包（大小以发布源为准），并验证 SHA-256、解压和文件完整性；不会安装、重启或改变当前版本，测试文件完成后自动删除。
     </p>
   </section>
   <section class="section update-notes-panel">
     <div class="section-title-row">
       <div>
         <h2>更新内容</h2>
-        <p class="section-description">完整更新会同步扩展、Native Helper、Bridge、Connector 和 Agent 插件缓存。</p>
+        <p class="section-description">更新会同步扩展、Native Helper、Bridge、Connector 和 Agent 插件缓存。</p>
       </div>
     </div>
-    <ul id="updateNotes" class="update-notes">
-      <li>等待检查更新</li>
-    </ul>
-    <dl class="kv compact-kv">
-      <div><dt>安装包</dt><dd id="updateAssetName">-</dd></div>
-      <div><dt>文件大小</dt><dd id="updateAssetSize">-</dd></div>
-      <div><dt>SHA-256</dt><dd id="updateAssetSha">-</dd></div>
-    </dl>
+    <details id="updateNotesDetails" open>
+      <summary>本次更新说明</summary>
+      <ul id="updateNotes" class="update-notes">
+        <li>等待检查更新</li>
+      </ul>
+    </details>
+    <details id="updateNotesRemainingDetails" hidden>
+      <summary>查看其余更新说明</summary>
+      <ul id="updateNotesRemaining" class="update-notes"></ul>
+    </details>
+    <details id="updateTechnicalDetails">
+      <summary>技术详情</summary>
+      <dl class="kv compact-kv">
+        <div><dt>安装包</dt><dd id="updateAssetName">-</dd></div>
+        <div><dt>文件大小</dt><dd id="updateAssetSize">-</dd></div>
+        <div><dt>SHA-256</dt><dd id="updateAssetSha">-</dd></div>
+      </dl>
+    </details>
   </section>
 `;
