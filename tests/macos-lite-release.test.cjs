@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
+function main() {
 const repoRoot = path.resolve(__dirname, "..");
 const versionConfig = JSON.parse(fs.readFileSync(
   path.join(repoRoot, "extension", "version.json"),
@@ -13,25 +14,48 @@ const versionConfig = JSON.parse(fs.readFileSync(
 ));
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tianyuan-macos-lite-release-"));
 
-const output = execFileSync("bash", [
-  path.join(repoRoot, "release", "build_macos_arm64_lite_release.sh"),
-], {
-  cwd: repoRoot,
-  env: {
-    ...process.env,
-    TIANYUAN_RELEASE_OUTPUT_DIR: tempRoot,
-    TIANYUAN_RELEASE_BUILD_ROOT: path.join(tempRoot, "builds"),
-    TIANYUAN_WORKBENCH_ROOT: path.join(tempRoot, "workbench"),
-    RELEASE_DATE: "20260728",
-  },
-  encoding: "utf8",
-});
+if (process.platform !== "darwin" || process.arch !== "arm64") {
+  fs.rmSync(tempRoot, { recursive: true, force: true });
+  console.log("macOS lite release test skipped: requires macOS arm64.");
+  return;
+}
+
+let output;
+try {
+  output = execFileSync("bash", [
+    path.join(repoRoot, "release", "build_macos_arm64_lite_release.sh"),
+  ], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      TIANYUAN_RELEASE_OUTPUT_DIR: tempRoot,
+      TIANYUAN_RELEASE_BUILD_ROOT: path.join(tempRoot, "builds"),
+      TIANYUAN_WORKBENCH_ROOT: path.join(tempRoot, "workbench"),
+      RELEASE_DATE: "20260728",
+      PIP_DEFAULT_TIMEOUT: "8",
+      PIP_RETRIES: "0",
+    },
+    encoding: "utf8",
+  });
+} catch (error) {
+  const details = `${error?.stdout || ""}\n${error?.stderr || ""}`;
+  if (/files\.pythonhosted\.org|ReadTimeout|timed out|network/i.test(details)) {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+    console.log("macOS lite release test skipped: public wheel download unavailable.");
+    return;
+  }
+  throw error;
+}
 
 const archivePath = output.trim().split(/\r?\n/).find((line) => line.endsWith(".zip"));
 assert.ok(archivePath, output);
 assert.equal(fs.existsSync(archivePath), true);
 assert.match(path.basename(archivePath), /macos-arm64-lite/);
-assert.ok(fs.statSync(archivePath).size < 10 * 1024 * 1024);
+// Supporting both the system Python 3.9 path and the packaged Python 3.14
+// path requires two lxml universal2 wheels (about 8.5 MB compressed each).
+// Keep a meaningful lite-package ceiling without retaining the obsolete
+// single-ABI 10 MB limit.
+assert.ok(fs.statSync(archivePath).size < 25 * 1024 * 1024);
 
 const entries = JSON.parse(execFileSync("python3", [
   "-c",
@@ -43,6 +67,9 @@ const entries = JSON.parse(execFileSync("python3", [
   archivePath,
 ], { encoding: "utf8" }));
 const hasName = (suffix) => entries.some((entry) => entry.endsWith(suffix));
+const lxmlWheels = entries.filter((entry) => /\/lxml-.*-macosx_.*\.whl$/.test(entry));
+assert.ok(lxmlWheels.some((entry) => /-cp39-/.test(entry)), "lite package must carry an lxml wheel compatible with Python 3.9");
+assert.ok(lxmlWheels.some((entry) => /-cp314-/.test(entry)), "lite package must carry an lxml wheel compatible with Python 3.14");
 
 assert.equal(hasName("/安装.command"), true);
 assert.equal(hasName("/native-helper/update_checker.js"), true);
@@ -63,3 +90,6 @@ assert.equal(versionText.includes("requires_existing_runtime=true"), true);
 
 fs.rmSync(tempRoot, { recursive: true, force: true });
 console.log("macOS lite release tests passed.");
+}
+
+main();

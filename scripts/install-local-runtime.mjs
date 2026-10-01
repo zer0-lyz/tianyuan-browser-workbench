@@ -351,10 +351,14 @@ function writePrivateJson(targetPath, value) {
 
 function writeUpdateStatus(phase, percent, extra = {}) {
   if (!updateStatusPath) return;
+  const normalizedPhase = ["preparing", "stopping_services", "waiting_for_file_release"].includes(phase)
+    ? "installing"
+    : (phase === "restarting_services" ? "verifying_install" : phase);
   writePrivateJson(updateStatusPath, {
     ok: phase !== "failed",
     action: "workbench_update",
     phase,
+    normalizedPhase,
     percent,
     updatedAt: new Date().toISOString(),
     ...extra,
@@ -864,6 +868,9 @@ if (isExecutedAsMainModule()) {
       .slice(0, 500);
     writeUpdateStatus("failed", 0, {
       reason,
+      errorCode: String(error?.code || reason).slice(0, 100),
+      currentVersionUnchanged: true,
+      nextAction: "请查看诊断摘要后运行完整安装包或重试",
     });
     process.stdout.write(`${JSON.stringify({
       ok: false,

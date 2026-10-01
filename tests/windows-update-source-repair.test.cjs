@@ -12,8 +12,15 @@ const repairScript = fs.readFileSync(
 
 assert.equal(repairScript.includes("TianyuanWorkbench\\native-helper\\update-sources.json"), true);
 assert.equal(
+  repairScript.includes("TIANYUAN_GITEE_MANIFEST_URL"),
+  true,
+);
+assert.equal(
   repairScript.includes("https://github.com/zer0-lyz/tianyuan-browser-workbench-releases/releases/latest/download/update-manifest.json"),
   true,
+);
+assert.ok(
+  repairScript.indexOf("$gitee") < repairScript.indexOf("$urls += 'https://github.com/"),
 );
 assert.equal(repairScript.includes("ExecutionPolicy Bypass"), true);
 

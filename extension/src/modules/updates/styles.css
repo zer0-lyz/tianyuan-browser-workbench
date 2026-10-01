@@ -39,3 +39,37 @@
 [data-module-id="updates"] .update-test-note {
   margin: 0;
 }
+
+[data-module-id="updates"] .update-legacy-actions {
+  display: none;
+}
+
+[data-module-id="updates"] .update-primary-actions button {
+  width: 100%;
+  min-height: 40px;
+}
+
+[data-module-id="updates"] .update-more-actions,
+[data-module-id="updates"] .update-notes-panel details {
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--surface-muted);
+}
+
+[data-module-id="updates"] .update-more-actions summary,
+[data-module-id="updates"] .update-notes-panel details summary {
+  min-height: 36px;
+  padding: 8px 10px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+[data-module-id="updates"] .update-more-actions .button-row {
+  padding: 0 10px 10px;
+}
+
+[data-module-id="updates"] .update-notes-panel details:not([open]) .update-notes {
+  display: none;
+}

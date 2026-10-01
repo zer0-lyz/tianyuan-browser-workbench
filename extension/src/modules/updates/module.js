@@ -72,6 +72,13 @@ function elementMap(documentRef) {
     "updatePlatform",
     "updateCheckedAt",
     "updateFeedback",
+    "updatePrimaryAction",
+    "updateTestNote",
+        "updateMoreActions",
+        "updateNotesDetails",
+        "updateNotesRemainingDetails",
+        "updateNotesRemaining",
+        "updateTechnicalDetails",
     "checkForUpdates",
     "testUpdate",
     "installUpdate",
@@ -84,6 +91,7 @@ function elementMap(documentRef) {
     "updateAssetName",
     "updateAssetSize",
     "updateAssetSha",
+    "copyUpdateDiagnostics",
   ];
   return Object.fromEntries(ids.map((id) => [id, documentRef.getElementById(id)]));
 }
@@ -118,15 +126,75 @@ export const updatesModule = {
       return new Promise((resolve) => window.setTimeout(resolve, delay));
     }
 
+    function currentVersion() {
+      return (versionConfig?.productVersion
+        || context?.extensionManifest?.version_name
+        || context?.extensionManifest?.version
+        || "-");
+    }
+
+    function diagnosticSummary(status = operationStatus, result = latestResult) {
+      const attempts = Array.isArray(status?.channelAttempts)
+        ? status.channelAttempts.map((attempt) => ({
+          id: String(attempt?.id || "").slice(0, 80),
+          source: String(attempt?.source || "").slice(0, 40),
+          status: String(attempt?.status || "").slice(0, 30),
+          attempts: Number(attempt?.attempts || 0),
+        }))
+        : [];
+      return JSON.stringify({
+        product: "天源浏览器工作台",
+        currentVersion: String(currentVersion()),
+        latestVersion: String(result?.latestVersion || ""),
+        platform: String(result?.platform || ""),
+        phase: String(status?.phase || result?.phase || "idle"),
+        stage: String(status?.stage || result?.stage || ""),
+        errorCode: String(status?.errorCode || result?.errorCode || result?.reason || ""),
+        currentVersionUnchanged: status?.currentVersionUnchanged !== false
+          && result?.currentVersionUnchanged !== false,
+        downloadChannel: String(status?.downloadChannel || result?.preferredDownloadChannel || ""),
+        channelAttempts: attempts,
+        checkedAt: String(result?.checkedAt || ""),
+      }, null, 2);
+    }
+
+    function hasDownloadAsset(result = latestResult) {
+      return Boolean(
+        result?.asset?.url
+        || (Array.isArray(result?.downloadCandidates) && result.downloadCandidates.some((candidate) => candidate?.url)),
+      );
+    }
+
+    async function copyDiagnostics() {
+      const text = diagnosticSummary();
+      try {
+        const clipboard = globalThis.navigator?.clipboard;
+        if (!clipboard?.writeText) throw new Error("CLIPBOARD_UNAVAILABLE");
+        await clipboard.writeText(text);
+        if (elements.updateFeedback) {
+          elements.updateFeedback.textContent = "已复制脱敏诊断摘要（不含路径、凭据或页面数据）";
+          elements.updateFeedback.dataset.kind = "ok";
+        }
+        context.setStatus("已复制脱敏诊断摘要。", "ok");
+      } catch {
+        context.setStatus("当前页面不允许复制诊断摘要，请手动查看更新状态。", "warn");
+      }
+      return text;
+    }
+
     function updateFailureText(reason) {
       const messages = {
-        UPDATE_NOT_REQUIRED: "当前已经是最新完整版本。",
-        UPDATE_ASSET_NOT_FOUND: "未找到适用于当前系统的完整安装包。",
+        UPDATE_NOT_REQUIRED: "当前已经是最新版本。",
+        UPDATE_ASSET_NOT_FOUND: "未找到适用于当前系统的安装包。",
         UPDATE_SHA256_MISSING: "官方发布包缺少 SHA-256，已停止安装。",
         UPDATE_SHA256_INVALID: "官方校验文件格式无效，已停止安装。",
         UPDATE_SHA256_MISMATCH: "安装包校验失败，文件可能损坏，已停止安装。",
         UPDATE_INSTALLER_NOT_FOUND: "安装包中缺少安装程序，已停止安装。",
         UPDATE_DOWNLOAD_NETWORK_FAILED: "安装包下载网络连接失败，请检查网络后重试。",
+        UPDATE_DOWNLOAD_CHANNELS_FAILED: "所有下载通道均失败，当前版本未改变；请检查网络或打开发布页手动下载。",
+        UPDATE_PYTHON_RUNTIME_UNAVAILABLE: "当前 macOS 没有可复用且兼容的 Python 运行时；当前版本未改变，请先运行 macOS 安装包。",
+        UPDATE_PYTHON_RUNTIME_ABI_UNSUPPORTED: "当前 macOS Python 缺少更新所需依赖，且版本不在轻量包支持范围内；当前版本未改变，请安装 Python 3.9/3.14 或运行 macOS 安装包。",
+        UPDATE_PREFLIGHT_FAILED: "更新环境预检未通过，当前版本未改变，请按提示修复后重试。",
         UPDATE_DOWNLOAD_TIMEOUT: "安装包下载超时，请检查网络稳定性后重试。",
         UPDATE_CHECK_TIMEOUT: "更新源响应超时，当前版本可以继续使用，请稍后重试。",
         NATIVE_HELPER_TIMEOUT: "本地助手响应超时，请重新加载扩展后重试；当前版本未改变。",
@@ -146,6 +214,12 @@ export const updatesModule = {
         const code = String(reason).slice("UPDATE_DOWNLOAD_NETWORK_".length);
         return `安装包下载网络连接失败（${code}），请检查网络后重试。`;
       }
+      if (String(reason || "").startsWith("UPDATE_PYTHON_RUNTIME_UNAVAILABLE")) {
+        return messages.UPDATE_PYTHON_RUNTIME_UNAVAILABLE;
+      }
+      if (String(reason || "").startsWith("UPDATE_PYTHON_RUNTIME_ABI_UNSUPPORTED")) {
+        return messages.UPDATE_PYTHON_RUNTIME_ABI_UNSUPPORTED;
+      }
       if (String(reason || "").startsWith("UPDATE_DOWNLOAD_HTTP_")) {
         const code = String(reason).slice("UPDATE_DOWNLOAD_HTTP_".length);
         return `GitHub 安装包下载失败（HTTP ${code}），请稍后重试。`;
@@ -157,30 +231,38 @@ export const updatesModule = {
         const code = String(reason).slice("UPDATE_INSTALLER_EXIT_".length);
         return `Windows 安装脚本失败（退出码 ${code}），当前版本已保留。`;
       }
-      return messages[reason] || reason || "完整更新失败";
+      return messages[reason] || reason || "更新失败";
     }
 
     function progressMessage(status) {
       if (status?.message) return status.message;
+      const phase = status?.normalizedPhase || status?.phase;
       const labels = {
+        checking: "正在检查更新源",
+        preflight: "正在预检本机运行环境",
+        downloading: "正在下载更新包",
+        verifying: "正在校验更新包",
+        extracting: "正在解压更新包",
+        installing: "正在安装工作台组件",
+        verifying_install: "正在验证安装结果",
+        complete: "更新已完成",
         preparing: "正在准备更新",
         stopping_services: "正在停止工作台服务",
         waiting_for_file_release: "正在等待文件释放",
-        installing: "正在安装全部组件",
-        verifying_install: "正在验证安装结果",
         restarting_services: "正在重启工作台服务",
         rollback: "正在恢复原版本",
       };
-      return labels[status?.phase] || (status?.phase === "failed"
+      return labels[phase] || (phase === "failed"
         ? updateFailureText(status.reason)
         : "等待开始");
     }
 
     function renderProgress(status = operationStatus) {
       operationStatus = status;
+      const normalizedPhase = status?.normalizedPhase || status?.phase;
       const active = installing || testing || (
         status
-        && !["idle", "complete", "test_complete", "failed"].includes(status.phase)
+        && !["idle", "complete", "test_complete", "failed"].includes(normalizedPhase)
       );
       elements.updateProgressPanel.classList.toggle("hidden", !active && !status);
       elements.updateProgressBar.value = Math.max(0, Math.min(100, Number(status?.percent || 0)));
@@ -222,10 +304,33 @@ export const updatesModule = {
       const values = Array.isArray(notes) && notes.length
         ? notes
         : ["暂无更新说明"];
-      for (const value of values) {
+      const visibleValues = values.slice(0, 5);
+      const remainingValues = values.slice(5);
+      for (const value of visibleValues) {
         const item = context.document.createElement("li");
         item.textContent = String(value);
         elements.updateNotes.appendChild(item);
+      }
+      if (elements.updateNotesDetails) {
+        const summary = elements.updateNotesDetails.querySelector?.("summary");
+        if (summary) {
+          summary.textContent = "本次更新说明";
+        }
+      }
+      if (elements.updateNotesRemainingDetails) {
+        const summaryText = `查看其余 ${remainingValues.length} 条`;
+        elements.updateNotesRemainingDetails.hidden = remainingValues.length === 0;
+        elements.updateNotesRemainingDetails.dataset.summaryText = summaryText;
+        const summary = elements.updateNotesRemainingDetails.querySelector?.("summary");
+        if (summary) summary.textContent = summaryText;
+        if (elements.updateNotesRemaining) {
+          elements.updateNotesRemaining.innerHTML = "";
+          for (const value of remainingValues) {
+            const item = context.document.createElement("li");
+            item.textContent = String(value);
+            elements.updateNotesRemaining.appendChild(item);
+          }
+        }
       }
     }
 
@@ -243,27 +348,48 @@ export const updatesModule = {
         : "-";
       elements.updatePlatform.textContent = result?.platform || "-";
       elements.updateCheckedAt.textContent = formatTime(result?.checkedAt);
-      elements.updateAssetName.textContent = result?.asset?.name || "-";
-      elements.updateAssetSize.textContent = formatBytes(result?.asset?.size);
-      elements.updateAssetSha.textContent = result?.asset?.sha256 || (
+      const candidates = Array.isArray(result?.downloadCandidates)
+        ? result.downloadCandidates
+        : [];
+      const preferredCandidate = candidates.find((candidate) =>
+        candidate?.source === result?.preferredDownloadChannel)
+      || candidates[0]
+      || null;
+      const asset = result?.asset || {};
+      elements.updateAssetName.textContent = asset.name || preferredCandidate?.name || "-";
+      elements.updateAssetSize.textContent = formatBytes(asset.size || preferredCandidate?.size);
+      elements.updateAssetSha.textContent = asset.sha256 || preferredCandidate?.sha256 || (
         result?.checksumAsset?.url ? "请使用同名 .sha256 文件校验" : "-"
       );
       renderNotes(result?.notes);
 
-      const assetUrl = safeReleaseUrl(result?.asset?.url);
+      const assetUrl = safeReleaseUrl(preferredCandidate?.url || result?.asset?.url);
       const releaseUrl = safeReleaseUrl(result?.releaseUrl);
       const operationBusy = checking || testing || installing;
-      elements.downloadUpdate.disabled = operationBusy || !assetUrl;
-      elements.downloadUpdate.dataset.url = assetUrl;
-      elements.openReleasePage.disabled = operationBusy || !releaseUrl;
-      elements.openReleasePage.dataset.url = releaseUrl;
-      elements.testUpdate.disabled = operationBusy
+      if (elements.downloadUpdate) {
+        elements.downloadUpdate.disabled = operationBusy || !assetUrl;
+        elements.downloadUpdate.dataset.url = assetUrl;
+      }
+      if (elements.openReleasePage) {
+        elements.openReleasePage.disabled = operationBusy || !releaseUrl;
+        elements.openReleasePage.dataset.url = releaseUrl;
+      }
+      if (elements.testUpdate) elements.testUpdate.disabled = operationBusy
         || !assetUrl
         || !result?.ok;
-      elements.installUpdate.disabled = operationBusy
+      if (elements.installUpdate) elements.installUpdate.disabled = operationBusy
         || !assetUrl
         || !result?.ok
         || (!result?.updateAvailable && !result?.repairRequired);
+      if (elements.updatePrimaryAction) {
+        elements.updatePrimaryAction.disabled = operationBusy;
+        elements.updatePrimaryAction.textContent = result?.updateAvailable || result?.repairRequired
+          ? `更新到 v${result.latestVersion}`
+          : "重新检查";
+      }
+      if (elements.updateTestNote && asset?.size) {
+        elements.updateTestNote.textContent = `安全自测会下载当前平台安装包（${formatBytes(asset.size)}），并验证 SHA-256、解压和文件完整性；不会安装、重启或改变当前版本，测试文件完成后自动删除。`;
+      }
 
       if (!result) {
         elements.updateHeadline.textContent = `天源浏览器工作台 v${currentVersion}`;
@@ -308,7 +434,7 @@ export const updatesModule = {
         elements.updateDescription.textContent = "产品版本相同，但运行指纹不同，需要重新下载安装当前版本。";
         elements.updateBadge.textContent = "需要修复";
         elements.updateFeedback.textContent = assetUrl
-          ? "可点击“更新全部组件”自动修复，或手动下载安装包"
+          ? `可点击“更新到 v${currentVersion}”自动修复${result.preferredDownloadChannel === "github-api" ? "；已优先选择 GitHub API 通道" : ""}`
           : "请打开发布页重新下载安装";
         elements.updateFeedback.dataset.kind = "error";
         setTopStatus("需修复", "error");
@@ -321,7 +447,7 @@ export const updatesModule = {
           : "可一次更新扩展、Helper、Bridge、Connector 和 Agent 插件缓存。";
         elements.updateBadge.textContent = result.mandatory ? "必须更新" : "有新版本";
         elements.updateFeedback.textContent = assetUrl
-          ? `已找到适用于 ${result.platform} 的安装包`
+          ? `已找到适用于 ${result.platform} 的安装包${result.preferredDownloadChannel === "github-api" ? "，已优先选择 GitHub API 下载通道" : ""}`
           : "未找到当前平台安装包，请查看 GitHub 发布页";
         elements.updateFeedback.dataset.kind = result.mandatory ? "error" : "ok";
         setTopStatus(
@@ -425,11 +551,11 @@ export const updatesModule = {
     }
 
     async function testUpdateModule() {
-      if (testing || installing || checking || !latestResult?.asset?.url) return;
+      if (testing || installing || checking || !hasDownloadAsset()) return;
       const confirmed = window.confirm([
         "确认测试更新模块？",
         "",
-        "将下载约 100–130 MB 的当前平台完整安装包，并测试：",
+        `将下载当前平台安装包（${formatBytes(latestResult?.asset?.size)}），并测试：`,
         "1. 发布源下载与重试通道",
         "2. SHA-256 校验",
         "3. 解压和安装包文件完整性",
@@ -448,7 +574,7 @@ export const updatesModule = {
         message: "正在准备更新模块安全自测",
       });
       render(latestResult);
-      context.setStatus("正在测试完整更新链路，不会执行安装...", "idle");
+      context.setStatus("正在测试更新链路，不会执行安装...", "idle");
       try {
         const { config, contract } = await loadVersionContext();
         let requestFinished = false;
@@ -495,6 +621,8 @@ export const updatesModule = {
           phase: "failed",
           percent: 0,
           reason,
+          errorCode: reason,
+          currentVersionUnchanged: true,
           message: friendly,
         });
         elements.updateFeedback.textContent = `更新模块测试失败：${friendly}`;
@@ -514,7 +642,7 @@ export const updatesModule = {
           setTopStatus("测试通过", "ok");
         } else if (finalStatus?.phase === "failed") {
           const friendly = updateFailureText(finalStatus.reason);
-          elements.updateFeedback.textContent = `更新模块测试失败：${friendly}`;
+          elements.updateFeedback.textContent = `更新模块测试失败：${friendly} 当前版本未改变。`;
           elements.updateFeedback.dataset.kind = "error";
           setTopStatus("测试失败", "error");
         }
@@ -542,7 +670,7 @@ export const updatesModule = {
     }
 
     async function installCompleteUpdate() {
-      if (installing || testing || checking || !latestResult?.asset?.url) return;
+      if (installing || testing || checking || !hasDownloadAsset()) return;
       const confirmed = window.confirm([
         `确认将天源浏览器工作台更新到 v${latestResult.latestVersion}？`,
         "",
@@ -556,7 +684,7 @@ export const updatesModule = {
       render(latestResult);
       elements.installUpdate.textContent = "更新中...";
       setTopStatus("更新中", "idle");
-      renderProgress({ phase: "checking", percent: 3, message: "正在准备完整更新" });
+      renderProgress({ phase: "checking", percent: 3, message: "正在准备更新" });
       context.setStatus("正在下载并安装全部工作台组件...", "idle");
       try {
         const { config, contract } = await loadVersionContext();
@@ -599,11 +727,18 @@ export const updatesModule = {
       } catch (error) {
         const reason = String(error?.message || error);
         const friendly = updateFailureText(reason);
-        renderProgress({ phase: "failed", percent: 0, reason, message: friendly });
-        elements.updateFeedback.textContent = friendly;
+        renderProgress({
+          phase: "failed",
+          percent: 0,
+          reason,
+          errorCode: reason,
+          currentVersionUnchanged: true,
+          message: friendly,
+        });
+        elements.updateFeedback.textContent = `${friendly} 当前版本未改变。`;
         elements.updateFeedback.dataset.kind = "error";
         setTopStatus("更新失败", "error");
-        context.setStatus(`完整更新失败：${friendly}`, "error");
+        context.setStatus(`更新失败：${friendly}`, "error");
       } finally {
         const finalStatus = operationStatus;
         installing = false;
@@ -612,7 +747,7 @@ export const updatesModule = {
         renderProgress(finalStatus);
         if (finalStatus?.phase === "failed") {
           const friendly = updateFailureText(finalStatus.reason);
-          elements.updateFeedback.textContent = friendly;
+          elements.updateFeedback.textContent = `${friendly} 当前版本未改变。`;
           elements.updateFeedback.dataset.kind = "error";
           setTopStatus("更新失败", "error");
         }
@@ -662,6 +797,11 @@ export const updatesModule = {
         context.scope.on(elements.checkForUpdates, "click", () =>
           check({ automatic: false })
         );
+        context.scope.on(elements.updatePrimaryAction, "click", () => (
+          latestResult?.updateAvailable || latestResult?.repairRequired
+            ? installCompleteUpdate()
+            : check({ automatic: false })
+        ));
         context.scope.on(elements.testUpdate, "click", testUpdateModule);
         context.scope.on(elements.installUpdate, "click", installCompleteUpdate);
         context.scope.on(elements.downloadUpdate, "click", () =>
@@ -670,6 +810,7 @@ export const updatesModule = {
         context.scope.on(elements.openReleasePage, "click", () =>
           openUrl(elements.openReleasePage)
         );
+        context.scope.on(elements.copyUpdateDiagnostics, "click", copyDiagnostics);
         context.scope.on(window, "focus", maybeAutoCheck);
         context.scope.interval(maybeAutoCheck, AUTO_CHECK_TIMER_MS);
         context.scope.timeout(maybeAutoCheck, 0);

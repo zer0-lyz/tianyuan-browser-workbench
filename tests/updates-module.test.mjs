@@ -14,16 +14,32 @@ class FakeElement extends EventTarget {
     this.dataset = {};
     this.disabled = false;
     this.href = "";
-    this.innerHTML = "";
+    this._innerHTML = "";
     this.rel = "";
     this.textContent = "";
     this.children = [];
     this.value = 0;
+    this.hidden = false;
+  }
+
+  get innerHTML() {
+    return this._innerHTML;
+  }
+
+  set innerHTML(value) {
+    this._innerHTML = String(value ?? "");
+    this.children = [];
   }
 
   appendChild(child) {
     this.children.push(child);
     return child;
+  }
+
+  querySelector(selector) {
+    if (selector !== "summary") return null;
+    this.summary ||= new FakeElement(`${this.id}-summary`);
+    return this.summary;
   }
 
   remove() {
@@ -55,6 +71,13 @@ const elementIds = [
   "updatePlatform",
   "updateCheckedAt",
   "updateFeedback",
+  "updatePrimaryAction",
+  "updateTestNote",
+  "updateMoreActions",
+  "updateNotesDetails",
+  "updateNotesRemainingDetails",
+  "updateNotesRemaining",
+  "updateTechnicalDetails",
   "checkForUpdates",
   "testUpdate",
   "installUpdate",
@@ -67,6 +90,7 @@ const elementIds = [
   "updateAssetName",
   "updateAssetSize",
   "updateAssetSha",
+  "copyUpdateDiagnostics",
 ];
 const elements = new Map(elementIds.map((id) => [id, new FakeElement(id)]));
 const documentRef = {
@@ -96,7 +120,7 @@ const savedResult = {
     size: 120 * 1024 * 1024,
     sha256: "a".repeat(64),
   },
-  notes: ["模块化测试"],
+  notes: ["模块化测试 1", "模块化测试 2", "模块化测试 3", "模块化测试 4", "模块化测试 5", "模块化测试 6", "模块化测试 7"],
 };
 const storage = {
   saved: null,
@@ -111,6 +135,18 @@ const navigation = [];
 const statuses = [];
 const connections = [];
 const nativeMessages = [];
+const diagnosticCopies = [];
+const originalNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+Object.defineProperty(globalThis, "navigator", {
+  configurable: true,
+  value: {
+    clipboard: {
+      async writeText(value) {
+        diagnosticCopies.push(value);
+      },
+    },
+  },
+});
 const moduleInstance = updatesModule.create();
 const updateScope = new ModuleScope();
 await moduleInstance.initialize({
@@ -166,6 +202,10 @@ await moduleInstance.initialize({
 
 assert.match(elements.get("page-updates").innerHTML, /id="checkForUpdates"/);
 assert.match(elements.get("page-updates").innerHTML, /id="testUpdate"/);
+assert.match(elements.get("page-updates").innerHTML, /id="updatePrimaryAction"/);
+assert.match(elements.get("page-updates").innerHTML, /id="updateMoreActions"/);
+assert.match(elements.get("page-updates").innerHTML, /id="copyUpdateDiagnostics"/);
+assert.match(elements.get("page-updates").innerHTML, /id="updateNotesRemainingDetails"/);
 assert.equal(documentRef.head.children.length, 1);
 assert.equal(
   documentRef.head.children[0].href,
@@ -174,12 +214,34 @@ assert.equal(
 assert.equal(elements.get("updateHeadline").textContent, "已是最新版本");
 assert.equal(elements.get("updateCurrentVersion").textContent, "v0.11.0");
 assert.equal(elements.get("updateLatestVersion").textContent, "v0.11.0");
+assert.equal(elements.get("updatePrimaryAction").textContent, "重新检查");
+assert.equal(elements.get("updateAssetSize").textContent, "120.0 MB");
+assert.match(elements.get("updateTestNote").textContent, /当前平台安装包（120\.0 MB）/);
+assert.doesNotMatch(elements.get("updateTestNote").textContent, /完整包/);
+assert.equal(elements.get("updateNotes").children.length, 5);
+assert.equal(elements.get("updateNotesRemaining").children.length, 2);
+assert.equal(elements.get("updateNotesRemainingDetails").hidden, false);
+assert.equal(elements.get("updateNotesRemainingDetails").summary.textContent, "查看其余 2 条");
+assert.equal(elements.get("testUpdate").disabled, false);
+assert.equal(elements.get("installUpdate").disabled, true);
 
 elements.get("openUpdatesTop").dispatchEvent(new Event("click"));
 elements.get("backFromUpdates").dispatchEvent(new Event("click"));
 assert.deepEqual(navigation, ["updates", "home"]);
 assert.equal(statuses.length, 0);
 assert.equal(connections.at(-1).text, "v0.11.0");
+
+elements.get("copyUpdateDiagnostics").dispatchEvent(new Event("click"));
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(diagnosticCopies.length, 1);
+assert.equal(JSON.parse(diagnosticCopies[0]).currentVersion, "0.11.0");
+
+elements.get("updatePrimaryAction").dispatchEvent(new Event("click"));
+await new Promise((resolve) => setTimeout(resolve, 20));
+assert.equal(
+  nativeMessages.some((message) => message.action === "check_github_update"),
+  true,
+);
 
 elements.get("testUpdate").dispatchEvent(new Event("click"));
 await new Promise((resolve) => setTimeout(resolve, 20));
@@ -193,4 +255,9 @@ assert.equal(elements.get("testUpdate").disabled, false);
 
 updateScope.dispose();
 globalThis.window = originalWindow;
+if (originalNavigatorDescriptor) {
+  Object.defineProperty(globalThis, "navigator", originalNavigatorDescriptor);
+} else {
+  delete globalThis.navigator;
+}
 console.log("Updates module tests passed.");

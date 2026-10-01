@@ -16,7 +16,7 @@
         <button id="refresh" type="button" class="icon-text-button">刷新</button>
       </header>
 
-      <details id="connectionStatusPanel" class="connection-status-panel" open>
+      <details id="connectionStatusPanel" class="connection-status-panel">
         <summary class="connection-status-summary">
           <span class="connection-status-summary-label">运行状态</span>
           <span id="connectionStatusSummaryText" class="connection-status-summary-text">正在读取连接状态…</span>
@@ -54,7 +54,7 @@
               <span>反馈</span>
             </button>
           </nav>
-          <section id="status" class="status status-idle">等待读取当前页面</section>
+          <section id="status" class="status status-idle" role="status" aria-live="polite">等待读取当前页面</section>
         </div>
       </details>
 

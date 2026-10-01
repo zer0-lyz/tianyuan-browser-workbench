@@ -1,5 +1,6 @@
 {
   "schemaVersion": 1,
+  "giteeManifestUrl": "https://gitee.com/zer0_y/tianyuan-browser-workbench-releases/raw/master/update-manifest.json",
   "manifestUrls": [
     "https://github.com/zer0-lyz/tianyuan-browser-workbench-releases/releases/latest/download/update-manifest.json"
   ]

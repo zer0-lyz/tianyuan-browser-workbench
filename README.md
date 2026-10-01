@@ -74,13 +74,13 @@ node scripts/install-local-runtime.mjs
 
 安装本机运行组件后，批量上传等页面写入模块不需要配置 Codex、WorkBuddy 或其他 Agent MCP。扩展会自动注册“天源工作台本机脚本”来源；首次执行写入时只需确认当前页面控制权。仅加载扩展文件而未注册 Native Messaging Host 时，文件夹选择和本机 Bridge 不会工作。
 
-版本更新模块通过公开发行仓库 `zer0-lyz/tianyuan-browser-workbench-releases` 的 GitHub Releases 检查新版本，不使用 MCP token。`0.13.0` 起可在侧栏点击“更新全部组件”，自动下载对应平台完整包、校验 SHA-256，并同步扩展、Native Helper、Bridge、Connector、`~/plugins/` 与 Codex 插件缓存；完成后自动重新加载扩展。
+版本更新模块通过 Gitee 国内镜像 `zer0_y/tianyuan-browser-workbench-releases` 的 `master` 分支清单及轻量包作为主通道，失败或过期时继续核对公开发行仓库 `zer0-lyz/tianyuan-browser-workbench-releases` 的 GitHub Release/API；也可通过 `TIANYUAN_GITEE_MANIFEST_URL` 临时覆盖镜像清单，不使用 MCP token。`0.13.0` 起可在侧栏点击“更新全部组件”，自动下载对应平台完整包、校验 SHA-256，并同步扩展、Native Helper、Bridge、Connector、`~/plugins/` 与 Codex 插件缓存；完成后自动重新加载扩展。
 
 Windows 打包发布的固定交接入口为仓库根目录 `WINDOWS_CODEX_HANDOFF.md`。macOS 主线只推送源码；Windows 专机 Codex 按该说明配置完整包和轻量包、执行真实首次安装与升级验收、生成 `update-manifest.json` 和 Release 专属 `WINDOWS_CODEX_HANDOFF.md`，再上传 GitHub Release。每次正式 Release 必须同时上传该交接文件；验收必须覆盖 Node.js、Python 全部业务依赖、Native Host、Native Messaging、Connector、Codex 插件缓存、CLI 与更新模块，不能把“扩展已复制或已加载”作为安装完成。
 
 `0.14.25` 的 2026-09-18 Windows 修复构建补齐了完整包和轻量包缺失的 `native-helper/codex_catalog.js` 与 `native-helper/anjuke-property.js`。Windows 打包现改为同步完整的受版本控制 `native-helper` 目录，并在下载测试阶段校验这些必需文件，避免安装中途出现 `MODULE_NOT_FOUND`。
 
-`0.14.9` 起支持轻量更新包和国内静态镜像清单。首次安装仍使用完整安装包；后续更新可只下载扩展、Native Helper、Connector、skills 和安装脚本，复用本机已安装 Node、Python/openpyxl 和天源 CLI。镜像源可使用 Gitee 仓库 raw 文件，失败时自动回退 GitHub，下载仍受域名白名单、文件大小和 SHA-256 校验保护。
+`0.14.9` 起支持轻量更新包和国内静态镜像清单。首次安装仍使用完整安装包；后续更新可只下载扩展、Native Helper、Connector、skills 和安装脚本，复用本机已安装 Node、Python/openpyxl 和天源 CLI。Gitee raw 包与 GitHub Release 资产必须使用相同文件名、相同字节、相同文件大小和 SHA-256；清单或下载失败时自动回退 GitHub Release/API，下载仍受 HTTPS 域名白名单、文件大小和 SHA-256 校验保护。
 
 `0.14.1` 起可先点击“测试更新模块”：它会下载当前平台完整包，验证 GitHub 下载、SHA-256、解压和安装包文件完整性，但不会安装、改变版本或重启，测试文件完成后自动删除。完整包约 100–130 MB。
 

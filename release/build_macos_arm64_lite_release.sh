@@ -22,6 +22,9 @@ OUTPUT="$DIST_DIR/${PACKAGE_NAME}-${RELEASE_DATE}.zip"
 OUTPUT_SHA="$OUTPUT.sha256"
 CACHE_DIR="$WORKBENCH_ROOT/release-cache"
 WHEEL_CACHE="$CACHE_DIR/python-wheels"
+MACOS_PYTHON_TARGETS="${TIANYUAN_MACOS_PYTHON_TARGETS:-39 314}"
+PIP_DOWNLOAD_TIMEOUT="${PIP_DOWNLOAD_TIMEOUT:-30}"
+PIP_DOWNLOAD_RETRIES="${PIP_DOWNLOAD_RETRIES:-2}"
 
 # 运行指纹统一由 scripts/runtime-fingerprint.mjs 计算，这里只调用封装脚本。
 RUNTIME_BUILD_ID="$(node "$ROOT_DIR/scripts/print-runtime-build-id.mjs" "$ROOT_DIR")"
@@ -30,7 +33,35 @@ RUNTIME_BUILD_ID="$(node "$ROOT_DIR/scripts/print-runtime-build-id.mjs" "$ROOT_D
 [[ "$(uname -m)" == "arm64" ]] || { echo "arm64 required" >&2; exit 1; }
 mkdir -p "$STAGE/runtime/python-wheels" "$STAGE/scripts" "$DIST_DIR" "$WHEEL_CACHE"
 
-python3 -m pip download   --quiet   --disable-pip-version-check   --dest "$WHEEL_CACHE"   "openpyxl==3.1.5"   "et_xmlfile==2.0.0"   "python-docx==1.2.0"   "lxml==6.1.0"
+# Keep pure-Python dependencies independent of the builder interpreter. The
+# binary lxml wheel is fetched once per supported CPython ABI so a macOS 3.9
+# machine is never offered a cp314-only package.
+python3 -m pip download \
+  --quiet \
+  --disable-pip-version-check \
+  --timeout "$PIP_DOWNLOAD_TIMEOUT" \
+  --retries "$PIP_DOWNLOAD_RETRIES" \
+  --only-binary=:all: \
+  --dest "$WHEEL_CACHE" \
+  "openpyxl==3.1.5" \
+  "et_xmlfile==2.0.0" \
+  "python-docx==1.2.0" \
+  "typing_extensions==4.16.0"
+for PYTHON_TARGET in $MACOS_PYTHON_TARGETS; do
+  python3 -m pip download \
+    --quiet \
+    --disable-pip-version-check \
+    --timeout "$PIP_DOWNLOAD_TIMEOUT" \
+    --retries "$PIP_DOWNLOAD_RETRIES" \
+    --only-binary=:all: \
+    --no-deps \
+    --platform macosx_11_0_arm64 \
+    --implementation cp \
+    --python-version "$PYTHON_TARGET" \
+    --abi "cp${PYTHON_TARGET}" \
+    --dest "$WHEEL_CACHE" \
+    "lxml==6.1.0"
+done
 
 /usr/bin/ditto "$ROOT_DIR/extension" "$STAGE/extension"
 /usr/bin/ditto "$ROOT_DIR/native-helper" "$STAGE/native-helper"
@@ -57,7 +88,9 @@ cp "$ROOT_DIR/release/macos-arm64/卸载.command" "$STAGE/卸载.command"
 cp "$ROOT_DIR/release/macos-arm64/安装使用说明.md" "$STAGE/安装使用说明.md"
 chmod +x "$STAGE/安装.command" "$STAGE/卸载.command" "$STAGE/native-helper/install_native_host.sh"
 find "$STAGE" -type f \( -name ".DS_Store" -o -name "._*" \) -delete
-find "$STAGE" -type d -name "__MACOSX" -prune -exec rm -rf {} +
+while IFS= read -r -d '' MACOSX_DIR; do
+  find "$MACOSX_DIR" -depth -delete
+done < <(find "$STAGE" -type d -name "__MACOSX" -print0)
 
 cat > "$STAGE/VERSION.txt" <<EOF
 name=天源浏览器工作台

@@ -91,6 +91,137 @@ async function run() {
     "https://gitee.com/example/tianyuan/raw/main/tianyuan-workbench-v0.9.2-windows-x64-lite.zip",
   );
   assert.equal(mirrorUpdate.asset.sha256, "c".repeat(64));
+  assert.equal(mirrorUpdate.preferredDownloadChannel, "gitee");
+  assert.equal(mirrorUpdate.downloadCandidates[0].source, "gitee");
+
+  const giteeManifestUrl = "https://gitee.com/example/tianyuan/raw/main/update-manifest.json";
+  const githubManifestUrl = "https://github.com/example/releases/latest/download/update-manifest.json";
+  const githubPreferred = await checkGithubUpdate({
+    currentVersion: "0.14.30",
+    currentBuildNumber: 2026092501,
+    updateManifestUrls: [giteeManifestUrl, githubManifestUrl],
+    platform: "win32",
+    architecture: "x64",
+  }, {
+    fetchImpl: async (url) => {
+      const requestUrl = String(url);
+      if (requestUrl === giteeManifestUrl) {
+        return response(200, {
+          source: "gitee",
+          productVersion: "0.15.0",
+          buildNumber: 2026093001,
+          assets: {
+            "windows-x64": {
+              fileName: "tianyuan-workbench-v0.15.0-windows-x64.zip",
+              url: "https://gitee.com/example/tianyuan/raw/main/tianyuan-workbench-v0.15.0-windows-x64.zip",
+              size: 10,
+              sha256: "1".repeat(64),
+            },
+          },
+        });
+      }
+      assert.equal(requestUrl, githubManifestUrl);
+      return response(200, {
+        productVersion: "0.15.1",
+        buildNumber: 2026093002,
+        assets: {
+          "windows-x64": {
+            fileName: "tianyuan-workbench-v0.15.1-windows-x64.zip",
+            size: 11,
+            sha256: "2".repeat(64),
+          },
+        },
+      });
+    },
+  });
+  assert.equal(githubPreferred.latestVersion, "0.15.1");
+  assert.equal(githubPreferred.manifestUrl, githubManifestUrl);
+  assert.equal(githubPreferred.sourceHealth.gitee.status, "ok");
+  assert.equal(githubPreferred.sourceHealth.githubRelease.status, "ok");
+  assert.equal(githubPreferred.preferredDownloadChannel, "github-release");
+
+  const authoritativeDual = await checkGithubUpdate({
+    currentVersion: "0.15.2",
+    currentBuildNumber: 2026093003,
+    updateManifestUrls: [githubManifestUrl],
+    platform: "win32",
+    architecture: "x64",
+  }, {
+    fetchImpl: async (url) => {
+      assert.equal(String(url), githubManifestUrl);
+      return response(200, {
+        productVersion: "0.15.2",
+        buildNumber: 2026093003,
+        assets: {
+          "windows-x64": {
+            fileName: "tianyuan-workbench-v0.15.2-windows-x64-lite.zip",
+            url: "https://gitee.com/example/tianyuan/raw/main/tianyuan-workbench-v0.15.2-windows-x64-lite.zip",
+            size: 12,
+            sha256: "4".repeat(64),
+            downloadCandidates: [
+              {
+                source: "gitee",
+                url: "https://gitee.com/example/tianyuan/raw/main/tianyuan-workbench-v0.15.2-windows-x64-lite.zip",
+                priority: 1,
+              },
+              {
+                source: "github-release",
+                url: "https://github.com/example/releases/download/v0.15.2/tianyuan-workbench-v0.15.2-windows-x64-lite.zip",
+                priority: 2,
+              },
+            ],
+          },
+        },
+      });
+    },
+  });
+  assert.equal(authoritativeDual.preferredDownloadChannel, "gitee");
+  assert.equal(authoritativeDual.downloadCandidates[0].source, "gitee");
+  assert.equal(authoritativeDual.downloadCandidates[0].priority, 1);
+
+  const staleGiteeRetained = await checkGithubUpdate({
+    currentVersion: "0.14.30",
+    currentBuildNumber: 2026092501,
+    updateManifestUrls: [giteeManifestUrl],
+    platform: "win32",
+    architecture: "x64",
+  }, {
+    fetchImpl: async (url) => {
+      if (String(url) === giteeManifestUrl) {
+        return response(200, {
+          source: "gitee",
+          productVersion: "0.14.29",
+          buildNumber: 2026092401,
+          assets: {
+            "windows-x64": {
+              fileName: "tianyuan-workbench-v0.14.29-windows-x64-lite.zip",
+              url: "https://gitee.com/example/tianyuan/raw/main/tianyuan-workbench-v0.14.29-windows-x64-lite.zip",
+              size: 9,
+              sha256: "3".repeat(64),
+            },
+          },
+        });
+      }
+      throw new Error("ETIMEDOUT");
+    },
+  });
+  assert.equal(staleGiteeRetained.source, "gitee");
+  assert.equal(staleGiteeRetained.latestVersion, "0.14.29");
+  assert.equal(staleGiteeRetained.updateAvailable, false);
+  assert.equal(staleGiteeRetained.sourceHealth.gitee.status, "ok");
+  assert.equal(staleGiteeRetained.sourceHealth.githubApi.status, "failed");
+  assert.equal(staleGiteeRetained.fallback.channel, "gitee");
+
+  await assert.rejects(
+    checkGithubUpdate({
+      currentVersion: "0.14.30",
+      currentBuildNumber: 2026092501,
+      updateManifestUrls: ["http://example.com/update-manifest.json"],
+      platform: "win32",
+      architecture: "x64",
+    }, { fetchImpl: async () => response(200, {}) }),
+    /UPDATE_MANIFEST_URL_FORBIDDEN/,
+  );
 
   const staleMirrorFallback = await checkGithubUpdate({
     currentVersion: "0.14.18",
@@ -256,6 +387,9 @@ async function run() {
     currentVersion: "0.14.21",
     currentBuildNumber: 2026080209,
     currentRuntimeBuildId: "current-build",
+    updateManifestUrls: [
+      "https://github.com/zer0-lyz/tianyuan-browser-workbench-releases/releases/latest/download/update-manifest.json",
+    ],
     platform: "win32",
     architecture: "x64",
   }, {
