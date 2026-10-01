@@ -279,23 +279,16 @@ EXPORT_HEADERS = [
 ]
 
 
-def captured_evidence_html(url: str, title: str | None, location: str | None, body: str) -> str:
-    return (
-        "<!doctype html><meta charset=\"utf-8\"><title>安居客页面快照</title>"
-        + f"<h1>{escape(title or '安居客案例')}</h1><p>来源：{escape(url)}</p>"
-        + f"<p>位置：{escape(location or '')}</p><pre>{escape(body)}</pre>"
-    )
-
-
-def build_case_row(index: int, url: str, output: Path, requested_type: str, body: str, title: str | None, location: str | None, page_html: str, screenshot_file: Path | None, longitude: float | None = None, latitude: float | None = None) -> CaseRow:
+def build_case_row(index: int, url: str, output: Path, requested_type: str, body: str, title: str | None, location: str | None, page_html: str, html_file: Path | None, screenshot_file: Path | None, longitude: float | None = None, latitude: float | None = None) -> CaseRow:
     body = clean(body)
     validate_detail_capture(url, body)
     title = nullable(title)
     location = nullable(location) or title
     if longitude is None or latitude is None:
         longitude, latitude = extract_coordinates(page_html)
-    html_file = output / "html" / f"case_{index:03d}.html"
-    html_file.write_text(page_html or captured_evidence_html(url, title, location, body), encoding="utf-8")
+    if html_file is None and page_html:
+        html_file = output / "html" / f"case_{index:03d}.html"
+        html_file.write_text(page_html, encoding="utf-8")
     case_type = infer_case_type(url, body, requested_type)
     total_price_text = first_match(body, [r"(?:总价|售价)\s*[：:]?\s*([\d,.]+\s*(?:万|万元|亿))", r"([\d,.]+\s*(?:万|万元))"])
     sale_unit_price_text = first_match(body, [r"(?:单价|售价单价)\s*[：:]?\s*([\d,.]+\s*元/(?:㎡|平米|平|m²))", r"([\d,.]+\s*元/(?:㎡|平米|平|m²))"])
@@ -321,7 +314,7 @@ def build_case_row(index: int, url: str, output: Path, requested_type: str, body
         rent_total_text=rent_total_text, rent_unit_price_text=rent_unit_price_text,
         rent_pricing_basis=first_match(body, [r"(元/(?:㎡|平米|平|m²)/(?:天|月))"]),
         payment_terms_text=first_match(body, [r"((?:押\d+付\d+|面议))"]), title=title,
-        html_path=str(html_file), screenshot_path=str(screenshot_file) if screenshot_file else None,
+        html_path=str(html_file) if html_file else None, screenshot_path=str(screenshot_file) if screenshot_file else None,
         capture_status="ok",
         longitude=longitude,
         latitude=latitude,
@@ -402,15 +395,212 @@ def extract_case(page: Any, index: int, url: str, output: Path, requested_type: 
     )
 
 
-def extract_captured_case(capture: dict[str, Any], index: int, output: Path, requested_type: str) -> CaseRow:
-    url = str(capture.get("url") or "").strip()
-    title = nullable(capture.get("title"))
-    location = nullable(capture.get("location"))
-    body = clean(capture.get("text"))
-    page_html = str(capture.get("html") or "")
-    longitude = parse_coordinate(capture.get("longitude"), -180, 180)
-    latitude = parse_coordinate(capture.get("latitude"), -90, 90)
-    return build_case_row(index, url, output, requested_type, body, title, location, page_html, None, longitude, latitude)
+CAPTURE_STATUSES = ("ok", "blocked_verification", "not_case", "read_failed")
+CAPTURE_STATUS_LABELS = {
+    "ok": "成功",
+    "blocked_verification": "验证阻断",
+    "not_case": "非案例",
+    "read_failed": "读取失败",
+}
+RUN_STATUS_LABELS = {
+    "complete": "完整",
+    "partial": "部分完成",
+    "stopped": "已终止",
+}
+BLOCKED_STATUS_BY_ERROR = {
+    "ANJUKE_DETAIL_VERIFICATION_REQUIRED": "blocked_verification",
+    "ANJUKE_DETAIL_VERIFICATION_TIMEOUT": "blocked_verification",
+    "ANJUKE_DETAIL_ROUTE_INVALID": "not_case",
+    "ANJUKE_RECOMMENDATION_PAGE": "not_case",
+    "ANJUKE_DETAIL_PAGE_NOT_CASE": "not_case",
+}
+MAP_ASSET_RELATIVE_PATHS = (
+    "leaflet.js",
+    "leaflet.css",
+    "leaflet.markercluster.js",
+    "MarkerCluster.css",
+    "MarkerCluster.Default.css",
+    "images/layers.png",
+    "images/layers-2x.png",
+    "images/marker-icon.png",
+    "images/marker-icon-2x.png",
+    "images/marker-shadow.png",
+)
+
+
+def normalize_candidate_outcome(raw: dict[str, Any], sequence: int) -> dict[str, Any]:
+    url = clean(raw.get("url"))
+    status = clean(raw.get("captureStatus", raw.get("capture_status"))).lower()
+    if status not in CAPTURE_STATUSES:
+        status = "read_failed"
+    return {
+        "sequence": sequence,
+        "detail_url": url,
+        "case_type": "unknown",
+        "capture_status": status,
+        "error_code": clean(raw.get("errorCode", raw.get("error_code"))) or None,
+        "title": nullable(raw.get("title")),
+        "location": nullable(raw.get("location")),
+        "text": clean(raw.get("text")),
+        "html": str(raw.get("html") or ""),
+        "longitude": parse_coordinate(raw.get("longitude"), -180, 180),
+        "latitude": parse_coordinate(raw.get("latitude"), -90, 90),
+        "html_file": None,
+    }
+
+
+def write_evidence_index(output: Path, candidates: list[dict[str, Any]], run_status: str, counts: dict[str, int], restore_status: str, generated_at: str) -> Path:
+    target = output / "evidence.json"
+    payload = {
+        "type": "anjuke-property-evidence",
+        "version": 1,
+        "generatedAt": generated_at,
+        "runStatus": run_status,
+        "restoreStatus": restore_status,
+        "counts": counts,
+        "candidates": [
+            {key: candidate.get(key) for key in (
+                "sequence", "detail_url", "case_type", "capture_status", "error_code",
+                "title", "location", "html_file", "longitude", "latitude",
+            )}
+            for candidate in candidates
+        ],
+    }
+    target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return target
+
+
+def prepare_local_map_assets(map_assets_dir: Any, output: Path) -> bool:
+    source = Path(str(map_assets_dir or "")).expanduser()
+    if not str(map_assets_dir or "").strip() or not source.is_dir():
+        return False
+    target_root = output / "map-assets"
+    copied = 0
+    for relative in MAP_ASSET_RELATIVE_PATHS:
+        asset = source / relative
+        if not asset.is_file():
+            continue
+        target = target_root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(asset, target)
+        copied += 1
+    return (target_root / "leaflet.js").is_file() and (target_root / "leaflet.css").is_file()
+
+
+def run_captured_request(request: dict[str, Any], candidate_inputs: list[dict[str, Any]], progress: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
+    def emit(payload: dict[str, Any]) -> None:
+        if progress:
+            progress(payload)
+
+    output = ensure_output(request.get("outputDirectory") or request.get("out") or "")
+    case_type = clean(request.get("caseType", request.get("case_type", "auto"))) or "auto"
+    max_cases = max(1, min(100, int(request.get("maxCases", request.get("max_cases", 10)) or 10)))
+    if bool(request.get("screenshot", False)):
+        return {"ok": False, "errorCode": "ANJUKE_CURRENT_TAB_SCREENSHOT_UNSUPPORTED", "reason": "当前浏览器标签页模式暂不支持详情页全页截图，请取消勾选“保存全页截图”后重试。", "security": {"credentialsReturned": False}}
+    candidates: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in candidate_inputs:
+        if not isinstance(raw, dict):
+            continue
+        outcome = normalize_candidate_outcome(raw, len(candidates) + 1)
+        if not outcome["detail_url"] or outcome["detail_url"] in seen:
+            continue
+        seen.add(outcome["detail_url"])
+        candidates.append(outcome)
+        if len(candidates) >= max_cases:
+            break
+    if not candidates:
+        return {"ok": False, "errorCode": "ANJUKE_NO_DETAIL_URLS", "reason": "当前安居客页面没有找到可读取的详情案例；请确认范围已加载完成。", "security": {"credentialsReturned": False}}
+    generated_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    emit({"phase": "capturing", "percent": 10, "message": "正在解析当前浏览器标签页中的安居客详情…", "fetched": len(candidates), "written": 0, "skipped": 0, "blocked": 0})
+    rows: list[CaseRow] = []
+    counts = {"candidates": len(candidates), "written": 0, "skipped": 0, "blocked": 0, "readFailed": 0}
+    try:
+        for candidate in candidates:
+            html_file: Path | None = None
+            if candidate["html"]:
+                html_file = output / "html" / f"candidate_{candidate['sequence']:03d}_{candidate['capture_status']}.html"
+                html_file.write_text(candidate["html"], encoding="utf-8")
+                candidate["html_file"] = str(html_file)
+            if candidate["capture_status"] == "ok":
+                try:
+                    row = build_case_row(
+                        candidate["sequence"], candidate["detail_url"], output, case_type,
+                        candidate["text"], candidate["title"], candidate["location"],
+                        candidate["html"], html_file, None,
+                        candidate["longitude"], candidate["latitude"],
+                    )
+                except (ValueError, TypeError) as exc:
+                    code = str(exc)
+                    candidate["capture_status"] = BLOCKED_STATUS_BY_ERROR.get(code, "read_failed")
+                    candidate["error_code"] = code
+                else:
+                    rows.append(row)
+                    candidate["case_type"] = row.case_type
+                    candidate["capture_status"] = "ok"
+                    candidate["error_code"] = None
+            if candidate["capture_status"] == "ok":
+                counts["written"] += 1
+            elif candidate["capture_status"] == "blocked_verification":
+                counts["blocked"] += 1
+            elif candidate["capture_status"] == "not_case":
+                counts["skipped"] += 1
+            else:
+                counts["readFailed"] += 1
+            emit({
+                "phase": "capturing",
+                "percent": 10 + round(candidate["sequence"] / len(candidates) * 80),
+                "message": f"已解析候选 {candidate['sequence']}/{len(candidates)}；有效 {counts['written']}，跳过 {counts['skipped']}，验证阻断 {counts['blocked']}。",
+                "fetched": len(candidates), "written": counts["written"], "skipped": counts["skipped"], "blocked": counts["blocked"],
+            })
+    except Exception as exc:
+        evidence_path = write_evidence_index(output, candidates, "partial", counts, clean(request.get("restoreStatus")) or "skipped", generated_at)
+        return {"ok": False, "errorCode": "ANJUKE_CAPTURED_PAGE_PARSE_FAILED", "reason": str(exc)[:300], "results": [asdict(row) for row in rows], "evidencePath": str(evidence_path), "security": {"credentialsReturned": False}}
+    run_status = clean(request.get("runStatus", request.get("run_status"))).lower()
+    if run_status not in {"complete", "partial", "stopped"}:
+        run_status = "complete" if counts["skipped"] == 0 and counts["blocked"] == 0 and counts["readFailed"] == 0 else "partial"
+    restore_status = clean(request.get("restoreStatus", request.get("restore_status"))) or "skipped"
+    evidence_path = write_evidence_index(output, candidates, run_status, counts, restore_status, generated_at)
+    if not rows:
+        return {
+            "ok": False, "errorCode": "ANJUKE_NO_VALID_DETAIL_CASES",
+            "reason": "读取到的页面均不是有效安居客详情案例，未生成案例文件；候选证据索引已保留。",
+            "skippedInvalidCount": counts["skipped"], "blockedVerificationCount": counts["blocked"],
+            "readFailureCount": counts["readFailed"], "candidateCount": len(candidates),
+            "status": "failed", "evidencePath": str(evidence_path),
+            "security": {"credentialsReturned": False},
+        }
+    for index, row in enumerate(rows, 1):
+        row.case_number = index
+    emit({"phase": "writing", "percent": 94, "message": "正在生成 CSV、JSON、结果表格和地图…", "fetched": len(candidates), "written": len(rows), "skipped": counts["skipped"], "blocked": counts["blocked"]})
+    csv_path = write_csv(rows, output)
+    json_path = write_json(rows, output)
+    result_html_path, map_path, map_generation = write_result_pages(rows, output, candidates, run_status, counts, restore_status, request.get("mapAssetsDir"))
+    try:
+        excel_path = write_excel(rows, output)
+    except Exception as exc:
+        return {
+            "ok": False, "errorCode": str(exc), "reason": "Excel 生成失败，已保留 CSV/JSON 和当前页证据。",
+            "csvPath": str(csv_path), "jsonPath": str(json_path),
+            "results": [asdict(row) for row in rows], "status": run_status,
+            "evidencePath": str(evidence_path), "security": {"credentialsReturned": False},
+        }
+    status_reason = {
+        "complete": "安居客详情案例抓取、证据归档、结果表格和地图输出完成。",
+        "partial": "安居客抓取部分完成：有效案例与候选证据索引均已归档。",
+        "stopped": "安居客抓取已终止：已完成案例与候选证据索引均已归档。",
+    }[run_status]
+    return {
+        "ok": True, "errorCode": "", "reason": status_reason,
+        "status": run_status, "caseCount": len(rows), "candidateCount": len(candidates),
+        "blockedVerificationCount": counts["blocked"], "skippedInvalidCount": counts["skipped"],
+        "readFailureCount": counts["readFailed"], "restoreStatus": restore_status,
+        "outputDirectory": str(output), "csvPath": str(csv_path), "jsonPath": str(json_path),
+        "excelPath": str(excel_path), "htmlDirectory": str(output / "html"), "resultHtmlPath": str(result_html_path),
+        "mapPath": str(map_path), "mapGeneration": map_generation, "evidencePath": str(evidence_path),
+        "screenshotDirectory": "",
+        "results": [asdict(row) for row in rows], "security": {"credentialsReturned": False},
+    }
 
 
 def collect_detail_urls(page: Any, list_url: str, keyword: str, max_cases: int, url_pattern: str) -> list[str]:
@@ -512,114 +702,129 @@ def write_json(rows: list[CaseRow], output: Path) -> Path:
     return target
 
 
-def write_result_pages(rows: list[CaseRow], output: Path) -> tuple[Path, Path]:
+def write_result_pages(rows: list[CaseRow], output: Path, candidates: list[dict[str, Any]], run_status: str, counts: dict[str, int], restore_status: str, map_assets_dir: Any) -> tuple[Path, Path, str]:
     result_path = output / "result.html"
     map_path = output / "map.html"
+    map_assets_ready = prepare_local_map_assets(map_assets_dir, output)
+    run_label = RUN_STATUS_LABELS.get(run_status, run_status)
+    status_label = {value: label for value, label in CAPTURE_STATUS_LABELS.items()}
+    evidence_by_url = {candidate["detail_url"]: candidate for candidate in candidates}
     table_rows = []
     for index, row in enumerate(rows, 1):
         coordinate = "已定位" if row.longitude is not None and row.latitude is not None else "无坐标"
+        candidate = evidence_by_url.get(row.source_url, {})
+        evidence_link = ""
+        if candidate.get("html_file"):
+            evidence_name = escape(Path(candidate["html_file"]).name, quote=True)
+            evidence_link = f" &middot; <a href=\"html/{evidence_name}\">证据</a>"
         table_rows.append(
             "<tr>"
             f"<td>{index}</td><td>{escape(row.title or '')}</td><td>{escape(row.location or '')}</td>"
+            f"<td>{escape(row.case_type)}</td><td>{escape(status_label.get('ok', '成功'))}</td>"
             f"<td>{escape(row.total_price_text or row.rent_total_text or '')}</td>"
             f"<td>{escape(str(row.building_area_m2 or ''))}</td><td>{escape(coordinate)}</td>"
             f"<td><a href=\"{escape(row.source_url, quote=True)}\" target=\"_blank\" rel=\"noreferrer\">来源</a>"
+            f"{evidence_link}"
             f" &middot; <a href=\"map.html#case-{index}\">地图</a></td></tr>"
         )
+    candidate_rows = []
+    for candidate in candidates:
+        evidence_link = ""
+        if candidate.get("html_file"):
+            evidence_name = escape(Path(candidate["html_file"]).name, quote=True)
+            evidence_link = f" &middot; <a href=\"html/{evidence_name}\">证据</a>"
+        candidate_rows.append(
+            "<tr>"
+            f"<td>{candidate['sequence']}</td><td>{escape(candidate['title'] or '')}</td>"
+            f"<td>{escape(CAPTURE_STATUS_LABELS.get(candidate['capture_status'], candidate['capture_status']))}</td>"
+            f"<td>{escape(candidate['error_code'] or '')}</td>"
+            f"<td><a href=\"{escape(candidate['detail_url'], quote=True)}\" target=\"_blank\" rel=\"noreferrer\">详情</a>{evidence_link}</td></tr>"
+        )
+    restore_note = "列表页已恢复。" if restore_status == "restored" else ("列表页恢复失败，请手动返回。" if restore_status == "restore_failed" else "")
+    map_note = "地图使用本地 Leaflet 资产生成。" if map_assets_ready else "地图降级：本地 Leaflet 资产缺失，本轮未生成地图；其余证据不受影响。"
     result_path.write_text(
         "<!doctype html><meta charset=\"utf-8\"><title>安居客案例结果</title>"
-        "<style>body{font:14px system-ui;margin:24px;color:#1f2937}h1{margin-bottom:6px}"
+        "<style>body{font:14px system-ui;margin:24px;color:#1f2937}h1{margin-bottom:6px}h2{margin-top:28px}"
         "table{border-collapse:collapse;width:100%;margin-top:18px}th,td{border:1px solid #d1d5db;padding:8px;text-align:left}"
-        "th{background:#f3f4f6}a{color:#2563eb}</style>"
+        "th{background:#f3f4f6}a{color:#2563eb}.banner{margin-top:10px;padding:10px 12px;border-radius:6px;background:#f8fafc;border:1px solid #e2e8f0}"
+        ".muted{color:#6b7280}</style>"
         "<h1>安居客案例结果</h1>"
-        f"<p>共 {len(rows)} 条。数据来源为逐个打开的安居客详情页，验证页和通用页面未纳入结果。</p>"
-        "<table><thead><tr><th>序号</th><th>标题</th><th>位置</th><th>价格</th><th>面积</th><th>坐标</th><th>链接</th></tr></thead>"
-        f"<tbody>{''.join(table_rows)}</tbody></table>\n",
+        f"<div class=\"banner\">运行状态：<strong>{escape(run_label)}</strong>；"
+        f"候选 {counts.get('candidates', 0)} 条，有效 {len(rows)} 条，跳过 {counts.get('skipped', 0)} 条，"
+        f"验证阻断 {counts.get('blocked', 0)} 条，读取失败 {counts.get('readFailed', 0)} 条。{escape(restore_note)}{escape(map_note)}</div>"
+        "<h2>有效案例</h2>"
+        f"<p class=\"muted\">数据来源为逐个打开的安居客详情页；验证页与通用页面不计入有效案例。</p>"
+        "<table><thead><tr><th>序号</th><th>标题</th><th>位置</th><th>类型</th><th>状态</th><th>价格</th><th>面积</th><th>坐标</th><th>链接</th></tr></thead>"
+        f"<tbody>{''.join(table_rows)}</tbody></table>"
+        "<h2>候选证据索引</h2>"
+        f"<p class=\"muted\">每个候选都保留 capture_status 与错误码；原始 HTML 证据只保存详情页真实内容。</p>"
+        "<table><thead><tr><th>#</th><th>标题</th><th>状态</th><th>错误码</th><th>链接</th></tr></thead>"
+        f"<tbody>{''.join(candidate_rows)}</tbody></table>\n",
         encoding="utf-8",
     )
+    located = [
+        {"id": index, "title": row.title or "安居客案例", "location": row.location or "", "url": row.source_url,
+         "caseType": row.case_type, "price": row.total_price_text or row.rent_total_text or "",
+         "longitude": row.longitude, "latitude": row.latitude}
+        for index, row in enumerate(rows, 1)
+        if row.longitude is not None and row.latitude is not None
+    ]
+    unlocated_count = len(rows) - len(located)
+    if not map_assets_ready:
+        return result_path, "", "degraded-missing-local-map-assets"
     map_data = json.dumps(
-        [
-            {"id": index, "title": row.title or "安居客案例", "location": row.location or "", "url": row.source_url,
-             "longitude": row.longitude, "latitude": row.latitude}
-            for index, row in enumerate(rows, 1)
-        ], ensure_ascii=False,
+        {"stats": {"total": len(rows), "located": len(located), "unlocated": unlocated_count}, "points": located},
+        ensure_ascii=False,
     ).replace("<", "\\u003c")
-    map_script_prefix = "<script>const cases=" + map_data + ";const htmlEscape=value=>String(value??'').replace(/[&<>\"']/g,character=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[character]));const list=document.getElementById('cases');"
+    marker_cluster_available = (output / "map-assets" / "leaflet.markercluster.js").is_file()
+    marker_cluster_tags = (
+        '<link rel="stylesheet" href="map-assets/MarkerCluster.css"><link rel="stylesheet" href="map-assets/MarkerCluster.Default.css">'
+        if marker_cluster_available else ""
+    )
+    marker_cluster_script = '<script src="map-assets/leaflet.markercluster.js"></script>' if marker_cluster_available else ""
+    map_script_prefix = (
+        "<script>const DATA=" + map_data + ";"
+        "const htmlEscape=value=>String(value??'').replace(/[&<>\"']/g,character=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[character]));"
+        "const points=DATA.points||[];const unlocatedCount=DATA.stats?DATA.stats.unlocated:0;"
+        "const list=document.getElementById('cases');const mapProviderStorageKey='tianyuan-anjuke-map-provider-v1';"
+        "const tileStatus=document.getElementById('tile-status');"
+        "const tileProviders=[{id:'arcgis',name:'ArcGIS World Street Map',url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',attribution:'&copy; Esri, Maxar, Earthstar Geographics'},{id:'amap',name:'高德地图（公开瓦片）',url:'https://webrd0{s}.is.autonavi.com/appmaptile?style=7&x={x}&y={y}&z={z}&lang=zh_cn&size=1&scale=1',attribution:'&copy; 高德地图',subdomains:'1234'},{id:'osm',name:'OpenStreetMap',url:'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',attribution:'&copy; OpenStreetMap contributors',subdomains:'abc'}];"
+        "let tileLayer=null;let tileLoadTimer=null;let tileGeneration=0;const failedTileProviders=new Set();"
+        "function setTileStatus(text,kind){if(tileStatus){tileStatus.textContent=text;tileStatus.style.color=kind==='error'?'#b42318':'#64748b';}}"
+        "function installTileProvider(providerId,options={}){const automatic=options.automatic===true;if(!automatic)failedTileProviders.clear();const provider=tileProviders.find(item=>item.id===providerId)||tileProviders[0];failedTileProviders.add(provider.id);const generation=++tileGeneration;if(tileLoadTimer){window.clearTimeout(tileLoadTimer);tileLoadTimer=null}if(tileLayer)map.removeLayer(tileLayer);try{localStorage.setItem(mapProviderStorageKey,provider.id)}catch{}setTileStatus('正在加载'+provider.name+'…');let loaded=false;let errorCount=0;const fallback=()=>{if(generation!==tileGeneration||loaded)return;const next=tileProviders.find(item=>!failedTileProviders.has(item.id));if(!next){setTileStatus('底图暂时不可用，但案例点和清单仍可使用。请检查网络。','error');return}setTileStatus(provider.name+'加载失败，正在切换到'+next.name+'…','error');installTileProvider(next.id,{automatic:true})};const tileOptions={maxZoom:19,attribution:provider.attribution,updateWhenIdle:true,keepBuffer:2};if(provider.subdomains)tileOptions.subdomains=provider.subdomains;tileLayer=L.tileLayer(provider.url,tileOptions);tileLayer.on('tileload',()=>{if(generation!==tileGeneration)return;loaded=true;if(tileLoadTimer){window.clearTimeout(tileLoadTimer);tileLoadTimer=null}failedTileProviders.clear();setTileStatus('当前底图：'+provider.name)});tileLayer.on('tileerror',()=>{if(generation!==tileGeneration||loaded)return;errorCount+=1;if(errorCount>=4)fallback()});tileLayer.addTo(map);tileLoadTimer=window.setTimeout(fallback,8000)}"
+    )
+    list_script = (
+        "for(const item of points){const button=document.createElement('button');button.className='case';"
+        "button.textContent=item.id+' · '+item.title+' '+item.location;button.dataset.id=item.id;list.appendChild(button);}"
+        "const unlocatedNote=document.getElementById('unlocated-note');"
+        "if(unlocatedNote)unlocatedNote.textContent=unlocatedCount>0?('未定位案例 '+unlocatedCount+' 条仍保留在结果表格中。'):'全部案例均已定位。';"
+        "const savedProvider=(()=>{try{return localStorage.getItem(mapProviderStorageKey)}catch{return ''}})();"
+    )
+    map_boot = (
+        "const map=L.map('map',{preferCanvas:true,zoomControl:false});"
+        "L.control.zoom({position:'bottomright'}).addTo(map);"
+        "if(points.length){map.fitBounds(L.latLngBounds(points.map(item=>[item.latitude,item.longitude])).pad(0.2));}else{map.setView([30.25,120.16],9);}"
+        "installTileProvider(tileProviders.some(item=>item.id===savedProvider)?savedProvider:'arcgis');"
+        "const markers=new Map();"
+        "for(const item of points){const marker=L.marker([item.latitude,item.longitude]).addTo(map).bindPopup('<b>'+htmlEscape(item.id+' · '+item.title)+'</b><br>'+htmlEscape(item.location)+'<br>类型：'+htmlEscape(item.caseType||'')+'<br>价格：'+htmlEscape(item.price||'')+'<br><a href=\\''+htmlEscape(item.url||'#')+'\\' target=\\'_blank\\' rel=\\'noopener noreferrer\\'>打开详情页</a>');markers.set(String(item.id),marker);}"
+        "for(const button of document.querySelectorAll('.case'))button.onclick=()=>{const marker=markers.get(button.dataset.id);if(marker){map.setView(marker.getLatLng(),15);marker.openPopup();}};"
+        "if(!points.length){document.getElementById('map').innerHTML='<div style=\"padding:24px\">当前结果没有可用坐标，仍可在左侧查看案例清单。</div>';}"
+    )
     map_path.write_text(
         "<!doctype html><meta charset=\"utf-8\"><title>安居客案例地图</title>"
-        "<link rel=\"stylesheet\" href=\"https://unpkg.com/leaflet@1.9.4/dist/leaflet.css\">"
+        '<link rel="stylesheet" href="map-assets/leaflet.css">' + marker_cluster_tags +
         "<style>body{margin:0;font:14px system-ui;color:#1f2937;display:flex;height:100vh}"
-        "aside{width:320px;overflow:auto;padding:16px;background:#f8fafc}#map{flex:1}"
+        "aside{width:320px;overflow:auto;padding:16px;background:#f8fafc}#map{flex:1;position:relative}"
+        "#tile-status{position:absolute;z-index:1000;top:12px;left:12px;padding:6px 10px;border-radius:6px;background:rgba(255,255,255,.94);border:1px solid #e2e8f0;color:#64748b;box-shadow:0 2px 8px rgba(15,23,42,.12)}"
         ".case{display:block;width:100%;text-align:left;border:1px solid #d1d5db;background:white;padding:10px;margin:0 0 8px;cursor:pointer}"
         ".case:hover{background:#eff6ff}.muted{color:#6b7280}</style>"
-        "<aside><h2>安居客案例</h2><p class=\"muted\">点击清单定位标记；没有坐标的案例仍保留在结果表格。</p><div id=\"cases\"></div></aside><div id=\"map\"></div>"
-        + map_script_prefix
-        + "for(const item of cases){const button=document.createElement('button');button.className='case';button.textContent=item.id+' · '+item.title+' '+item.location;button.dataset.id=item.id;list.appendChild(button);}"
-        + "const located=cases.filter(item=>Number.isFinite(item.latitude)&&Number.isFinite(item.longitude));"
-        + "function noMap(){document.getElementById('map').innerHTML='<div style=\"padding:24px\">当前结果没有可用坐标，仍可在左侧查看案例清单。</div>'; }"
-        + "if(!located.length){noMap();}else{const script=document.createElement('script');script.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';script.onload=()=>{const map=L.map('map');L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map);const markers=new Map();for(const item of located){const marker=L.marker([item.latitude,item.longitude]).addTo(map).bindPopup('<b>'+htmlEscape(item.id+' · '+item.title)+'</b><br>'+htmlEscape(item.location));markers.set(String(item.id),marker);}map.fitBounds(L.featureGroup([...markers.values()]).getBounds().pad(0.2));for(const button of document.querySelectorAll('.case'))button.onclick=()=>{const marker=markers.get(button.dataset.id);if(marker){map.setView(marker.getLatLng(),15);marker.openPopup();}};};script.onerror=noMap;document.head.appendChild(script);}"
-        + "</script>\n",
+        "<aside><h2>安居客案例</h2><p class=\"muted\" id=\"unlocated-note\"></p><p class=\"muted\">点击清单定位标记；坐标仅来自详情页明确返回的位置。</p><div id=\"cases\"></div></aside>"
+        "<div id=\"map\"><div id=\"tile-status\">正在加载底图…</div></div>"
+        + "<script src=\"map-assets/leaflet.js\"></script>" + marker_cluster_script
+        + "<script>" + map_script_prefix + list_script + map_boot + "</script>\n",
         encoding="utf-8",
     )
-    return result_path, map_path
-
-
-def run_captured_request(request: dict[str, Any], captured_pages: list[dict[str, Any]], progress: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
-    def emit(payload: dict[str, Any]) -> None:
-        if progress:
-            progress(payload)
-
-    output = ensure_output(request.get("outputDirectory") or request.get("out") or "")
-    case_type = clean(request.get("caseType", request.get("case_type", "auto"))) or "auto"
-    max_cases = max(1, min(100, int(request.get("maxCases", request.get("max_cases", 10)) or 10)))
-    if bool(request.get("screenshot", False)):
-        return {"ok": False, "errorCode": "ANJUKE_CURRENT_TAB_SCREENSHOT_UNSUPPORTED", "reason": "当前浏览器标签页模式暂不支持详情页全页截图，请取消勾选“保存全页截图”后重试。", "security": {"credentialsReturned": False}}
-    pages: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for page in captured_pages:
-        url = str(page.get("url") or "").strip()
-        if not url or url in seen or not page.get("text"):
-            continue
-        seen.add(url)
-        pages.append(page)
-        if len(pages) >= max_cases:
-            break
-    if not pages:
-        return {"ok": False, "errorCode": "ANJUKE_NO_DETAIL_URLS", "reason": "当前安居客页面没有找到可读取的详情案例；请确认范围已加载完成。", "security": {"credentialsReturned": False}}
-    emit({"phase": "capturing", "percent": 10, "message": "正在读取当前浏览器标签页中的安居客详情…", "fetched": len(pages), "written": 0})
-    rows: list[CaseRow] = []
-    skipped_invalid = max(0, int(request.get("skippedInvalidCount", request.get("skipped_invalid_count", 0)) or 0))
-    try:
-        for index, page in enumerate(pages, 1):
-            try:
-                row = extract_captured_case(page, index, output, case_type)
-            except (ValueError, TypeError) as exc:
-                if str(exc) in {"ANJUKE_DETAIL_ROUTE_INVALID", "ANJUKE_RECOMMENDATION_PAGE", "ANJUKE_DETAIL_VERIFICATION_REQUIRED", "ANJUKE_DETAIL_PAGE_NOT_CASE"}:
-                    skipped_invalid += 1
-                    continue
-                raise
-            rows.append(row)
-            emit({"phase": "capturing", "percent": 10 + round(index / len(pages) * 80), "message": f"已完成 {index}/{len(pages)} 条详情页证据保存。", "fetched": len(pages), "written": len(rows), "current": row.title or row.source_url})
-    except Exception as exc:
-        return {"ok": False, "errorCode": "ANJUKE_CAPTURED_PAGE_PARSE_FAILED", "reason": str(exc)[:300], "results": [asdict(row) for row in rows], "security": {"credentialsReturned": False}}
-    if not rows:
-        return {"ok": False, "errorCode": "ANJUKE_NO_VALID_DETAIL_CASES", "reason": "读取到的页面均不是有效安居客详情案例，未生成案例文件。", "skippedInvalidCount": skipped_invalid, "security": {"credentialsReturned": False}}
-    emit({"phase": "writing", "percent": 94, "message": "正在生成 CSV、JSON、结果表格和地图…", "fetched": len(pages), "written": len(rows)})
-    csv_path = write_csv(rows, output)
-    json_path = write_json(rows, output)
-    result_html_path, map_path = write_result_pages(rows, output)
-    try:
-        excel_path = write_excel(rows, output)
-    except Exception as exc:
-        return {"ok": False, "errorCode": str(exc), "reason": "Excel 生成失败，已保留 CSV/JSON 和当前页证据。", "csvPath": str(csv_path), "jsonPath": str(json_path), "results": [asdict(row) for row in rows], "security": {"credentialsReturned": False}}
-    return {
-        "ok": True, "errorCode": "", "reason": "安居客详情案例抓取、证据归档、结果表格和地图输出完成。",
-        "caseCount": len(rows), "blockedVerificationCount": 0, "skippedInvalidCount": skipped_invalid,
-        "outputDirectory": str(output), "csvPath": str(csv_path), "jsonPath": str(json_path),
-        "excelPath": str(excel_path), "htmlDirectory": str(output / "html"), "resultHtmlPath": str(result_html_path),
-        "mapPath": str(map_path), "screenshotDirectory": "",
-        "results": [asdict(row) for row in rows], "security": {"credentialsReturned": False},
-    }
+    return result_path, map_path, "local-assets"
 
 
 def run_request(request: dict[str, Any], progress: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
@@ -628,9 +833,13 @@ def run_request(request: dict[str, Any], progress: Callable[[dict[str, Any]], No
             progress(payload)
 
     output = ensure_output(request.get("outputDirectory") or request.get("out") or "")
+    candidate_outcomes = request.get("candidateOutcomes", request.get("candidate_outcomes"))
+    if isinstance(candidate_outcomes, list):
+        return run_captured_request(request, candidate_outcomes, progress)
     captured_pages = request.get("capturedPages", request.get("captured_pages"))
     if isinstance(captured_pages, list):
-        return run_captured_request(request, captured_pages, progress)
+        legacy_candidates = [dict(page, captureStatus="ok") for page in captured_pages if isinstance(page, dict)]
+        return run_captured_request(request, legacy_candidates, progress)
     list_urls = [str(value).strip() for value in request.get("listUrls", request.get("list_urls", [])) if str(value).strip()]
     detail_urls = [str(value).strip() for value in request.get("detailUrls", request.get("detail_urls", [])) if str(value).strip()]
     keyword = clean(request.get("keyword"))
@@ -704,7 +913,13 @@ def run_request(request: dict[str, Any], progress: Callable[[dict[str, Any]], No
     emit({"phase": "writing", "percent": 94, "message": "正在生成 CSV、JSON、结果表格和地图…", "fetched": len(deduped), "written": len(rows)})
     csv_path = write_csv(rows, output)
     json_path = write_json(rows, output)
-    result_html_path, map_path = write_result_pages(rows, output)
+    legacy_candidates = [
+        {"sequence": index, "detail_url": row.source_url, "case_type": row.case_type, "capture_status": "ok",
+         "error_code": None, "title": row.title, "location": row.location, "html_file": row.html_path,
+         "longitude": row.longitude, "latitude": row.latitude}
+        for index, row in enumerate(rows, 1)
+    ]
+    result_html_path, map_path, map_generation = write_result_pages(rows, output, legacy_candidates, "complete", {"candidates": len(rows), "written": len(rows), "skipped": 0, "blocked": 0, "readFailed": 0}, "not-applicable", request.get("mapAssetsDir"))
     try:
         excel_path = write_excel(rows, output)
     except Exception as exc:
@@ -713,13 +928,16 @@ def run_request(request: dict[str, Any], progress: Callable[[dict[str, Any]], No
         "ok": True,
         "errorCode": "",
         "reason": "安居客详情案例抓取、证据归档、结果表格和地图输出完成。",
+        "status": "complete",
         "caseCount": len(rows), "skippedInvalidCount": skipped_invalid,
         "blockedVerificationCount": 0,
+        "restoreStatus": "not-applicable",
         "outputDirectory": str(output),
         "csvPath": str(csv_path),
         "jsonPath": str(json_path),
         "excelPath": str(excel_path),
         "htmlDirectory": str(output / "html"), "resultHtmlPath": str(result_html_path), "mapPath": str(map_path),
+        "mapGeneration": map_generation, "evidencePath": "",
         "screenshotDirectory": str(output / "screenshots") if screenshot else "",
         "results": [asdict(row) for row in rows],
         "security": {"credentialsReturned": False},

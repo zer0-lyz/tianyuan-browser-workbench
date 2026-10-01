@@ -30,11 +30,20 @@ test("安居客模块已接入侧栏、Native Helper 和本机安装同步", () 
   assert.match(moduleSource, /id: "anjuke-property"/);
   assert.match(moduleSource, /run_anjuke_property/);
   assert.match(template, /导入当前网址/);
-  assert.match(template, /开始抓取/);
-  for (const id of ["openAnjukeProperty", "page-anjuke-property", "anjukePropertyCurrentUrl", "importAnjukePropertyCurrentUrl", "anjukePropertyOutputDirectory", "runAnjukeProperty"]) {
+  assert.match(template, /开始网络抓取/);
+  assert.match(template, /确认并应用参数/);
+  for (const id of ["openAnjukeProperty", "page-anjuke-property", "anjukePropertyCurrentUrl", "importAnjukePropertyCurrentUrl", "anjukePropertyOutputDirectory", "runAnjukeProperty", "applyAnjukePropertyParams", "openAnjukePropertySource", "pauseAnjukeProperty", "stopAnjukeProperty", "anjukePropertyProgressSkipped", "anjukePropertyProgressBlocked", "anjukePropertyKeyword"]) {
     assert.match(`${html}\n${template}`, new RegExp(`id=\\"${id}\\"`), `missing ${id}`);
   }
-  assert.doesNotMatch(template, /anjukePropertyDetailUrls|saveAnjukePropertyParams|openAnjukePropertySource/);
+  assert.doesNotMatch(template, /anjukePropertyDetailUrls|saveAnjukePropertyParams/);
+  assert.match(moduleSource, /parametersApplied/);
+  assert.match(moduleSource, /appliedConfig/);
+  assert.match(moduleSource, /candidateOutcomes/);
+  assert.match(moduleSource, /runStatus/);
+  assert.match(moduleSource, /restoreListingPage/);
+  assert.match(moduleSource, /readRestoredListingUrl/);
+  assert.match(moduleSource, /waitWhilePaused/);
+  assert.match(moduleSource, /outerHTML/);
   assert.match(moduleSource, /tabs\.query\(\{ active: true, lastFocusedWindow: true \}\)/);
   assert.match(moduleSource, /scripting\.executeScript/);
   assert.match(moduleSource, /verificationRequired/);
@@ -48,6 +57,9 @@ test("安居客模块已接入侧栏、Native Helper 和本机安装同步", () 
   assert.match(helper, /--open-only/);
   assert.match(anjukeHelper, /capturedPages/);
   assert.match(anjukeHelper, /safeCoordinate/);
+  assert.match(anjukeHelper, /candidateOutcomes/);
+  assert.match(anjukeHelper, /mapAssetsDir/);
+  assert.match(helper, /mapAssetsDir/);
   assert.match(moduleSource, /resultHtmlPath/);
   assert.match(moduleSource, /mapPath/);
   assert.match(moduleSource, /DETAIL_DELAY_MS/);
@@ -56,9 +68,25 @@ test("安居客模块已接入侧栏、Native Helper 和本机安装同步", () 
   assert.match(moduleSource, /isAnjukeListingUrl/);
   assert.match(moduleSource, /window\.scrollTo/);
   assert.match(moduleSource, /shadowRoot/);
-  assert.match(fs.readFileSync(path.join(repoRoot, "skills/anjuke-property-case-fetcher/scripts/fetch_anjuke_property_cases.py"), "utf8"), /page\.locator\("a\[href\]"\)/);
   assert.match(moduleSource, /cardTextOf/);
-  assert.match(moduleSource, /skippedInvalidCount/);
+  assert.match(moduleSource, /outcomeCounts/);
+  assert.match(moduleSource, /captureStatus/);
+  const pythonSource = fs.readFileSync(path.join(repoRoot, "skills/anjuke-property-case-fetcher/scripts/fetch_anjuke_property_cases.py"), "utf8");
+  assert.match(pythonSource, /page\.locator\("a\[href\]"\)/);
+  assert.match(pythonSource, /write_evidence_index/);
+  assert.match(pythonSource, /prepare_local_map_assets/);
+  assert.match(pythonSource, /CAPTURE_STATUS_LABELS/);
+  assert.match(pythonSource, /RUN_STATUS_LABELS/);
+  assert.match(pythonSource, /candidateOutcomes/);
+  assert.doesNotMatch(pythonSource, /unpkg\.com/);
+  const elementMapMatch = moduleSource.match(/const ids = \[([\s\S]*?)\];/);
+  assert.ok(elementMapMatch, "module.js must declare its element id list");
+  const requiredIds = Array.from(elementMapMatch[1].matchAll(/"([A-Za-z0-9]+)"/g)).map((match) => match[1]);
+  assert.ok(requiredIds.length >= 30, "element id list should stay complete");
+  const renderedDom = `${html}\n${template}`;
+  for (const id of requiredIds) {
+    assert.match(renderedDom, new RegExp(`id="${id}"`), `sidepanel/template missing element id ${id}`);
+  }
   assert.match(skill, /当前标签页/);
   assert.match(installer, /anjuke-property\.js/);
   assert.match(installer, /anjuke-property-case-fetcher\/scripts\/fetch_anjuke_property_cases\.py/);
@@ -134,14 +162,16 @@ test("Anjuke current-tab snapshots are converted into verified output", () => {
     "sys.path.insert(0, " + JSON.stringify("skills/anjuke-property-case-fetcher/scripts") + ")",
     "from fetch_anjuke_property_cases import run_request",
     "out = Path(" + JSON.stringify(output) + ")",
-    "result = run_request({'outputDirectory': str(out), 'caseType': 'sale', 'maxCases': 1, 'capturedPages': [{'url': 'https://hz.sydc.anjuke.com/x/123', 'title': '测试案例', 'location': '杭州市西湖区', 'text': '测试案例 总价：122万元 建筑面积：100㎡ 楼层：中区 交易时间：2026-06'}]})",
-    "print(json.dumps({'ok': result['ok'], 'caseCount': result['caseCount'], 'html': Path(result['htmlDirectory']).exists(), 'result': Path(result['resultHtmlPath']).exists(), 'map': Path(result['mapPath']).exists()}))",
+    "assets = Path(" + JSON.stringify(path.join(repoRoot, "native-helper/map-assets")) + ")",
+    "result = run_request({'outputDirectory': str(out), 'caseType': 'sale', 'maxCases': 1, 'mapAssetsDir': str(assets), 'capturedPages': [{'url': 'https://hz.sydc.anjuke.com/x/123', 'title': '测试案例', 'location': '杭州市西湖区', 'text': '测试案例 总价：122万元 建筑面积：100㎡ 楼层：中区 交易时间：2026-06'}]})",
+    "print(json.dumps({'ok': result['ok'], 'status': result.get('status'), 'caseCount': result['caseCount'], 'html': Path(result['htmlDirectory']).exists(), 'result': Path(result['resultHtmlPath']).exists(), 'map': bool(result['mapPath']) and Path(result['mapPath']).exists(), 'mapGeneration': result.get('mapGeneration')}))",
   ].join("\n");
   try {
     const result = spawnSync(python, ["-c", script], { cwd: repoRoot, encoding: "utf8", timeout: 30000 });
     assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(JSON.parse(result.stdout.trim()), { ok: true, caseCount: 1, html: true, result: true, map: true });
+    assert.deepEqual(JSON.parse(result.stdout.trim()), { ok: true, status: "complete", caseCount: 1, html: true, result: true, map: true, mapGeneration: "local-assets" });
     assert.ok(fs.existsSync(path.join(output, "cases.xlsx")));
+    assert.ok(fs.existsSync(path.join(output, "evidence.json")));
   } finally {
     fs.rmSync(output, { recursive: true, force: true });
   }
@@ -156,19 +186,24 @@ test("Anjuke current-tab snapshots reject verification and generic pages", () =>
     "sys.path.insert(0, " + JSON.stringify("skills/anjuke-property-case-fetcher/scripts") + ")",
     "from fetch_anjuke_property_cases import run_request",
     "out = Path(" + JSON.stringify(output) + ")",
-    "result = run_request({'outputDirectory': str(out), 'caseType': 'sale', 'capturedPages': [",
+    "assets = Path(" + JSON.stringify(path.join(repoRoot, "native-helper/map-assets")) + ")",
+    "result = run_request({'outputDirectory': str(out), 'caseType': 'sale', 'mapAssetsDir': str(assets), 'capturedPages': [",
     "{'url': 'https://www.anjuke.com/', 'title': '安居客-房产网', 'text': '安居客-房产网 二手房 安居客小程序'},",
     "{'url': 'https://hz.sydc.anjuke.com/x/124', 'title': '安全验证', 'text': '安全验证 请输入验证码'},",
     "{'url': 'https://hz.sydc.anjuke.com/x/125', 'title': '有效案例', 'location': '杭州市西湖区', 'longitude': 120.12, 'latitude': 30.27, 'text': '有效案例 总价：122万元 建筑面积：100㎡ 楼层：中区 户型：三室'}]})",
-    "print(json.dumps({'ok': result['ok'], 'caseCount': result['caseCount'], 'skipped': result['skippedInvalidCount'], 'rows': [row['title'] for row in result['results']]}))",
+    "print(json.dumps({'ok': result['ok'], 'status': result.get('status'), 'caseCount': result['caseCount'], 'skipped': result['skippedInvalidCount'], 'blocked': result['blockedVerificationCount'], 'rows': [row['title'] for row in result['results']]}))",
   ].join("\n");
   try {
     const result = spawnSync(python, ["-c", script], { cwd: repoRoot, encoding: "utf8", timeout: 30000 });
     assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(JSON.parse(result.stdout.trim()), { ok: true, caseCount: 1, skipped: 2, rows: ["有效案例"] });
+    assert.deepEqual(JSON.parse(result.stdout.trim()), { ok: true, status: "partial", caseCount: 1, skipped: 1, blocked: 1, rows: ["有效案例"] });
     const cases = JSON.parse(fs.readFileSync(path.join(output, "cases.json"), "utf8"));
     assert.equal(cases.length, 1);
     assert.equal(cases[0].source_url, "https://hz.sydc.anjuke.com/x/125");
+    const evidence = JSON.parse(fs.readFileSync(path.join(output, "evidence.json"), "utf8"));
+    assert.equal(evidence.candidates.length, 3);
+    assert.equal(evidence.candidates.filter((candidate) => candidate.capture_status === "not_case").length, 1);
+    assert.equal(evidence.candidates.filter((candidate) => candidate.capture_status === "blocked_verification").length, 1);
     assert.match(fs.readFileSync(path.join(output, "map.html"), "utf8"), /30\.27/);
   } finally {
     fs.rmSync(output, { recursive: true, force: true });
