@@ -448,6 +448,50 @@ function isFresherManifestResult(candidate, current) {
   return Boolean(candidate.updateAvailable) && !Boolean(current.updateAvailable);
 }
 
+/**
+ * The GitHub API asset path loses the mirror's download candidates because
+ * the API response cannot know them; on networks where github.com is flaky
+ * but api.github.com works this would push domestic users onto the slow
+ * GitHub channels. Only adopt mirror candidates when the authoritative API
+ * just confirmed the exact same package (same file name, size and SHA-256),
+ * so a stale mirror can never change the version or the expected digest —
+ * it can only contribute an extra download URL that the installer still
+ * verifies byte-for-byte.
+ */
+function mergeMirrorCandidatesForApiResult({
+  mirrorUpdate,
+  latestVersion,
+  packageAsset,
+  downloadCandidates,
+  fallbackPreferredChannel,
+}) {
+  const unchanged = { downloadCandidates, preferredDownloadChannel: fallbackPreferredChannel };
+  if (!mirrorUpdate || !packageAsset) return unchanged;
+  try {
+    if (compareSemver(mirrorUpdate.latestVersion, latestVersion) !== 0) return unchanged;
+  } catch {
+    return unchanged;
+  }
+  const mirrorAsset = mirrorUpdate.asset || {};
+  if (!mirrorAsset.name
+    || mirrorAsset.name !== packageAsset.name
+    || String(mirrorAsset.sha256 || "").toLowerCase() !== String(packageAsset.sha256 || "").toLowerCase()
+    || Number(mirrorAsset.size || 0) !== Number(packageAsset.size || 0)) {
+    return unchanged;
+  }
+  const giteeCandidates = (Array.isArray(mirrorUpdate.downloadCandidates) ? mirrorUpdate.downloadCandidates : [])
+    .filter((candidate) => candidate?.source === "gitee" && String(candidate.url || "").trim());
+  if (!giteeCandidates.length) return unchanged;
+  const seen = new Set();
+  const merged = [];
+  for (const candidate of [...giteeCandidates, ...downloadCandidates]) {
+    if (seen.has(candidate.url)) continue;
+    seen.add(candidate.url);
+    merged.push({ ...candidate, priority: merged.length + 1 });
+  }
+  return { downloadCandidates: merged, preferredDownloadChannel: "gitee" };
+}
+
 async function checkManifestSources(input = {}, options = {}) {
   const health = [];
   let mirrorUpdate = null;
@@ -734,14 +778,26 @@ async function checkGithubUpdateInternal(input = {}, options = {}) {
   const preferredDownloadChannel = githubReleaseStatus && githubReleaseStatus.status !== "ok"
     ? "github-api"
     : "github-release";
-  const downloadCandidates = buildDownloadCandidates(packageAsset, {
+  const apiCandidates = buildDownloadCandidates(packageAsset, {
     preferredDownloadChannel,
     source: "github-release",
   });
+  const merged = mergeMirrorCandidatesForApiResult({
+    mirrorUpdate: manifestCheck?.mirrorUpdate || null,
+    latestVersion,
+    packageAsset: packageAsset ? {
+      name: packageAsset.name,
+      size: packageAsset.size,
+      sha256: String(requestedAsset?.sha256 || packageAsset.sha256 || "").replace(/^sha256:/i, "").toLowerCase(),
+    } : null,
+    downloadCandidates: apiCandidates,
+    fallbackPreferredChannel: preferredDownloadChannel,
+  });
+  const downloadCandidates = merged.downloadCandidates;
   const sourceHealth = createSourceHealth([
     ...(manifestCheck?.health || []),
     channelStatus("github-api", "ok"),
-  ], preferredDownloadChannel);
+  ], merged.preferredDownloadChannel);
   const latestRuntimeBuildId = String(manifest?.runtimeBuildId || "").trim();
   const currentRuntimeBuildId = String(input.currentRuntimeBuildId || "").trim();
   const currentRuntimeBuildKind = normalizeRuntimeBuildKind(input.currentRuntimeBuildKind);
@@ -769,7 +825,7 @@ async function checkGithubUpdateInternal(input = {}, options = {}) {
     minimumSupportedVersion: minimumSupportedVersion || null,
     source: "github-api",
     sourceHealth,
-    preferredDownloadChannel,
+    preferredDownloadChannel: merged.preferredDownloadChannel,
     channel: manifest?.channel || (release.prerelease ? "beta" : "stable"),
     releaseName: String(release.name || release.tag_name || latestVersion),
     releaseUrl: String(release.html_url || ""),
