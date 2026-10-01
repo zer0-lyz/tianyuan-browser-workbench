@@ -345,7 +345,7 @@ const windowsHandoff = `# Windows Codex 打包发布交接 — v${versionConfig.
 \`$env:TIANYUAN_GITEE_ASSET_URL_MAP='<JSON对象: 文件名 -> Gitee Release 附件真实直链>'\`
 \`node scripts/generate-update-manifest.mjs\`
 
-Gitee raw 匿名下载对大文件会被拒绝（\`large file require login for access\`）。超过约 10MB 的安装包必须作为 Gitee Release 附件上传，并把发行版页面实际返回的 \`browser_download_url\`（含附件数字 ID，不要自行拼接）逐个写入 \`TIANYUAN_GITEE_ASSET_URL_MAP\`；该映射只对 Gitee 候选生效，未映射文件仍按 \`TIANYUAN_GITEE_BASE_URL\` 拼接，且必须同时设置 \`TIANYUAN_GITEE_BASE_URL\`。manifest、SHA 文件等小文件继续走 raw 镜像，不得重新压缩。
+Gitee raw 匿名下载对大文件会被拒绝（\`large file require login for access\`）。0.14.32 起 macOS 轻量包改为复用本机运行环境、不再捆绑 lxml wheel，包体保持在 raw 匿名限制以内；如未来某个安装包再次超过该限制，应优先压缩包体，确需直发大文件时才把该包作为 Gitee Release 附件上传，并把发行版页面实际返回的 \`browser_download_url\`（含附件数字 ID，不要自行拼接）逐个写入 \`TIANYUAN_GITEE_ASSET_URL_MAP\`；该映射只对 Gitee 候选生效，未映射文件仍按 \`TIANYUAN_GITEE_BASE_URL\` 拼接，且必须同时设置 \`TIANYUAN_GITEE_BASE_URL\`。manifest、SHA 文件等小文件继续走 raw 镜像，不得重新压缩。
 
 核对 \`update-manifest.json\` 中 build、源码 commit、运行指纹、Windows 包文件名、大小和 SHA-256 与真实文件一致；Gitee 与 GitHub 候选必须使用同一文件名、同一 ZIP 字节和同一 SHA-256。
 
