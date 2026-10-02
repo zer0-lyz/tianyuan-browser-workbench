@@ -24,7 +24,7 @@ function elementMap(documentRef) {
     "anjukePropertyCaseType", "anjukePropertyMaxCases", "anjukePropertyKeyword", "anjukePropertyWaitVerification",
     "anjukePropertyScreenshot", "applyAnjukePropertyParams", "resetAnjukePropertyParams",
     "anjukePropertyParameterState", "anjukePropertyParameterMessage", "anjukePropertyOutputDirectory",
-    "chooseAnjukePropertyOutput", "openAnjukePropertySource", "openAnjukePropertyExcel", "openAnjukePropertyCsv",
+    "chooseAnjukePropertyOutput", "anjukePropertyProfileHint", "openAnjukePropertySource", "runAnjukeProperty", "openAnjukePropertyExcel", "openAnjukePropertyCsv",
     "openAnjukePropertyHtml", "openAnjukePropertyResult", "openAnjukePropertyMap", "pauseAnjukeProperty",
     "stopAnjukeProperty", "clearAnjukePropertyResults", "anjukePropertyResultCount", "anjukePropertyResultStatus",
     "anjukePropertyProgressPhase", "anjukePropertyProgressPercent", "anjukePropertyProgressBar",
