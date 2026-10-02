@@ -13,7 +13,7 @@ export const alibabaLeaseTemplate = `
     <div class="section-title-row">
       <div>
         <h2>检索参数</h2>
-        <p class="section-description">按本栏参数生成阿里资产搜索网址（住宅用房·租赁/使用权），再读取并核验详情。</p>
+        <p class="section-description">按本栏参数生成阿里资产搜索网址（租赁/使用权，支持住宅与商业），再读取并核验详情。</p>
       </div>
       <span id="alibabaLeaseParameterState" class="badge" data-kind="pending">待确认参数</span>
     </div>
@@ -21,6 +21,10 @@ export const alibabaLeaseTemplate = `
       <label><span>省份</span><select id="alibabaLeaseProvince" aria-label="省份"><option value="330000">浙江省</option></select></label>
       <label><span>城市</span><select id="alibabaLeaseCity" aria-label="城市"><option value="330100">杭州市</option></select></label>
       <label><span>区县</span><select id="alibabaLeaseDistrict" aria-label="区县"><option value="330102">上城区</option></select></label>
+      <label><span>物业类型</span><select id="alibabaLeasePropertyType" aria-label="物业类型">
+        <option value="residential">住宅用房</option>
+        <option value="commercial">商业用房</option>
+      </select></label>
       <label><span>标的状态</span><select id="alibabaLeaseStatus">
         <option value="finished">已结束</option>
         <option value="all">全部状态</option>

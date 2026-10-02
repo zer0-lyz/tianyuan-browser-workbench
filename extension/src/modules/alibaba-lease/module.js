@@ -6,8 +6,15 @@ import { ALIBABA_REGION_CATALOG } from "../../data/china-regions.js";
 // 操作页面下拉控件：h_t_mode 缺失时列表会混入普通房产拍卖（2026-10-02 实测），
 // 因此每次导航都必须带全 h_t_mode 与 structFieldMap，分页亦然。
 const LEASE_SEARCH_PATH = "/wow/pm/default/pc/zichansearch";
+// 类目 ID 来自真实页面筛选实测（2026-10-02）：点击分类 chips 后 URL 中的 fcatV4Ids。
 const LEASE_CATEGORY = {
   residential: "206060601",
+  commercial: "206057102",
+};
+const LEASE_PROPERTY_TYPES = ["residential", "commercial"];
+const LEASE_PROPERTY_LABELS = {
+  residential: "住宅用房",
+  commercial: "商业用房",
 };
 const LEASE_MODE_FILTER = "[2,3]";
 const LEASE_MODE_STRUCT_FIELD = '{"h_t_mode":"[2,3]"}';
@@ -21,6 +28,7 @@ const DEFAULT_CONFIG = {
   cityCode: "330100",
   district: "上城区",
   districtCode: "330102",
+  propertyType: "residential",
   status: "finished",
   keyword: "",
   startDate: "",
@@ -32,7 +40,7 @@ const DEFAULT_CONFIG = {
 
 const LEASE_PARAMETER_SNAPSHOT_FIELDS = [
   "province", "provinceCode", "city", "cityCode", "district", "districtCode",
-  "status", "keyword", "startDate", "endDate", "maxPages", "outputDirectory", "generateMap",
+  "propertyType", "status", "keyword", "startDate", "endDate", "maxPages", "outputDirectory", "generateMap",
 ];
 
 function parameterSnapshotMatches(config, snapshot) {
@@ -54,7 +62,7 @@ const RESULT_FIELDS = [
 function elementMap(documentRef) {
   const ids = [
     "openAlibabaLease", "page-alibaba-lease", "backFromAlibabaLease",
-    "alibabaLeaseProvince", "alibabaLeaseCity", "alibabaLeaseDistrict",
+    "alibabaLeaseProvince", "alibabaLeaseCity", "alibabaLeaseDistrict", "alibabaLeasePropertyType",
     "alibabaLeaseStatus", "alibabaLeaseKeyword", "alibabaLeaseStartDate",
     "alibabaLeaseEndDate", "alibabaLeaseMaxPages", "alibabaLeaseSourceUrl",
     "openAlibabaLeaseSource", "runAlibabaLease",
@@ -105,6 +113,7 @@ function normalizeConfig(value = {}) {
     cityCode: city?.code || "",
     district: district?.name || "",
     districtCode: district?.code || "",
+    propertyType: LEASE_PROPERTY_TYPES.includes(source.propertyType) ? source.propertyType : DEFAULT_CONFIG.propertyType,
     status: ["finished", "all"].includes(source.status) ? source.status : DEFAULT_CONFIG.status,
     keyword: String(source.keyword || "").trim().slice(0, 100),
     startDate: String(source.startDate || "").trim(),
@@ -120,7 +129,7 @@ function locationScopeCode(config) {
 }
 
 function buildSourceUrl(config, page = 1) {
-  const category = LEASE_CATEGORY.residential;
+  const category = LEASE_CATEGORY[config.propertyType] || LEASE_CATEGORY.residential;
   const url = new URL(`https://zc-paimai.taobao.com${LEASE_SEARCH_PATH}`);
   url.searchParams.set("disableNav", "YES");
   url.searchParams.set("page", String(Math.max(1, Number(page) || 1)));
@@ -358,11 +367,25 @@ async function extractLeaseDetailPage() {
     if (chinese) return chineseNumberMap[chinese[1]] || null;
     return null;
   };
-  const leaseTermYears = parseTermYears(descriptionField(["租期", "本次出租意向租期", "租赁期限"]))
+  // 商业租赁描述常为表格样式：“租期”独立成行，值“1年”在隔几行后的单元格。
+  const tableTermText = (() => {
+    const labelIndex = descriptionLines.findIndex((line) => ["租期", "租赁期限", "租赁期"].includes(line));
+    if (labelIndex < 0) return "";
+    for (let offset = 1; offset <= 6 && labelIndex + offset < descriptionLines.length; offset += 1) {
+      const line = descriptionLines[labelIndex + offset];
+      const value = line.match(/^[\d一二两三四五六七八九十百]+\s*年$/);
+      if (value) return value[0];
+      // 遇到其它表头单元格（含括号/冒号的长文本）说明值不在后方，停止。
+      if (/[（）()：:]/.test(line) && line.length > 6) break;
+    }
+    return "";
+  })();
+  const leaseTermYears = parseTermYears(descriptionField(["租期", "本次出租意向租期", "租赁期限", "租赁期", "出租期限"]))
     // 捕获组只含数字/中文数字，需把“年”一并传给 parseTermYears 才能识别单位。
-    || parseTermYears(clean(heading).match(/[\d一二两三四五六七八九十]+\s*年使用权/)?.[0] || "")
-    || parseTermYears(description.match(/[\d一二两三四五六七八九十]+\s*年使用权/)?.[0] || "")
-    || parseTermYears(description.match(/租期[：:]\s*第?\s*[一二两三四五六七八九十百\d]+\s*年/)?.[0] || "");
+    || parseTermYears(clean(heading).match(/[\d一二两三四五六七八九十]+\s*年(?:使用权|租赁权|租赁期)/)?.[0] || "")
+    || parseTermYears(description.match(/[\d一二两三四五六七八九十]+\s*年(?:使用权|租赁权|租赁期)/)?.[0] || "")
+    || parseTermYears(description.match(/(?:租期|租赁期限|租赁期)[：:]\s*第?\s*[一二两三四五六七八九十百\d]+\s*年/)?.[0] || "")
+    || parseTermYears(tableTermText);
   const buildingAreaValue = parseAmountText(attributes["建筑面积"]);
   const transactionAmountText = hasExplicitSoldPrice
     ? parseAmountText(soldPriceMatch?.[0])
@@ -393,8 +416,8 @@ async function extractLeaseDetailPage() {
     depositAmount: depositValue,
     monthlyUnitPrice,
     leaseTermYears: leaseTermYears ? String(leaseTermYears) : "",
-    rentPaymentTerms: descriptionField(["租金支付方式", "支付方式"]),
-    rentEscalation: descriptionField(["租金递增幅度", "租金递增"]),
+    rentPaymentTerms: descriptionField(["租金支付方式", "支付方式"]) || clean(description.match(/租金(?:半年|[季年月])付[^。；\n]{0,24}/)?.[0] || ""),
+    rentEscalation: descriptionField(["租金递增幅度", "租金递增"]) || clean(description.match(/租金无递增|租金[^。；\n]{0,10}递增[^。；\n]{0,12}/)?.[0] || ""),
     rentTermText: descriptionField(["租期", "本次出租意向租期", "租赁期限"]),
     hasSoldText: hasEndedText && (hasExplicitSoldPrice || bidCount > 0),
     hasExplicitSoldPrice,
@@ -632,8 +655,9 @@ function pageBeforeRequestedRange(items, request = {}) {
 
 function candidateInScope(item, request = {}) {
   // 列表筛选已被 URL 参数保证，这里仅拦截非租赁条目（h_t_mode 被页面丢弃时的兜底）。
+  // 商业租赁标题常不带“使用权”字样（如“XX大厦1号 27.75万元/年”），需按租金计价特征识别。
   const text = `${item.title || ""} ${item.text || ""}`;
-  return /使用权|租金|出租|租赁/.test(text);
+  return /使用权|租赁|出租|租金|[\d.元]\s*\/\s*年|[\d.元]\s*\/\s*月|万元\/年|元\/年|元\/月/.test(text);
 }
 
 function resultGenerationProgress(results, request = {}, counts = {}) {
@@ -1018,9 +1042,7 @@ async function runCurrentTabScrape(context, request, emit = () => {}, control = 
       ? "本地结果写入完成，抓取已终止。"
       : results.length
         ? "阿里资产租赁成交案例已完成详情核验。"
-        : skippedReasons.length
-          ? `候选记录中没有找到详情页可确认的租赁成交案例。首条跳过原因：${skippedReasons[0].reason}。`
-          : "候选记录中没有找到详情页可确认的租赁成交案例。",
+        : noValidCasesReason(skippedReasons, candidates.length),
     candidates: candidates.length,
     results: Array.isArray(saved?.results) ? saved.results : results,
     htmlPath: String(saved?.htmlPath || ""),
@@ -1030,6 +1052,29 @@ async function runCurrentTabScrape(context, request, emit = () => {}, control = 
     skippedReasons: skippedReasons.slice(-20),
     security: { credentialsReturned: false },
   };
+}
+
+
+// 页面没有服务端日期筛选（实测），默认按时间倒序；日期控制靠本地过滤+到页即停。
+// 当所有候选都因日期被跳过时，给出带候选日期区间与调整建议的明确原因，
+// 而不是看起来像程序失败的通用报错。
+function noValidCasesReason(skippedReasons = [], candidates = 0) {
+  const reasons = Array.isArray(skippedReasons) ? skippedReasons : [];
+  const dates = reasons
+    .map((item) => (String(item?.reason || "").match(/结束时间 (\d{4}-\d{2}-\d{2})/) || [])[1])
+    .filter(Boolean);
+  const allDateOutOfRange = reasons.length > 0
+    && reasons.every((item) => /早于所选起始日|晚于所选截止日/.test(String(item?.reason || "")));
+  if (allDateOutOfRange) {
+    const earliest = dates.slice().sort()[0] || "";
+    const latest = dates.slice().sort().at(-1) || "";
+    const rangeText = earliest && latest && earliest !== latest ? `${earliest} 至 ${latest}` : earliest || latest || "未知";
+    return `候选 ${candidates} 条记录的结束时间（${rangeText}）均不在所选日期范围内。页面按时间倒序展示且无服务端日期筛选，通常说明所选区域在该时间段没有租赁成交案例：请扩大日期范围、更换区域，或改选“全部状态”。已撤并的区（如杭州江干区，2021 年并入上城区）名下只有并区前的旧记录。`;
+  }
+  if (reasons.length) {
+    return `候选记录中没有找到详情页可确认的租赁成交案例。首条跳过原因：${reasons[0].reason}。`;
+  }
+  return "候选记录中没有找到详情页可确认的租赁成交案例。";
 }
 
 // ===== 模块生命周期 =====
@@ -1092,6 +1137,7 @@ export const alibabaLeaseModule = {
         provinceCode: elements.alibabaLeaseProvince.value,
         cityCode: elements.alibabaLeaseCity.value,
         districtCode: elements.alibabaLeaseDistrict.value,
+        propertyType: elements.alibabaLeasePropertyType.value,
         status: elements.alibabaLeaseStatus.value,
         keyword: elements.alibabaLeaseKeyword.value,
         startDate: elements.alibabaLeaseStartDate.value,
@@ -1104,6 +1150,7 @@ export const alibabaLeaseModule = {
 
     function renderConfig() {
       renderRegionOptions();
+      elements.alibabaLeasePropertyType.value = config.propertyType;
       elements.alibabaLeaseStatus.value = config.status;
       elements.alibabaLeaseKeyword.value = config.keyword;
       elements.alibabaLeaseStartDate.value = config.startDate;
@@ -1529,7 +1576,7 @@ export const alibabaLeaseModule = {
           renderResults();
           setMessage(elements.alibabaLeaseResultMessage, "已清空本地结果。", "");
         });
-        for (const id of ["alibabaLeaseStatus", "alibabaLeaseKeyword", "alibabaLeaseStartDate", "alibabaLeaseEndDate", "alibabaLeaseMaxPages", "alibabaLeaseGenerateMap"]) {
+        for (const id of ["alibabaLeasePropertyType", "alibabaLeaseStatus", "alibabaLeaseKeyword", "alibabaLeaseStartDate", "alibabaLeaseEndDate", "alibabaLeaseMaxPages", "alibabaLeaseGenerateMap"]) {
           context.scope.on(elements[id], "change", syncConfigFromInputs);
           if (["alibabaLeaseKeyword", "alibabaLeaseStartDate", "alibabaLeaseEndDate"].includes(id)) {
             context.scope.on(elements[id], "input", markConfigDirtyFromInputs);
@@ -1572,6 +1619,7 @@ export {
   locationScopeCode,
   matchesRequest,
   mergeListingEvidence,
+  noValidCasesReason,
   normalizeConfig,
   pageBeforeRequestedRange,
   pageLooksBlocked,

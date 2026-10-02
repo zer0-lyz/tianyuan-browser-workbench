@@ -14,6 +14,7 @@ import {
   locationScopeCode,
   matchesRequest,
   mergeListingEvidence,
+  noValidCasesReason,
   normalizeConfig,
   pageBeforeRequestedRange,
   parseLeaseDetail,
@@ -82,6 +83,9 @@ assert.deepEqual(
 );
 
 const config = normalizeConfig({ districtCode: "330102", status: "finished" });
+assert.equal(config.propertyType, "residential");
+assert.equal(normalizeConfig({ propertyType: "commercial" }).propertyType, "commercial");
+assert.equal(normalizeConfig({ propertyType: "other" }).propertyType, "residential");
 assert.equal(config.province, "浙江省");
 assert.equal(config.city, "杭州市");
 assert.equal(config.district, "上城区");
@@ -102,6 +106,7 @@ assert.equal(sourceUrl.searchParams.get("statusOrders"), '["2"]');
 assert.equal(sourceUrl.searchParams.get("locationCodes"), '["330102"]');
 assert.equal(new URL(buildSourceUrl(normalizeConfig({ status: "all" }))).searchParams.get("statusOrders"), null);
 assert.equal(new URL(buildSourceUrl(config, 3)).searchParams.get("page"), "3");
+assert.equal(new URL(buildSourceUrl(normalizeConfig({ propertyType: "commercial" }))).searchParams.get("fcatV4Ids"), '["206057102"]');
 
 const cityScopeConfig = normalizeConfig({ cityCode: "330100", districtCode: "" });
 assert.equal(locationScopeCode(cityScopeConfig), "330100");
@@ -120,7 +125,10 @@ assert.equal(canonicalDetailUrl("https://sf-item.taobao.com/sf_item/107393885518
 assert.equal(canonicalDetailUrl("https://zc-item.taobao.com/auction/abc.htm"), "");
 
 assert.equal(candidateInScope({ title: "杭州市上城区景芳东区7-3-501室住宅使用权", text: "使用权" }, {}), true);
-assert.equal(candidateInScope({ title: "杭州市平海公寓3幢1002室", text: "当前价 766万" }, {}), false);
+assert.equal(candidateInScope({ title: "杭州市上城区大塔儿巷1号", text: "当前价 ¥ 27.75 万元/年 评估价 待说明" }, {}), true);
+assert.equal(candidateInScope({ title: "XX大厦1306室房屋1年租赁权", text: "当前价 ¥ 4.35 万元/年" }, {}), true);
+assert.equal(candidateInScope({ title: "商铺月租金面议", text: "元/月" }, {}), true);
+assert.equal(candidateInScope({ title: "杭州市平海公寓3幢1002室", text: "当前价 766万 评估价 957万 已结束" }, {}), false);
 
 // ---- 详情解析：成交、流拍、进行中、字段归一 ----
 
@@ -203,5 +211,17 @@ assert.equal(pageBeforeRequestedRange([
 ], { startDate: "2026-09-01" }), true);
 assert.equal(pageBeforeRequestedRange([{ listedEndDate: "2026年09月24日" }], { startDate: "2026-09-01" }), false);
 assert.equal(pageBeforeRequestedRange([{ listedEndDate: "" }], { startDate: "2026-09-01" }), false);
+
+// ---- 全部因日期跳过时的可解释失败原因 ----
+const dateSkips = [
+  { reason: "结束时间 2021-05-20 早于所选起始日。" },
+  { reason: "结束时间 2020-11-03 早于所选起始日。" },
+];
+const dateReason = noValidCasesReason(dateSkips, 25);
+assert.match(dateReason, /候选 25 条记录的结束时间（2020-11-03 至 2021-05-20）均不在所选日期范围/);
+assert.match(dateReason, /扩大日期范围/);
+assert.match(noValidCasesReason([{ reason: "结束时间 2026-10-05 晚于所选截止日。" }], 3), /扩大日期范围/);
+assert.match(noValidCasesReason([{ reason: "本场竞价失败（无人出价），属流拍记录。" }], 1), /首条跳过原因/);
+assert.match(noValidCasesReason([], 0), /没有找到详情页可确认/);
 
 console.log("alibaba-lease module tests passed.");
