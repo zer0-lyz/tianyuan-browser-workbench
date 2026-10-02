@@ -98,6 +98,9 @@ test("alibaba lease normalizeResultRow coerces fields and strips unsafe url para
   assert.equal(row.platform, "阿里资产");
   assert.equal(row.longitude, 120.15);
 
+  const disclaimed = helper.normalizeResultRow({ location: "浙江省 杭州市 上城区XX小区1幢101室 地图标注仅供参考，具体位置以标的物实际为准" });
+  assert.equal(disclaimed.location, "浙江省 杭州市 上城区XX小区1幢101室");
+
   const invalid = helper.normalizeResultRow(sampleResults[1]);
   assert.equal(invalid.longitude, null);
   assert.equal(invalid.latitude, null);
@@ -197,6 +200,18 @@ test("alibaba lease geocode utilities stay offline-safe", async () => {
   }
 });
 
+test("alibaba lease renderResultHtml formats numeric cells with thousand separators", () => {
+  const html = helper.renderResultHtml(
+    [{ title: "千分位案例", transactionAmount: 16300, buildingArea: "32.07", valuationAmount: "", monthlyUnitPrice: 8.47 }],
+    helper.normalizeRequest({}),
+    {},
+  );
+  assert.match(html, /16,300/);
+  assert.match(html, /32\.07/);
+  assert.match(html, /8\.47/);
+  assert.equal(html.includes(">16300<"), false);
+});
+
 test("alibaba lease renderResultHtml escapes untrusted text", () => {
   const html = helper.renderResultHtml(
     [{ title: '<script>alert("x")</script>', url: "javascript:alert(1)" }],
@@ -241,17 +256,21 @@ test("alibaba lease excel export writes a readable workbook when python openpyxl
         "from openpyxl import load_workbook",
         "sheet = load_workbook(sys.argv[1]).active",
         "headers = [cell.value for cell in sheet[1]]",
-        "print(json.dumps({'headers': headers, 'a2': sheet['A2'].value, 'j2': sheet['J2'].value, 'k2': sheet['K2'].value}, ensure_ascii=False))",
+        "print(json.dumps({'headers': headers, 'a2': sheet['A2'].value, 'i2': sheet['I2'].value}, ensure_ascii=False))",
       ].join("\n");
       execFile(PYTHON_BIN, ["-c", script, result.excelPath], { encoding: "utf8" }, (error, stdout) => {
         if (error) { reject(error); return; }
         const payload = JSON.parse(stdout);
         assert.equal(payload.headers[0], "标的名称");
-        assert.equal(payload.headers[5], "标的物位置");
+        assert.equal(payload.headers[4], "标的物位置");
+        assert.equal(payload.headers[5], "流转方式");
+        assert.equal(payload.headers.includes("小区名称"), false);
+        assert.equal(payload.headers.includes("物业类型"), false);
+        assert.equal(payload.headers.includes("房屋用途"), true);
         assert.equal(payload.headers.includes("月租金单价（元/m²·月）"), true);
         assert.equal(payload.headers.includes("案例网址"), true);
         assert.equal(payload.a2, sampleResults[0].title);
-        assert.equal(payload.k2, 16300);
+        assert.equal(payload.i2, 16300);
         resolve();
       });
     });

@@ -55,7 +55,7 @@ let lastGeocodeAt = 0;
 
 const RESULT_EXCEL_COLUMNS = Object.freeze([
   ["标的名称", "title"], ["省份", "province"], ["城市", "city"], ["区县", "district"],
-  ["小区名称", "community"], ["标的物位置", "location"], ["流转方式", "transferMode"], ["物业类型", "propertyType"], ["房屋用途", "houseUsage"],
+  ["标的物位置", "location"], ["流转方式", "transferMode"], ["房屋用途", "houseUsage"],
   ["建筑面积（m²）", "buildingArea"], ["成交价（首年租金，元）", "transactionAmount"], ["起始价（元）", "startPrice"],
   ["评估价（元）", "valuationAmount"], ["月租金单价（元/m²·月）", "monthlyUnitPrice"], ["租期（年）", "leaseTermYears"],
   ["租金支付方式", "rentPaymentTerms"], ["租金递增", "rentEscalation"], ["押金（元）", "depositAmount"],
@@ -123,7 +123,7 @@ for row_index, row in enumerate(rows, 2):
 sheet.freeze_panes = "A2"
 if rows:
     sheet.auto_filter.ref = sheet.dimensions
-widths = [34, 9, 9, 10, 16, 30, 9, 10, 10, 12, 16, 12, 12, 16, 9, 18, 20, 12, 8, 12, 9, 8, 10, 9, 9, 9, 12, 8, 16, 12, 12, 9, 9, 46]
+widths = [34, 9, 9, 10, 30, 9, 10, 12, 16, 12, 12, 16, 9, 18, 20, 12, 8, 12, 9, 8, 10, 9, 9, 9, 12, 8, 16, 12, 12, 9, 9, 46]
 for column_index, width in enumerate(widths, 1):
     sheet.column_dimensions[chr(64 + column_index) if column_index <= 26 else "A"].width = width
 sheet.row_dimensions[1].height = 22
@@ -267,7 +267,11 @@ function normalizeResultRow(item) {
     city: safeText(item?.city, 40),
     district: safeText(item?.district, 40),
     community: safeText(item?.community, 80),
-    location: safeText(item?.location, 120),
+    // 防御：历史数据或直传数据可能仍带免责文案，行归一时再剥一次。
+    location: safeText(String(item?.location || "")
+      .replace(/地图标注[^。；]{0,40}?为准[。.]?/g, "")
+      .replace(/地图标注仅供参考/g, "")
+      .replace(/[，,、；;\s]+$/g, ""), 120),
     transferMode: safeText(item?.transferMode, 20),
     propertyType: safeText(item?.propertyType, 40),
     houseUsage: safeText(item?.houseUsage, 40),
@@ -421,11 +425,18 @@ function renderResultHtml(results, request, metadata = {}) {
   const columns = RESULT_EXCEL_COLUMNS;
   const numericFields = RESULT_EXCEL_NUMERIC_FIELDS;
   const header = columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join("");
+  const formatCellNumber = (field, value) => {
+    if (!numericFields.has(field)) return null;
+    const number = Number(String(value ?? "").replace(/,/g, ""));
+    return Number.isFinite(number) && String(value ?? "").trim() !== ""
+      ? number.toLocaleString("zh-CN", { maximumFractionDigits: 2 })
+      : null;
+  };
   const rows = (Array.isArray(results) ? results : []).map((item, rowIndex) => {
     const cells = columns.map(([, field]) => {
       const value = field === "url" && item?.[field] && safeExportUrl(item[field])
         ? `<a href="${escapeHtml(safeExportUrl(item[field]))}" target="_blank" rel="noopener noreferrer">打开详情</a>`
-        : escapeHtml(item?.[field] === null || item?.[field] === undefined ? "" : item[field]);
+        : escapeHtml(formatCellNumber(field, item?.[field]) ?? (item?.[field] === null || item?.[field] === undefined ? "" : item[field]));
       return `<td class="${numericFields.has(field) ? "numeric-cell" : ""}">${value}</td>`;
     }).join("");
     return `<tr><td class="sequence-cell">${rowIndex + 1}</td>${cells}</tr>`;

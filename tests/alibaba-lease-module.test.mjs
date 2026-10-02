@@ -175,6 +175,10 @@ assert.equal(parsed.endTime, "2026-09-23");
 assert.equal(parsed.buildingArea, 32.07);
 assert.equal(parsed.url, "https://zc-item.taobao.com/auction/1081356663322.htm");
 assert.equal(parsed.location, "浙江省 杭州市 上城区三里亭一区2-2-101");
+assert.equal(
+  parseLeaseDetail({ ...baseDetail, location: "浙江省 杭州市 上城区XX小区1幢101室 地图标注仅供参考，具体位置以标的物实际为准" }, request).location,
+  "浙江省 杭州市 上城区XX小区1幢101室",
+);
 assert.equal(parsed.resultStatus, "成交");
 assert.equal(parsed.platform, "阿里资产");
 assert.equal(parsed.coordinateStatus.includes("已定位"), true);
@@ -223,5 +227,12 @@ assert.match(dateReason, /扩大日期范围/);
 assert.match(noValidCasesReason([{ reason: "结束时间 2026-10-05 晚于所选截止日。" }], 3), /扩大日期范围/);
 assert.match(noValidCasesReason([{ reason: "本场竞价失败（无人出价），属流拍记录。" }], 1), /首条跳过原因/);
 assert.match(noValidCasesReason([], 0), /没有找到详情页可确认/);
+
+// ---- “评估价 待说明”等占位文本不得误捕为金额（含数字 0 的回归）----
+const pricePattern = (label) => new RegExp(`${label}\\s*[：:]?\\s*[¥￥]?\\s*([\\d,]+(?:\\.\\d+)?)\\s*(万|亿|元)?(?!\\s*年)`);
+assert.equal("评估价 \n待说明 \n结束 \n2026年09月24日".match(pricePattern("(?:评估价|市场价)"))?.[1] ?? "", "", "待说明不得跨字段捕数");
+assert.equal("评估价: \n¥35,000".match(pricePattern("(?:评估价|市场价)"))?.[1], "35,000");
+assert.equal("起始价: \n¥15,300".match(pricePattern("起始价"))?.[1], "15,300");
+assert.equal("结束 2026年09月24日".match(pricePattern("当前价"))?.[1] ?? "", "", "跨字段年份不得误捕");
 
 console.log("alibaba-lease module tests passed.");
