@@ -280,11 +280,34 @@ EXPORT_HEADERS = [
 ]
 
 
+def clean_title_text(value: Any) -> str | None:
+    """去掉详情页 h1 带出的页面杂质（下载app举报、房屋编码等）。"""
+    text = clean(value)
+    if not text:
+        return None
+    text = re.split(r"下载\s*app|下载APP|下载App", text)[0]
+    text = re.sub(r"房屋编码[：:].*$", "", text).strip()
+    return text or None
+
+
+def clean_location_text(value: Any) -> str | None:
+    """把"楼盘： xx > 位置： 拱墅-武林-文晖路46号地图"还原成纯位置。"""
+    text = clean(value)
+    if not text:
+        return None
+    parts = re.findall(r"位置：\s*([^\n>]+)", text)
+    if parts:
+        text = clean(parts[-1])
+    text = re.sub(r"(?:进入)?地图$", "", text).strip()
+    text = re.sub(r"^楼盘[：:]\s*", "", text).strip()
+    return text or None
+
+
 def build_case_row(index: int, url: str, output: Path, requested_type: str, body: str, title: str | None, location: str | None, page_html: str, html_file: Path | None, screenshot_file: Path | None, longitude: float | None = None, latitude: float | None = None) -> CaseRow:
     body = clean(body)
     validate_detail_capture(url, body)
-    title = nullable(title)
-    location = nullable(location) or title
+    title = clean_title_text(title)
+    location = clean_location_text(location) or title
     if longitude is None or latitude is None:
         longitude, latitude = extract_coordinates(page_html)
     if html_file is None and page_html:
@@ -338,7 +361,7 @@ def extract_case(page: Any, index: int, url: str, output: Path, requested_type: 
             body = clean(page.evaluate("() => document.body ? (document.body.innerText || document.body.textContent || '') : ''"))
             blocked = verification_required(body)
     validate_detail_capture(url, body)
-    title = nullable(page.evaluate("() => document.querySelector('h1,.title,.house-title,.main-title')?.innerText || document.title || ''"))
+    title = clean_title_text(page.evaluate("() => document.querySelector('h1,.title,.house-title,.main-title')?.innerText || document.title || ''"))
     page_html = page.content()
     html_file = output / "html" / f"case_{index:03d}.html"
     html_file.write_text(page_html, encoding="utf-8")
@@ -357,7 +380,7 @@ def extract_case(page: Any, index: int, url: str, output: Path, requested_type: 
     publish = label_value(body, ("发布时间", "更新于", "交易时间")) or first_match(body, [r"(20\d{2}[-年./]\d{1,2}[-月./]\d{1,2})"])
     construction = parse_number(label_value(body, ("建成年份", "竣工年份", "年代")))
     construction_year = int(construction) if construction and construction >= 1800 else None
-    location = nullable(page.evaluate("() => document.querySelector('.address,.addr,[class*=address],[class*=addr]')?.innerText || ''")) or title
+    location = clean_location_text(page.evaluate("() => document.querySelector('.address,.addr,[class*=address],[class*=addr]')?.innerText || ''")) or title
     property_type = first_match(body, [r"(办公|商铺|住宅|商住楼|写字楼|厂房)"])
     transaction_time = publish
     return CaseRow(

@@ -553,6 +553,31 @@ export const anjukePropertyModule = {
       return Math.max(0, VERIFICATION_TOTAL_BUDGET_MS - runControl.verificationWaitUsedMs);
     }
 
+    async function currentTabUrl(tabId) {
+      try {
+        const tab = await context.chrome.tabs.get(tabId);
+        return String(tab?.url || "");
+      } catch {
+        return "";
+      }
+    }
+
+    // 58 系反爬验证页（callback.58.com/antibot）不在宿主权限内，无法注入读取；
+    // 唯一正确语义是"等待人工验证"：聚焦标签页，等会话恢复、URL 回到安居客再继续读。
+    async function waitForVerificationIfRedirected(tabId, request, deadline) {
+      const tabUrl = await currentTabUrl(tabId);
+      if (!tabUrl || /(^|\.)anjuke\.com\//i.test(tabUrl)) return false;
+      if (!request.waitVerification || Date.now() >= deadline - 2000) {
+        return { captureStatus: "blocked_verification", errorCode: "ANJUKE_REDIRECTED_TO_VERIFICATION", text: "", html: "", title: "", location: "", pageUrl: tabUrl };
+      }
+      await focusTab(tabId);
+      setMessage(elements.anjukePropertyResultMessage, "安居客把标签页跳转到了 58 反爬验证页：已在浏览器中聚焦，请完成滑块验证，完成后脚本会自动继续。", "warn");
+      renderProgress({ phase: "capturing", percent: 12, message: `等待安居客反爬验证完成…（剩余 ${Math.max(0, Math.ceil((deadline - Date.now()) / 1000))} 秒）` });
+      runControl.verificationWaitUsedMs = (runControl.verificationWaitUsedMs || 0) + 2000;
+      await new Promise((resolve) => window.setTimeout(resolve, 2000));
+      return null;
+    }
+
     async function readDetailOutcome(tabId, request) {
       if (request.waitVerification && verificationBudgetRemainingMs() <= 0) {
         return { captureStatus: "blocked_verification", errorCode: "ANJUKE_VERIFICATION_BUDGET_EXHAUSTED", text: "", html: "", title: "", location: "", pageUrl: "" };
@@ -563,6 +588,8 @@ export const anjukePropertyModule = {
       const contentSettleDeadline = Math.min(deadline, Date.now() + 15000);
       const remainingText = () => `剩余 ${Math.max(0, Math.ceil((deadline - Date.now()) / 1000))} 秒`;
       while (Date.now() < deadline) {
+        const redirected = await waitForVerificationIfRedirected(tabId, request, deadline);
+        if (redirected) return redirected;
         const allTabs = await context.chrome.tabs.query({});
         const verificationTab = allTabs.find((candidate) => {
           if (candidate.id === tabId) return false;
@@ -585,7 +612,15 @@ export const anjukePropertyModule = {
           await new Promise((resolve) => window.setTimeout(resolve, 2000));
           continue;
         }
-        const [result] = await context.chrome.scripting.executeScript({ target: { tabId }, func: readAnjukeDetailTab });
+        let result;
+        try {
+          result = await context.chrome.scripting.executeScript({ target: { tabId }, func: readAnjukeDetailTab });
+        } catch (error) {
+          // 注入失败多半是导航中又被跳到无权限的 58 验证页：转回验证等待而不是记失败。
+          const redirected = await waitForVerificationIfRedirected(tabId, request, deadline);
+          if (redirected) return redirected;
+          return { captureStatus: "read_failed", errorCode: `ANJUKE_INJECT_FAILED:${String(error?.message || error || "").slice(0, 100)}`, text: "", html: "", title: "", location: "", pageUrl: "" };
+        }
         const detail = result?.result;
         if (detail?.verificationRequired) {
           if (!request.waitVerification || Date.now() >= deadline - 2000) {
