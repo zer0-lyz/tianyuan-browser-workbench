@@ -98,6 +98,17 @@ const anjukeProperty = (() => {
     }
   }
 })();
+const alibabaLease = (() => {
+  try {
+    return require("./alibaba-lease.js");
+  } catch (cause) {
+    try {
+      return createRequire(path.join(path.dirname(process.execPath), "native_host.js"))("./alibaba-lease.js");
+    } catch {
+      throw cause;
+    }
+  }
+})();
 const platformAdapter = (() => {
   try {
     return require("./platform/index.js");
@@ -2143,6 +2154,15 @@ async function chooseAnjukePropertyOutputDirectory() {
     "安居客物业案例",
     "anjuke_property_output_directory_selected",
     "ANJUKE_OUTPUT_DIRECTORY_CREATE_FAILED",
+  );
+}
+
+async function chooseAlibabaLeaseOutputDirectory() {
+  return await chooseManagedOutputDirectory(
+    "选择阿里资产租赁上级目录",
+    "阿里资产租赁",
+    "alibaba_lease_output_directory_selected",
+    "ALIBABA_LEASE_OUTPUT_DIRECTORY_CREATE_FAILED",
   );
 }
 
@@ -4590,6 +4610,66 @@ async function handle(message) {
     return {
       ...opened,
       action: "open_alibaba_auction_path",
+      path: resolved,
+      security: { credentialsReturned: false },
+    };
+  }
+  if (message?.action === "select_alibaba_lease_output_directory") {
+    return await chooseAlibabaLeaseOutputDirectory();
+  }
+  if (message?.action === "write_alibaba_lease_result") {
+    const request = alibabaLease.normalizeRequest(message?.request || {});
+    const results = Array.isArray(message?.results) ? message.results : [];
+    const candidates = Number.isFinite(Number(message?.candidates)) ? Number(message.candidates) : results.length;
+    const skipped = Number.isFinite(Number(message?.skipped)) ? Number(message.skipped) : 0;
+    const artifacts = results.length
+      ? await alibabaLease.writeResultArtifacts(results, request, { candidates, skipped })
+      : {
+        htmlPath: "",
+        jsonPath: "",
+        historyPath: "",
+        mapPath: "",
+        coordsPath: "",
+        pointsJsPath: "",
+        locatedCount: 0,
+        unlocatedCount: 0,
+        mapGeneration: "no_results",
+      };
+    return {
+      ok: results.length > 0,
+      action: "write_alibaba_lease_result",
+      ...artifacts,
+      candidates,
+      skipped,
+      security: { credentialsReturned: false },
+    };
+  }
+  if (message?.action === "write_alibaba_lease_excel") {
+    const request = alibabaLease.normalizeRequest(message?.request || {});
+    const results = Array.isArray(message?.results) ? message.results : [];
+    const candidates = Number.isFinite(Number(message?.candidates)) ? Number(message.candidates) : results.length;
+    const skipped = Number.isFinite(Number(message?.skipped)) ? Number(message.skipped) : 0;
+    try {
+      return await alibabaLease.writeResultExcel(results, request, { candidates, skipped });
+    } catch (error) {
+      return {
+        ok: false,
+        action: "write_alibaba_lease_excel",
+        errorCode: error?.code || "ALIBABA_LEASE_EXCEL_EXPORT_FAILED",
+        reason: alibabaLease.safeError(error),
+        security: { credentialsReturned: false },
+      };
+    }
+  }
+  if (message?.action === "open_alibaba_lease_path") {
+    const resolved = alibabaLease.openResultPath(message.path, message.outputDirectory || alibabaLease.RESULT_ROOT);
+    if (message.openInCurrentBrowserTab === true) {
+      return { ok: true, opened: false, action: "open_alibaba_lease_path", path: resolved, browserTab: true, security: { credentialsReturned: false } };
+    }
+    const opened = await platformAdapter.openPath(resolved);
+    return {
+      ...opened,
+      action: "open_alibaba_lease_path",
       path: resolved,
       security: { credentialsReturned: false },
     };
