@@ -234,11 +234,13 @@ async function captureAnjukeCurrentTab(options = {}) {
 function readAnjukeDetailTab() {
   const text = String(document.body?.innerText || document.body?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60000);
   const html = String(document.documentElement?.outerHTML || "").slice(0, 400000);
-  const verificationMarkers = ["验证码", "访问过于频繁", "安全验证", "滑块", "人机验证", "请完成验证", "请拖动滑块", "验证后继续", "风险验证", "人机校验"];
+  // 只认验证码专属的 DOM 信号；'verify'/'slider' 会误中详情页的"核验"徽章与图片轮播组件。
   const verificationSelectors = [
-    "iframe[src*='captcha' i]", "iframe[src*='verify' i]", "[id*='captcha' i]", "[class*='captcha' i]",
-    "[id*='verify' i]", "[class*='verify' i]", "[class*='slider' i]", ".geetest_panel", ".nc-container", "#nc_1_wrapper",
+    "iframe[src*='captcha' i]", "iframe[src*='verify' i]",
+    "[id*='captcha' i]", "[class*='captcha' i]",
+    ".geetest_panel", ".geetest_slider", ".nc-container", "#nc_1_wrapper", "#tcaptcha", "[class*='yidun' i]",
   ];
+  const verificationMarkers = ["验证码", "访问过于频繁", "安全验证", "滑块", "人机验证", "请完成验证", "请拖动滑块", "验证后继续", "风险验证", "人机校验"];
   const detailMarkers = ["总价", "售价", "参考售价", "报价", "租金", "建筑面积", "房屋单价", "单价", "户型", "楼层", "朝向", "装修", "房源编号", "写字楼", "商铺"];
   const source = html;
   const coordinate = (name, minimum, maximum) => {
@@ -247,9 +249,13 @@ function readAnjukeDetailTab() {
     const value = match ? Number(match[1]) : NaN;
     return Number.isFinite(value) && value >= minimum && value <= maximum ? value : null;
   };
-  const verificationRequired = verificationMarkers.some((marker) => text.includes(marker))
-    || verificationSelectors.some((selector) => document.querySelector(selector));
+  const markerCount = verificationMarkers.filter((marker) => text.includes(marker)).length;
+  const captchaDomRequired = verificationSelectors.some((selector) => document.querySelector(selector));
   const detailSignalCount = detailMarkers.filter((marker) => text.includes(marker)).length;
+  // 反爬验证页没有案例信号；正常详情页即使出现"验证码"（如查电话组件）也不算被拦截。
+  const verificationRequired = captchaDomRequired
+    || markerCount >= 2
+    || (markerCount >= 1 && detailSignalCount === 0);
   const detailAvailable = !verificationRequired && detailSignalCount >= 2;
   return {
     pageUrl: location.href,
@@ -260,7 +266,7 @@ function readAnjukeDetailTab() {
     longitude: coordinate("longitude", -180, 180) ?? coordinate("lng", -180, 180) ?? coordinate("lon", -180, 180),
     latitude: coordinate("latitude", -90, 90) ?? coordinate("lat", -90, 90),
     verificationRequired,
-    verificationSource: verificationRequired ? "text-or-verification-dom" : "",
+    verificationSource: verificationRequired ? (captchaDomRequired ? "captcha-dom" : `text-markers:${markerCount}`) : "",
     detailAvailable,
     detailSignalCount,
     errorCode: detailAvailable ? "" : (verificationRequired ? "ANJUKE_DETAIL_VERIFICATION_REQUIRED" : "ANJUKE_DETAIL_PAGE_NOT_CASE"),
