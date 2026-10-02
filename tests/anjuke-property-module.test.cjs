@@ -133,7 +133,7 @@ from pathlib import Path
 sys.path.insert(0, "skills/anjuke-property-case-fetcher/scripts")
 from fetch_anjuke_property_cases import CaseRow, write_excel, write_csv, write_json
 out = Path(${JSON.stringify(output)})
-row = CaseRow("数据库", 1, "中田大厦", 1220000, 100.0, 0.09, "中区/20F", "精装修", None, "2026-06", None, None, None, "办公", 2018, "https://hz.sydc.anjuke.com/x/123", "浙江省杭州市", None, None, None, None, "sale", "122万", "12200元/㎡", None, None, None, None, "测试案例", None, None, "ok")
+row = CaseRow("数据库", 1, "中田大厦", 1220000, 100.0, 0.09, "中区/20F", "精装修", None, "2026-06", None, None, None, "办公", 2018, "https://hz.sydc.anjuke.com/xzl-shou/7562497924", "浙江省杭州市", None, None, None, None, "sale", "122万", "12200元/㎡", None, None, None, None, "测试案例", None, None, "ok")
 write_excel([row], out)
 write_csv([row], out)
 write_json([row], out)
@@ -168,7 +168,7 @@ test("Anjuke current-tab snapshots are converted into verified output", () => {
     "from fetch_anjuke_property_cases import run_request",
     "out = Path(" + JSON.stringify(output) + ")",
     "assets = Path(" + JSON.stringify(path.join(repoRoot, "native-helper/map-assets")) + ")",
-    "result = run_request({'outputDirectory': str(out), 'caseType': 'sale', 'maxCases': 1, 'mapAssetsDir': str(assets), 'capturedPages': [{'url': 'https://hz.sydc.anjuke.com/x/123', 'title': '测试案例', 'location': '杭州市西湖区', 'text': '测试案例 总价：122万元 建筑面积：100㎡ 楼层：中区 交易时间：2026-06'}]})",
+    "result = run_request({'outputDirectory': str(out), 'caseType': 'sale', 'maxCases': 1, 'mapAssetsDir': str(assets), 'capturedPages': [{'url': 'https://hz.sydc.anjuke.com/xzl-shou/7562497924', 'title': '测试案例', 'location': '杭州市西湖区', 'text': '测试案例 总价：122万元 建筑面积：100㎡ 楼层：中区 交易时间：2026-06'}]})",
     "print(json.dumps({'ok': result['ok'], 'status': result.get('status'), 'caseCount': result['caseCount'], 'html': Path(result['htmlDirectory']).exists(), 'result': Path(result['resultHtmlPath']).exists(), 'map': bool(result['mapPath']) and Path(result['mapPath']).exists(), 'mapGeneration': result.get('mapGeneration')}))",
   ].join("\n");
   try {
@@ -194,8 +194,8 @@ test("Anjuke current-tab snapshots reject verification and generic pages", () =>
     "assets = Path(" + JSON.stringify(path.join(repoRoot, "native-helper/map-assets")) + ")",
     "result = run_request({'outputDirectory': str(out), 'caseType': 'sale', 'mapAssetsDir': str(assets), 'capturedPages': [",
     "{'url': 'https://www.anjuke.com/', 'title': '安居客-房产网', 'text': '安居客-房产网 二手房 安居客小程序'},",
-    "{'url': 'https://hz.sydc.anjuke.com/x/124', 'title': '安全验证', 'text': '安全验证 请输入验证码'},",
-    "{'url': 'https://hz.sydc.anjuke.com/x/125', 'title': '有效案例', 'location': '杭州市西湖区', 'longitude': 120.12, 'latitude': 30.27, 'text': '有效案例 总价：122万元 建筑面积：100㎡ 楼层：中区 户型：三室'}]})",
+    "{'url': 'https://hz.sydc.anjuke.com/xzl-shou/7562497925', 'title': '安全验证', 'text': '安全验证 请输入验证码'},",
+    "{'url': 'https://hz.sydc.anjuke.com/xzl-shou/7562497926', 'title': '有效案例', 'location': '杭州市西湖区', 'longitude': 120.12, 'latitude': 30.27, 'text': '有效案例 总价：122万元 建筑面积：100㎡ 楼层：中区 户型：三室'}]})",
     "print(json.dumps({'ok': result['ok'], 'status': result.get('status'), 'caseCount': result['caseCount'], 'skipped': result['skippedInvalidCount'], 'blocked': result['blockedVerificationCount'], 'rows': [row['title'] for row in result['results']]}))",
   ].join("\n");
   try {
@@ -204,7 +204,7 @@ test("Anjuke current-tab snapshots reject verification and generic pages", () =>
     assert.deepEqual(JSON.parse(result.stdout.trim()), { ok: true, status: "partial", caseCount: 1, skipped: 1, blocked: 1, rows: ["有效案例"] });
     const cases = JSON.parse(fs.readFileSync(path.join(output, "cases.json"), "utf8"));
     assert.equal(cases.length, 1);
-    assert.equal(cases[0].source_url, "https://hz.sydc.anjuke.com/x/125");
+    assert.equal(cases[0].source_url, "https://hz.sydc.anjuke.com/xzl-shou/7562497926");
     const evidence = JSON.parse(fs.readFileSync(path.join(output, "evidence.json"), "utf8"));
     assert.equal(evidence.candidates.length, 3);
     assert.equal(evidence.candidates.filter((candidate) => candidate.capture_status === "not_case").length, 1);
@@ -230,8 +230,9 @@ test("Anjuke recognizes commercial detail routes but not the commercial listing 
     "assert not is_recommendation_url('https://hz.sydc.anjuke.com/xzl-shou/123456/?legoAdClickUrl=redirect')",
     "assert canonical_detail_url('https://hz.sydc.anjuke.com/xzl-shou/123456/?legoAdClickUrl=redirect').endswith('/xzl-shou/123456/')",
     "from fetch_anjuke_property_cases import is_recommendation_url",
-    "assert is_anjuke_detail_url('https://hz.sydc.anjuke.com/xzl-shou/xiaoshan/123456')",
+    "assert is_anjuke_detail_url('https://hz.sydc.anjuke.com/xzl-shou/xiaoshan/1234567890')",
     "assert not is_anjuke_detail_url('https://hz.sydc.anjuke.com/xzl-shou/xiaoshan/')",
+    "assert not is_anjuke_detail_url('https://hz.sydc.anjuke.com/xzl-shou/gongshu-p2/')",
     "assert is_recommendation_url('https://hz.sydc.anjuke.com/xzl-shou/7433530925/?from=xzlshou_guessrecommend&legoAdClickUrl=redirect')",
     "print('ok')",
   ].join("\n");

@@ -96,8 +96,9 @@ def is_anjuke_detail_url(value: Any) -> bool:
     return bool(
         re.search(r"/prop/view/[A-Za-z0-9_-]+", path, re.I)
         or re.search(r"/(?:fang5|sale|rent)/[A-Za-z0-9_-]+", path, re.I)
-        or re.search(r"/(?:xzl-shou|xzl-zu|sp-shou|sp-zu|sp-rent)/(?:[^/]+/)*\d+(?:/|$)", path, re.I)
-        or re.search(r"/\d+(?:/|$)", path)
+        # 商业地产详情是 /{频道}/{≥7位房源id}/；分页（如 gongshu-p2）与列表根凭位数即可区分。
+        or re.search(r"/(?:xzl-shou|xzl-zu|sp-shou|sp-zu|sp-rent)/(?:[^/]+/)*\d{7,}(?:/|$)", path, re.I)
+        or re.search(r"/\d{7,}(?:/|$)", path)
         or re.search(r"\.html$", path, re.I)
     )
 

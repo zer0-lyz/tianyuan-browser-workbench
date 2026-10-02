@@ -65,7 +65,7 @@ function runFixture(request) {
 
 function saleOutcome(sequence) {
   return {
-    url: `https://hz.sydc.anjuke.com/xzl-shou/hzxl/${sequence}`,
+    url: `https://hz.sydc.anjuke.com/xzl-shou/xihuqu/75624979${sequence}`,
     title: `测试大厦${sequence}`,
     location: `西湖区 测试大厦${sequence}`,
     text: "总价：120万 建筑面积：60㎡ 户型：2房2厅 楼层：中区/20F 朝向：南 装修：精装修 建筑结构：钢混 写字楼出售",
@@ -100,7 +100,7 @@ function baseRequest(outputDirectory, candidates, overrides = {}) {
 
 test("候选证据契约：混合候选输出 evidence.json、真实 HTML 与部分完成状态", () => {
   const blocked = {
-    url: "https://hz.sydc.anjuke.com/xzl-shou/hzxl/900",
+    url: "https://hz.sydc.anjuke.com/xzl-shou/xihuqu/7562497924",
     title: "验证页",
     location: "",
     text: "请完成安全验证 滑块",
@@ -172,7 +172,7 @@ test("全部成功：状态 complete、案例序号连续、Excel 公式与文�
     assert.equal(facts.excel.h2, "=ROUND(E2/F2/(1+G2),0)");
     assert.equal(facts.excel.h3, "=ROUND(E3/F3/(1+G3),0)");
     assert.equal(facts.excel.l2Format, "@");
-    assert.match(String(facts.excel.r2), /=HYPERLINK\("https:\/\/hz\.sydc\.anjuke\.com\/xzl-shou\/hzxl\/201"/);
+    assert.match(String(facts.excel.r2), /=HYPERLINK\("https:\/\/hz\.sydc\.anjuke\.com\/xzl-shou\/xihuqu\/75624979201"/);
     assert.deepEqual(facts.excel.caseNumbers, [1, 2]);
   } else {
     assert.ok(true, "openpyxl unavailable on this machine; Excel contract covered by CSV/JSON");
