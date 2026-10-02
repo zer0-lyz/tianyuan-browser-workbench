@@ -76,3 +76,13 @@ extension/src/modules/alibaba-lease/
 
 - 离线全量门禁 `bash scripts/quality-check.sh` 必须通过。
 - 真实站点端到端（用户 Chrome 登录态下完整跑一次抓取）列为用户验收项；本会话已在 opencli 后台会话验证列表/详情/分页/坐标可提取。
+
+## 实施记录（2026-10-02）
+
+- 提交 `15d9753`（分支 `codex/anjuke-property-continuation-20261001`，基线含并行会话的 `fd35d86`——该提交卷入了本任务先暂存的 regions.js→data 重命名，纯 rename 无内容影响）。未推送、未发布、未覆盖本机运行副本。
+- 与方案的差异（实施中发现并调整）：
+  1. **坐标不可靠**：zc-item 详情页静态 HTML 的脚本坐标不稳定（同一条目首访有、复访无），因此地图定位改为两级：详情页坐标优先，缺失时对“标的物位置”文本走高德 poiTips（免钥）+ Nominatim 兜底（移植拍卖模块管线，缓存 `~/.tianyuan-workbench/cache/alibaba-lease-geocode.json`，预算 12s/300ms 限速），仍定位失败显式“未定位”。新增 `location` 字段与 Excel“标的物位置”列。
+  2. **提取加固**（真实页面回归发现）：列表标题取卡片首行而非整卡 innerText；卡片金额捕获收紧（数字后禁止紧跟“年”，距离 ≤6 字符）避免把“结束 2026年…”误读为评估价；详情页起始价/评估价/押金正则补冒号；描述字段支持“1、租期：三年”编号前缀；parseTermYears 需收到含“年”的完整匹配。
+- 真实页面验证（opencli 后台会话，用户登录态）：列表页 40 条/页（金额换算、日期归一、sf-item 排除）；成交案例（1081356663322）拍下价 16300/起始价 15300/租期 5 年/押金 7650/楼层 1/7/出价 2/月租金单价自动补算 8.47 元/㎡·月；流拍案例（1083334193009）failedNoBids=true、出价 0、正确判为跳过。
+- 测试：`tests/alibaba-lease-module.test.mjs`（模块契约/URL 构建/解析判据/翻页停止）、`tests/alibaba-lease-native.test.cjs` 8 例（请求校验、行归一、产物落盘、地图显式降级、XSS 转义、Excel 真实回读含列契约、地理编码离线桩、路径越界拒绝）；`module-architecture.test.mjs` 15→16/13→14；`alibaba-auction-module.test.cjs` 区域路径更新。全量门禁 142/142 通过（两轮）。
+- 部署待用户验收：需同步 audit 仓库 → `~/.tianyuan-workbench/projects/天源评估系统/extension`（含 native-helper）并在 chrome://extensions 重载；注意运行副本 native_host.js 含并行会话的折旧 `read_input` 路由，同步时以工作树版本为准（含双方改动），不要用本分支已提交版本覆盖。
