@@ -120,7 +120,9 @@ function validateOutputPath(value, outputDirectory) {
   const raw = String(value || "").trim();
   if (!raw || raw.includes("\0") || !path.isAbsolute(raw)) throw new Error("ANJUKE_OUTPUT_PATH_INVALID");
   const resolved = fs.realpathSync(raw);
-  const root = path.resolve(outputDirectory);
+  // 根目录同样 realpath：用户选择的目录可能在 /tmp 等符号链接路径下，
+  // 只对文件一侧 realpath 会把合法输出误判为越界。
+  const root = fs.realpathSync(path.resolve(outputDirectory));
   const relative = path.relative(root, resolved);
   if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("ANJUKE_OUTPUT_OUTSIDE_DIRECTORY");
   const stat = fs.statSync(resolved);

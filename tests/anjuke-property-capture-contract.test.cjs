@@ -265,3 +265,56 @@ test("Native Helper 规范化：候选状态白名单、非法网址剔除与本
   }
   assert.throws(() => helper.normalizeRequest({ listUrls: ["https://evil.example.com/"], outputDirectory }));
 });
+
+
+test("大载荷回归：多候选整页 HTML 经临时文件传给 Python，不再受 execve 参数上限限制", () => {
+  const nativeHost = path.join(repoRoot, "native-helper/native_host.js");
+  const bigHtml = `<html>${"x".repeat(150 * 1024)}</html>`;
+  const candidateOutcomes = Array.from({ length: 8 }, (_, index) => ({
+    url: `https://hz.sydc.anjuke.com/xzl-shou/xihuqu/756249792${index}`,
+    title: `大厦${index}`,
+    location: "西湖区",
+    text: "总价：150万 建筑面积：100㎡ 户型：开间 楼层：高区 朝向：南 装修：精装修",
+    html: bigHtml,
+    captureStatus: "ok",
+    errorCode: "",
+  }));
+  const request = {
+    listUrls: ["https://hz.sydc.anjuke.com/xzl-shou/gongshu/"],
+    detailUrls: [],
+    outputDirectory: fs.mkdtempSync(path.join(os.tmpdir(), "anjuke-e2big-")),
+    maxCases: 10,
+    caseType: "sale",
+    waitVerification: false,
+    runStatus: "complete",
+    restoreStatus: "restored",
+    candidateOutcomes,
+  };
+  const message = Buffer.from(JSON.stringify({ action: "run_anjuke_property", request }), "utf8");
+  const frame = Buffer.alloc(4 + message.length);
+  frame.writeUInt32LE(message.length, 0);
+  message.copy(frame, 4);
+  const result = spawnSync(process.execPath, [nativeHost], {
+    cwd: repoRoot,
+    input: frame,
+    env: { ...process.env, TIANYUAN_PRINT_SKILLS_DIR: path.join(repoRoot, "skills"), TIANYUAN_PYTHON_BIN: process.env.TIANYUAN_PYTHON_BIN || "python3" },
+    timeout: 120000,
+  });
+  assert.equal(result.status, 0, result.stderr.toString().slice(0, 400));
+  // 进度事件与最终结果都是独立帧，取 event === "complete" 的那一帧。
+  let offset = 0;
+  let payload = null;
+  while (result.stdout.length >= offset + 4) {
+    const frameLength = result.stdout.readUInt32LE(offset);
+    if (result.stdout.length < offset + 4 + frameLength) break;
+    const candidate = JSON.parse(result.stdout.subarray(offset + 4, offset + 4 + frameLength).toString("utf8"));
+    if (candidate.event === "complete" || candidate.phase === "failed") payload = candidate;
+    offset += 4 + frameLength;
+  }
+  assert.ok(payload, "run must produce a final frame");
+  assert.equal(payload.ok, true, `expected ok: ${payload.reason}`);
+  assert.equal(payload.status, "complete");
+  assert.equal(payload.caseCount, 8);
+  assert.ok(payload.evidencePath, "evidence index must be written");
+  assert.ok(payload.excelPath, "excel must be written");
+});
