@@ -1,12 +1,13 @@
 import { alibabaAuctionTemplate } from "./template.js";
-import { ALIBABA_REGION_CATALOG } from "./regions.js";
+// 区划目录已下沉到共享数据层，供阿里司法拍卖与阿里资产租赁两个模块复用。
+import { ALIBABA_REGION_CATALOG } from "../../data/china-regions.js";
 
 const PROPERTY_TYPE_CATEGORY = {
   residential: "50025969",
   commercial: "200782003",
 };
 // 阿里列表页的城市路径使用 GBK 百分号编码，不能用 encodeURIComponent 代替。
-// 全部条目由 regions.js 的 ALIBABA_REGION_CATALOG 生成：城市短名（去掉末尾“市”）
+// 全部条目由 china-regions.js 的 ALIBABA_REGION_CATALOG 生成：城市短名（去掉末尾“市”）
 // 逐字节 GBK 大写百分号编码；直辖市仅保留省级选择，故无城市条目。
 const ALIBABA_CITY_PATH_SUFFIX = {
   "130100": "%CA%AF%BC%D2%D7%AF",
