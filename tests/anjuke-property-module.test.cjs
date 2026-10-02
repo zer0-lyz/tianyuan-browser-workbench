@@ -87,6 +87,11 @@ test("安居客模块已接入侧栏、Native Helper 和本机安装同步", () 
   for (const id of requiredIds) {
     assert.match(renderedDom, new RegExp(`id="${id}"`), `sidepanel/template missing element id ${id}`);
   }
+  const templateIds = Array.from(template.matchAll(/id="([A-Za-z0-9]+)"/g)).map((match) => match[1])
+    .filter((id) => id !== "backFromAnjukeProperty" && id !== "openAnjukeProperty");
+  for (const id of templateIds) {
+    assert.ok(requiredIds.includes(id), `module.js elementMap is missing template id ${id}`);
+  }
   assert.match(skill, /当前标签页/);
   assert.match(installer, /anjuke-property\.js/);
   assert.match(installer, /anjuke-property-case-fetcher\/scripts\/fetch_anjuke_property_cases\.py/);
