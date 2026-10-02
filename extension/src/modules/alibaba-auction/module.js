@@ -378,6 +378,14 @@ const ALIBABA_CITY_PATH_SUFFIX = {
   "820008": "%C2%7D%B7%BD%9D%FA%B8%F7%CC%C3%85%5E",
 };
 const DEFAULT_SOURCE_URL = "https://sf.taobao.com/list/50025969__2.htm";
+// 阿里资产搜索入口（zc-paimai）：出售交易方式即司法拍卖标的（实测 40/40 为 sf-item），
+// 列表候选转成 sf_item 链接后复用既有详情核验与产物链路。
+const ZC_SEARCH_PATH = "/wow/pm/default/pc/zichansearch";
+const ZC_CATEGORY = {
+  residential: "206060601",
+  commercial: "206057102",
+};
+const ZC_MODE_SALE = "[1]";
 const DEFAULT_CONFIG = {
   province: "浙江省",
   provinceCode: "330000",
@@ -387,6 +395,7 @@ const DEFAULT_CONFIG = {
   districtCode: "",
   propertyType: "residential",
   status: "finished",
+  entry: "sf",
   keyword: "",
   startDate: "",
   endDate: "",
@@ -399,7 +408,7 @@ const DEFAULT_CONFIG = {
 
 const ALIBABA_PARAMETER_SNAPSHOT_FIELDS = [
   "province", "provinceCode", "city", "cityCode", "district", "districtCode",
-  "propertyType", "status", "keyword", "startDate", "endDate", "outputDirectory", "generateMap",
+  "propertyType", "status", "entry", "keyword", "startDate", "endDate", "outputDirectory", "generateMap",
 ];
 
 function parameterSnapshotMatches(config, snapshot) {
@@ -418,7 +427,7 @@ const RESULT_FIELDS = [
 function elementMap(documentRef) {
   const ids = [
     "openAlibabaAuction", "page-alibaba-auction", "backFromAlibabaAuction",
-    "alibabaAuctionProvince", "alibabaAuctionCity", "alibabaAuctionDistrict", "alibabaAuctionPropertyType",
+    "alibabaAuctionProvince", "alibabaAuctionCity", "alibabaAuctionDistrict", "alibabaAuctionEntry", "alibabaAuctionPropertyType",
     "alibabaAuctionStatus", "alibabaAuctionKeyword", "alibabaAuctionStartDate",
     "alibabaAuctionEndDate", "alibabaAuctionSourceUrl", "openAlibabaAuctionSource", "runAlibabaAuction",
     "saveAlibabaAuctionParams", "resetAlibabaAuctionParams", "alibabaAuctionParameterState", "alibabaAuctionParameterMessage",
@@ -477,6 +486,7 @@ function normalizeConfig(value = {}) {
       ? source.propertyType
       : DEFAULT_CONFIG.propertyType,
     status: ["finished", "all"].includes(source.status) ? source.status : DEFAULT_CONFIG.status,
+    entry: ["sf", "zc"].includes(source.entry) ? source.entry : DEFAULT_CONFIG.entry,
     keyword: String(source.keyword || "").trim().slice(0, 100),
     startDate: String(source.startDate || "").trim(),
     endDate: String(source.endDate || "").trim(),
@@ -488,7 +498,21 @@ function normalizeConfig(value = {}) {
   };
 }
 
-function buildSourceUrl(config) {
+function buildZcAuctionSourceUrl(config, page = 1) {
+  const url = new URL(`https://zc-paimai.taobao.com${ZC_SEARCH_PATH}`);
+  url.searchParams.set("disableNav", "YES");
+  url.searchParams.set("page", String(Math.max(1, Number(page) || 1)));
+  url.searchParams.set("fcatV4Ids", JSON.stringify([ZC_CATEGORY[config.propertyType] || ZC_CATEGORY.residential]));
+  url.searchParams.set("h_t_mode", ZC_MODE_SALE);
+  url.searchParams.set("structFieldMap", JSON.stringify({ h_t_mode: ZC_MODE_SALE }));
+  if ((config.status || "finished") === "finished") url.searchParams.set("statusOrders", '["2"]');
+  const locationCode = String(config.districtCode || config.cityCode || config.provinceCode || "").trim();
+  if (locationCode) url.searchParams.set("locationCodes", JSON.stringify([locationCode]));
+  return url.href;
+}
+
+function buildSourceUrl(config, page = 1) {
+  if (config.entry === "zc") return buildZcAuctionSourceUrl(config, page);
   const category = PROPERTY_TYPE_CATEGORY[config.propertyType] || PROPERTY_TYPE_CATEGORY.residential;
   const citySuffix = ALIBABA_CITY_PATH_SUFFIX[String(config.cityCode || "")] || "";
   // The numeric segment is part of Alibaba's real list path as well as the
@@ -813,6 +837,80 @@ async function extractAlibabaDetailPage() {
     detailContentReady,
     pageText: body.slice(0, 12000),
     attachments: attachments.slice(0, 8),
+    verificationRequired,
+  };
+}
+
+// 阿里资产搜索入口的列表提取：卡片结构是 Rax SPA（.pc-search-list--area），
+// 出售条目链接为 sf_item 详情页，字段映射成与 sf 列表提取器一致的形状后
+// 走同一条候选/详情/核验管线。
+function extractZcAuctionListPage() {
+  const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
+  const isVisible = (element) => {
+    if (!element) return false;
+    for (let current = element; current; current = current.parentElement) {
+      if (current.hasAttribute?.("hidden") || current.getAttribute?.("aria-hidden") === "true") return false;
+      const style = window.getComputedStyle(current);
+      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
+    }
+    const rect = element.getBoundingClientRect?.();
+    return rect ? rect.width > 0 && rect.height > 0 : element.getClientRects?.().length > 0;
+  };
+  const isRecommended = (element) => {
+    let current = element;
+    for (let depth = 0; current && depth < 8; depth += 1, current = current.parentElement) {
+      const marker = `${current.id || ""} ${current.className || ""} ${current.getAttribute?.("aria-label") || ""}`;
+      if (/recommend|guess|猜你喜欢|为您推荐|推荐更多/i.test(marker)) return true;
+    }
+    return false;
+  };
+  const parseCardAmount = (text, labels) => {
+    // 数字后禁止紧跟“年”，且与标签间隔有限，防止把“结束 2026年…”读成金额。
+    const pattern = new RegExp(`(?:${labels.join("|")})[^\\d¥￥]{0,6}[¥￥]?\\s*([\\d,]+(?:\\.\\d+)?)\\s*(万|亿|元)?(?!\\s*年)`);
+    const match = text.match(pattern);
+    if (!match) return "";
+    const number = Number(match[1].replace(/,/g, ""));
+    if (!Number.isFinite(number)) return "";
+    const scale = match[2] === "万" ? 10000 : match[2] === "亿" ? 100000000 : 1;
+    return String(Math.round(number * scale * 100) / 100);
+  };
+  const items = [];
+  const seen = new Set();
+  const root = document.querySelector('[class*="pc-search-list--area"]');
+  const cards = root ? [...root.children] : [];
+  for (const card of cards) {
+    // 出售入口只接受 sf-item 详情链接（实测 40/40）；zc-item 详情是另一套 DOM，不混入。
+    const anchor = card.querySelector('a[href*="sf-item.taobao.com/sf_item/"]');
+    if (!anchor || !isVisible(anchor) || isRecommended(anchor)) continue;
+    const href = anchor.href || "";
+    if (!href || seen.has(href)) continue;
+    const text = clean(card.innerText || card.textContent || "");
+    if (!text) continue;
+    seen.add(href);
+    // 出售卡片首行常是“支持贷款/放心付/低于评估价X%”徽标；标题取首个像地址的长行。
+    const lines = String(card.innerText || "").split("\n").map(clean).filter(Boolean);
+    const cardTitle = lines.find((line) => line.length >= 12 || /室|房|号|大厦|公寓|小区|厂房|车间|土地|转让/.test(line))
+      || lines.reduce((longest, line) => (line.length > longest.length ? line : longest), "");
+    items.push({
+      href,
+      text,
+      title: cardTitle || clean(anchor.innerText || anchor.textContent || "").split("\n")[0],
+      listedAmount: parseCardAmount(text, ["当前价", "拍下价", "成交价", "起拍价", "起始价"]),
+      listedBidCount: Number(text.match(/(\d+)\s*次出价/i)?.[1] || 0),
+      listedHasEndedText: /已结束/.test(text),
+      listedHasExplicitSoldPrice: /拍下价|成交价/.test(text),
+    });
+  }
+  const body = document.body?.innerText || "";
+  const totalMatch = body.match(/共\s*([\d,]+)\s*(条|个|件)/);
+  const verificationRequired = [...document.querySelectorAll('[class*="captcha"],[id*="captcha"],[class*="slider"],[id*="slider"],[class*="verify"],[id*="verify"]')].some(isVisible)
+    || /验证码|滑块|安全验证|访问验证|人机验证|请完成.{0,8}验证/.test(body);
+  return {
+    url: location.href,
+    title: document.title,
+    total: totalMatch ? totalMatch[1] : "",
+    items,
+    pageText: clean(body.slice(0, 1200)),
     verificationRequired,
   };
 }
@@ -1188,7 +1286,8 @@ function directListPageUrl(sourceUrl, page) {
 function isAlibabaListPage(value) {
   try {
     const url = new URL(String(value || ""));
-    return url.hostname === "sf.taobao.com" && /^\/list\//.test(url.pathname);
+    if (url.hostname === "sf.taobao.com" && /^\/list\//.test(url.pathname)) return true;
+    return url.hostname === "zc-paimai.taobao.com" && url.pathname === ZC_SEARCH_PATH;
   } catch {
     return false;
   }
@@ -1200,7 +1299,10 @@ function listPageMatchesRequest(value, request) {
     const current = new URL(value);
     const expected = new URL(buildSourceUrl(request));
     if (current.pathname !== expected.pathname) return false;
-    for (const key of ["location_code", "auction_start_from", "auction_start_to", "auction_start_seg"]) {
+    const comparedKeys = request.entry === "zc"
+      ? ["locationCodes", "fcatV4Ids", "h_t_mode", "statusOrders"]
+      : ["location_code", "auction_start_from", "auction_start_to", "auction_start_seg"];
+    for (const key of comparedKeys) {
       if ((current.searchParams.get(key) || "") !== (expected.searchParams.get(key) || "")) return false;
     }
     return true;
@@ -1919,6 +2021,8 @@ async function runCurrentTabScrape(context, request, emit = () => {}, control = 
     }
   }
   const currentListMatchesRequest = listPageMatchesRequest(tab.url, request);
+  const zcEntry = request.entry === "zc";
+  const listExtractor = zcEntry ? extractZcAuctionListPage : extractAlibabaListPage;
   let listSourceUrl = currentListMatchesRequest ? tab.url : directListPageUrl(request.sourceUrl, 1);
   let firstPage = 1;
   try {
@@ -1931,7 +2035,7 @@ async function runCurrentTabScrape(context, request, emit = () => {}, control = 
   const seen = new Set();
   let prefiltered = 0;
   const progress = (payload) => emit({ security: { credentialsReturned: false }, ...payload });
-  progress({ phase: "opening", percent: 2, message: isAlibabaListPage(tab.url) ? "正在读取当前阿里拍卖筛选结果…" : "正在当前浏览器打开阿里拍卖列表页…", fetched: 0, verified: 0, skipped: 0 });
+  progress({ phase: "opening", percent: 2, message: isAlibabaListPage(tab.url) ? (zcEntry ? "正在读取当前阿里资产出售筛选结果…" : "正在读取当前阿里拍卖筛选结果…") : (zcEntry ? "正在当前浏览器打开阿里资产搜索列表页…" : "正在当前浏览器打开阿里拍卖列表页…"), fetched: 0, verified: 0, skipped: 0 });
 
   for (let page = firstPage; page < firstPage + MAX_DIRECT_PAGES && !historyCandidates.length; page += 1) {
     try {
@@ -1941,30 +2045,33 @@ async function runCurrentTabScrape(context, request, emit = () => {}, control = 
         tab = await navigateCurrentTab(chromeRef, tab, directListPageUrl(listSourceUrl, page));
       }
       const expectedListUrl = directListPageUrl(listSourceUrl, page);
-      let listRead = await readAlibabaPageWithManualVerification(context, tab, extractAlibabaListPage, progress, "读取列表", control, { expectedUrl: expectedListUrl, pageKind: "list" });
+      let listRead = await readAlibabaPageWithManualVerification(context, tab, listExtractor, progress, "读取列表", control, { expectedUrl: expectedListUrl, pageKind: "list" });
       tab = listRead.tab;
       let extracted = listRead.value;
       let blocked = directPageLooksBlocked(extracted);
       if (blocked) throw new Error(blocked);
-      progress({
-        phase: "syncing_filters",
-        percent: Math.min(35, 8 + Math.round(((page - firstPage + 1) / MAX_DIRECT_PAGES) * 27)),
-        message: `正在同步阿里页面“拍卖状态”：${request.status === "finished" ? "已结束" : "全部状态"}…`,
-        page,
-        pages: MAX_DIRECT_PAGES,
-        fetched: 0,
-        verified: 0,
-        skipped: prefiltered,
-      });
-      const settled = await synchronizeAlibabaAuctionStatusOnTab(chromeRef, tab, request.status);
-      const statusSync = settled.statusSync;
-      if (statusSync.changed) {
-        tab = settled.tab;
-        listRead = await readAlibabaPageWithManualVerification(context, tab, extractAlibabaListPage, progress, "读取同步后的列表", control, { expectedUrl: tab.url, pageKind: "list" });
-        tab = listRead.tab;
-        extracted = listRead.value;
-        blocked = directPageLooksBlocked(extracted);
-        if (blocked) throw new Error(blocked);
+      // 阿里资产入口的状态筛选走 URL（statusOrders），页面没有可同步的状态控件。
+      if (!zcEntry) {
+        progress({
+          phase: "syncing_filters",
+          percent: Math.min(35, 8 + Math.round(((page - firstPage + 1) / MAX_DIRECT_PAGES) * 27)),
+          message: `正在同步阿里页面“拍卖状态”：${request.status === "finished" ? "已结束" : "全部状态"}…`,
+          page,
+          pages: MAX_DIRECT_PAGES,
+          fetched: 0,
+          verified: 0,
+          skipped: prefiltered,
+        });
+        const settled = await synchronizeAlibabaAuctionStatusOnTab(chromeRef, tab, request.status);
+        const statusSync = settled.statusSync;
+        if (statusSync.changed) {
+          tab = settled.tab;
+          listRead = await readAlibabaPageWithManualVerification(context, tab, listExtractor, progress, "读取同步后的列表", control, { expectedUrl: tab.url, pageKind: "list" });
+          tab = listRead.tab;
+          extracted = listRead.value;
+          blocked = directPageLooksBlocked(extracted);
+          if (blocked) throw new Error(blocked);
+        }
       }
       const pageItems = Array.isArray(extracted.items) ? extracted.items : [];
       let newItems = 0;
@@ -2227,6 +2334,7 @@ export const alibabaAuctionModule = {
         provinceCode: elements.alibabaAuctionProvince.value,
         cityCode: elements.alibabaAuctionCity.value,
         districtCode: elements.alibabaAuctionDistrict.value,
+        entry: elements.alibabaAuctionEntry.value,
         propertyType: elements.alibabaAuctionPropertyType.value,
         status: elements.alibabaAuctionStatus.value,
         keyword: elements.alibabaAuctionKeyword.value,
@@ -2239,6 +2347,7 @@ export const alibabaAuctionModule = {
 
     function renderConfig() {
       renderRegionOptions();
+      elements.alibabaAuctionEntry.value = config.entry;
       elements.alibabaAuctionPropertyType.value = config.propertyType;
       elements.alibabaAuctionStatus.value = config.status;
       elements.alibabaAuctionKeyword.value = config.keyword;
@@ -2576,9 +2685,13 @@ export const alibabaAuctionModule = {
         if (!requestConfig) return;
         let tab = await getCurrentBrowserTab(context.chrome);
         tab = await navigateCurrentTab(context.chrome, tab, buildSourceUrl(requestConfig));
-        const settled = await synchronizeAlibabaAuctionStatusOnTab(context.chrome, tab, requestConfig.status);
-        tab = settled.tab;
-        setMessage(elements.alibabaAuctionParameterMessage, `已打开阿里拍卖列表页，并同步“拍卖状态”为${requestConfig.status === "finished" ? "已结束" : "全部状态"}。等待结果加载完成后即可开始抓取。`, "ok");
+        if (requestConfig.entry !== "zc") {
+          const settled = await synchronizeAlibabaAuctionStatusOnTab(context.chrome, tab, requestConfig.status);
+          tab = settled.tab;
+        }
+        setMessage(elements.alibabaAuctionParameterMessage, requestConfig.entry === "zc"
+          ? "已打开阿里资产搜索列表页（出售）。等待结果加载完成后即可开始抓取。"
+          : `已打开阿里拍卖列表页，并同步“拍卖状态”为${requestConfig.status === "finished" ? "已结束" : "全部状态"}。等待结果加载完成后即可开始抓取。`, "ok");
         context.setStatus("阿里拍卖检索页已在当前浏览器打开", "ok");
       } catch (error) {
         const errorCode = error?.code && error.code !== error?.message ? `${error.code}：` : "";
@@ -2606,6 +2719,7 @@ export const alibabaAuctionModule = {
           throw failure;
         }
         if (!isAlibabaListPage(tab.url)) return { ok: false, skipped: true };
+        if (requestConfig.entry === "zc") return { ok: false, skipped: true };
         const settled = await synchronizeAlibabaAuctionStatusOnTab(context.chrome, tab, requestConfig.status);
         tab = settled.tab;
         setMessage(elements.alibabaAuctionParameterMessage, `已同步阿里页面“拍卖状态”为${requestConfig.status === "finished" ? "已结束" : "全部状态"}。`, "ok");
@@ -2831,7 +2945,7 @@ export const alibabaAuctionModule = {
           setMessage(elements.alibabaAuctionResultMessage, "已清空本地结果。", "");
         });
         for (const id of [
-          "alibabaAuctionPropertyType", "alibabaAuctionKeyword",
+          "alibabaAuctionEntry", "alibabaAuctionPropertyType", "alibabaAuctionKeyword",
           "alibabaAuctionStartDate", "alibabaAuctionEndDate",
         ]) {
           context.scope.on(elements[id], "change", syncConfigFromInputs);
@@ -2892,6 +3006,8 @@ export {
   normalizeConfig,
   parameterSnapshotMatches,
   propertyTypeLabel,
+  buildZcAuctionSourceUrl,
+  extractZcAuctionListPage,
   synchronizeAlibabaAuctionStatus,
   synchronizeAlibabaAuctionStatusOnTab,
   executeCurrentTab,
