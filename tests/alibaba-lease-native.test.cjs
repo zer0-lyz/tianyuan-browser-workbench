@@ -212,6 +212,44 @@ test("alibaba lease renderResultHtml formats numeric cells with thousand separat
   assert.equal(html.includes(">16300<"), false);
 });
 
+test("alibaba lease map page ships the enhanced auction-parity features", () => {
+  const mapHtml = helper.renderLeaseMapHtml({
+    stats: { total: 1, located: 1, unlocated: 0 },
+    points: [{ id: "1", title: "冠盛大厦1306室", address: "上城区望江东路299号", district: "上城区", community: "冠盛大厦", houseUsage: "办公", propertyType: "商业用房", endTime: "2026-09-30", transactionAmount: 43586.84, monthlyUnitPrice: 69.96, buildingArea: 51.92, leaseTermYears: 1, resultStatus: "成交", coordinateStatus: "已定位", longitude: 120.2, latitude: 30.28, url: "https://zc-item.taobao.com/auction/1.htm" }],
+    unlocated: [],
+    mapConfig: { amapEnabled: false, amapWebKey: "" },
+  }, { district: "上城区" });
+  for (const marker of [
+    "阿里资产租赁地图", "map-provider-select", "tile-status", "marker-dialog", "distance-panel",
+    "reference-marker-list", "ALIBABA_MAP_DISTANCE_REQUEST", "ALIBABA_MAP_SELECTION_CHANGED",
+    "ALIBABA_MAP_SET_SELECTED", "tianyuan-alibaba-lease-map-reference-v1", "成交价（首年租金）",
+    "月租金单价：", "首年租金：高到低", "租期：",
+  ]) assert.ok(mapHtml.includes(marker), `map missing ${marker}`);
+  assert.equal(mapHtml.includes("阿里司法拍卖"), false);
+  assert.equal(mapHtml.includes("tianyuan-alibaba-auction"), false);
+});
+
+test("alibaba lease result page embeds the map with selection and distance wiring", () => {
+  const html = helper.renderResultHtml(
+    [
+      { title: "定位案例", transactionAmount: 43586.84, endTime: "2026-09-30", longitude: 120.2, latitude: 30.28, url: "https://zc-item.taobao.com/auction/1.htm" },
+      { title: "未定位案例", transactionAmount: 16300, endTime: "2026-09-24", longitude: null, latitude: null, url: "" },
+    ],
+    helper.normalizeRequest({ startDate: "2026-01-01", endDate: "2026-10-02" }),
+    { candidates: 5, skipped: 2 },
+  );
+  for (const marker of [
+    "alibaba-lease-map-frame", "alibaba-lease-map-resize-handle", "show-selected-distances",
+    "clear-selection", "clear-filters", "result-select", "ALIBABA_MAP_SET_SELECTED",
+    "ALIBABA_MAP_DISTANCE_REQUEST", "ALIBABA_MAP_SELECTION_CHANGED", "16,300", "43,586.84",
+    "该记录没有坐标，无法在地图上定位",
+  ]) assert.ok(html.includes(marker), `result page missing ${marker}`);
+  assert.match(html, /地图（1 条可定位结果）/);
+  // 未定位记录不渲染 iframe 时按钮仍存在但禁用态由脚本控制；iframe 缺失时显示提示。
+  const emptyHtml = helper.renderResultHtml([], helper.normalizeRequest({ generateMap: false }), {});
+  assert.match(emptyHtml, /本次未生成地图/);
+});
+
 test("alibaba lease renderResultHtml escapes untrusted text", () => {
   const html = helper.renderResultHtml(
     [{ title: '<script>alert("x")</script>', url: "javascript:alert(1)" }],
