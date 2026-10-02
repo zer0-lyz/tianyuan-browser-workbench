@@ -343,11 +343,14 @@ async function extractLeaseDetailPage() {
     const scale = match[2] === "万" ? 10000 : match[2] === "亿" ? 100000000 : 1;
     return String(Math.round(number * scale * 100) / 100);
   };
-  const soldPriceMatch = body.match(/拍下价\s*[：:]?\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)\s*(万|亿|元)?/);
-  const currentPriceMatch = body.match(/当前价\s*[：:]?\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)\s*(万|亿|元)?/);
-  const startPriceMatch = body.match(/起始价\s*[：:]?\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)\s*(万|亿|元)?/);
-  const valuationMatch = body.match(/(?:评估价|市场价)\s*[：:]?\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)\s*(万|亿|元)?/);
-  const depositMatch = body.match(/保证金\s*[：:]?\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)\s*(万|亿|元)?/);
+  // 金额标签与数字之间只允许空白/货币符：中间夹“待说明”等占位文本时不得跨字段捕数
+  // （实测“评估价 待说明 结束 2026年…”曾被误读为 0）。
+  const pricePattern = (label) => new RegExp(`${label}\\s*[：:]?\\s*[¥￥]?\\s*([\\d,]+(?:\\.\\d+)?)\\s*(万|亿|元)?(?!\\s*年)`);
+  const soldPriceMatch = body.match(pricePattern("拍下价"));
+  const currentPriceMatch = body.match(pricePattern("当前价"));
+  const startPriceMatch = body.match(pricePattern("起始价"));
+  const valuationMatch = body.match(pricePattern("(?:评估价|市场价)"));
+  const depositMatch = body.match(pricePattern("保证金"));
   const endTimeMatch = body.match(/结束时间\s*[：:]?\s*([0-9]{4}[\/-][0-9]{1,2}[\/-][0-9]{1,2}(?:\s+[0-9:]{4,8})?)/);
   const bidCountMatch = body.match(/竞买记录\s*[（(]\s*(\d+)\s*[）)]/);
   const signupMatch = body.match(/(\d+)\s*人报名/);
@@ -428,7 +431,11 @@ async function extractLeaseDetailPage() {
     viewCount: Number(viewMatch?.[1] || 0),
     reminderCount: Number(reminderMatch?.[1] || 0),
     endTime: clean(endTimeMatch?.[1] || ""),
-    location: clean(locationMatch?.[1] || ""),
+    // 详情页位置段常带“地图标注仅供参考，具体位置以标的物实际为准”免责文案，剥离后再入库。
+    location: clean((locationMatch?.[1] || "")
+      .replace(/地图标注[^。；]{0,40}?为准[。.]?/g, "")
+      .replace(/地图标注仅供参考/g, "")
+      .replace(/[，,、；;\s]+$/g, "")),
     disposalOrg: clean(orgMatch?.[1] || ""),
     longitude: coordinates?.longitude ?? null,
     latitude: coordinates?.latitude ?? null,
@@ -500,7 +507,11 @@ function parseLeaseDetail(detail, request = {}) {
     city: String(request.city || ""),
     district: String(request.district || ""),
     community: String(detail.community || ""),
-    location: String(detail.location || ""),
+    location: String(detail.location || "")
+      .replace(/地图标注[^。；]{0,40}?为准[。.]?/g, "")
+      .replace(/地图标注仅供参考/g, "")
+      .replace(/[，,、；;\s]+$/g, "")
+      .trim(),
     transferMode: String(detail.transferMode || ""),
     propertyType: String(detail.propertyType || ""),
     houseUsage: String(detail.houseUsage || ""),
