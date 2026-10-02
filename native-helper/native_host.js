@@ -412,6 +412,7 @@ const DEPRECIATION_CAPEX_ACTIONS = Object.freeze({
   depreciation_capex_forecast_write_params: "write_params",
   depreciation_capex_forecast_write_stock: "write_stock",
   depreciation_capex_forecast_write_added: "write_added",
+  depreciation_capex_forecast_read_input: "read_input",
   depreciation_capex_forecast_preflight: "preflight",
   depreciation_capex_forecast_run: "run",
   depreciation_capex_forecast_run_with_details: "run_with_details",
@@ -3245,7 +3246,14 @@ function runAnjukeProperty(message, emit) {
         resolve(result);
       }
     };
-    const mapAssetsDirectory = anjukeProperty.mapAssetsDir();
+    let mapAssetsDirectory = "";
+    try {
+      mapAssetsDirectory = typeof anjukeProperty.mapAssetsDir === "function" ? anjukeProperty.mapAssetsDir() : "";
+    } catch (error) {
+      // 本机目录里的 native_host.js 与 anjuke-property.js 版本可能错位（热补丁部署）；
+      // 地图资产缺失只会让地图降级，绝不能让整个抓取无响应。
+      mapAssetsDirectory = "";
+    }
     const runnerRequest = mapAssetsDirectory ? { ...request, mapAssetsDir: mapAssetsDirectory } : { ...request };
     const args = [ANJUKE_PROPERTY_SCRIPT, "--request-json", JSON.stringify(runnerRequest)];
     const launch = processLauncher.commandLaunchSpec(PYTHON_BIN, args);
