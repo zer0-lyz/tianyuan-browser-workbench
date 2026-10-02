@@ -294,7 +294,7 @@ export const anjukePropertyModule = {
     let results = [];
     let paths = { excelPath: "", csvPath: "", htmlDirectory: "", resultHtmlPath: "", mapPath: "" };
     let running = false;
-    let runControl = { paused: false, stopRequested: false, resumeResolvers: [] };
+    let runControl = { paused: false, stopRequested: false, resumeResolvers: [], verificationWaitUsedMs: 0 };
 
     function state() {
       return { ...config, results, ...paths, appliedConfig };
@@ -364,10 +364,10 @@ export const anjukePropertyModule = {
       elements.anjukePropertyProgressPercent.textContent = `${percent}%`;
       elements.anjukePropertyProgressBar.style.width = `${percent}%`;
       elements.anjukePropertyProgressBar.parentElement.setAttribute("aria-valuenow", String(percent));
-      elements.anjukePropertyProgressFetched.textContent = String(payload.fetched ?? 0);
-      elements.anjukePropertyProgressWritten.textContent = String(payload.written ?? 0);
-      elements.anjukePropertyProgressSkipped.textContent = String(payload.skipped ?? 0);
-      elements.anjukePropertyProgressBlocked.textContent = String(payload.blocked ?? 0);
+      if (payload.fetched !== undefined) elements.anjukePropertyProgressFetched.textContent = String(payload.fetched);
+      if (payload.written !== undefined) elements.anjukePropertyProgressWritten.textContent = String(payload.written);
+      if (payload.skipped !== undefined) elements.anjukePropertyProgressSkipped.textContent = String(payload.skipped);
+      if (payload.blocked !== undefined) elements.anjukePropertyProgressBlocked.textContent = String(payload.blocked);
       if (payload.message) elements.anjukePropertyResultStatus.textContent = payload.message;
     }
 
@@ -527,12 +527,38 @@ export const anjukePropertyModule = {
       });
     }
 
+    async function focusTab(tabId) {
+      try {
+        const tab = await context.chrome.tabs.update(tabId, { active: true });
+        if (tab?.windowId !== undefined) {
+          await context.chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+        }
+      } catch {
+        // Tab may be gone; the wait loop will still honour its deadline.
+      }
+    }
+
+    // 安居客的反爬验证是会话级的：每个详情候选都可能触发等待。
+    // 给整轮设一个总预算，超时后剩余候选直接记为验证阻断，避免数十分钟假死。
+    const VERIFICATION_TOTAL_BUDGET_MS = 600000;
+
+    function verificationBudgetRemainingMs() {
+      runControl.verificationWaitUsedMs = runControl.verificationWaitUsedMs || 0;
+      return Math.max(0, VERIFICATION_TOTAL_BUDGET_MS - runControl.verificationWaitUsedMs);
+    }
+
     async function readDetailOutcome(tabId, request) {
-      const deadline = Date.now() + (request.waitVerification ? request.verificationTimeout * 1000 : 10000);
+      if (request.waitVerification && verificationBudgetRemainingMs() <= 0) {
+        return { captureStatus: "blocked_verification", errorCode: "ANJUKE_VERIFICATION_BUDGET_EXHAUSTED", text: "", html: "", title: "", location: "", pageUrl: "" };
+      }
+      const budgetMs = verificationBudgetRemainingMs();
+      const waitCeiling = request.waitVerification ? Math.min(request.verificationTimeout * 1000, budgetMs) : 0;
+      const deadline = Date.now() + (waitCeiling > 0 ? waitCeiling : 10000);
       const contentSettleDeadline = Math.min(deadline, Date.now() + 15000);
+      const remainingText = () => `剩余 ${Math.max(0, Math.ceil((deadline - Date.now()) / 1000))} 秒`;
       while (Date.now() < deadline) {
         const allTabs = await context.chrome.tabs.query({});
-        const verificationPopup = allTabs.some((candidate) => {
+        const verificationTab = allTabs.find((candidate) => {
           if (candidate.id === tabId) return false;
           try {
             const candidateUrl = new URL(candidate.url || "");
@@ -542,22 +568,27 @@ export const anjukePropertyModule = {
             return false;
           }
         });
-        if (verificationPopup) {
+        if (verificationTab?.id) {
           if (!request.waitVerification || Date.now() >= deadline - 2000) {
             return { captureStatus: "blocked_verification", errorCode: "ANJUKE_DETAIL_VERIFICATION_REQUIRED", text: "", html: "", title: "", location: "", pageUrl: "" };
           }
-          setMessage(elements.anjukePropertyResultMessage, "安居客验证页面已打开，请完成验证，脚本会继续等待。", "warn");
+          await focusTab(verificationTab.id);
+          setMessage(elements.anjukePropertyResultMessage, "安居客验证页已在浏览器中聚焦：请完成滑块验证（也可以关闭该验证标签页），脚本会继续等待。", "warn");
+          renderProgress({ phase: "capturing", percent: 12, message: `等待安居客验证完成…（${remainingText()}）` });
+          runControl.verificationWaitUsedMs = (runControl.verificationWaitUsedMs || 0) + 2000;
           await new Promise((resolve) => window.setTimeout(resolve, 2000));
           continue;
         }
         const [result] = await context.chrome.scripting.executeScript({ target: { tabId }, func: readAnjukeDetailTab });
         const detail = result?.result;
         if (detail?.verificationRequired) {
-          if (!request.waitVerification) {
+          if (!request.waitVerification || Date.now() >= deadline - 2000) {
             return { captureStatus: "blocked_verification", errorCode: "ANJUKE_DETAIL_VERIFICATION_REQUIRED", ...detail };
           }
-          setMessage(elements.anjukePropertyResultMessage, "详情页需要验证，请在当前标签页完成验证，脚本会继续等待。", "warn");
-          renderProgress({ phase: "capturing", percent: 12, message: "等待当前标签页完成详情页验证…" });
+          await focusTab(tabId);
+          setMessage(elements.anjukePropertyResultMessage, "安居客要求验证：已在浏览器中聚焦当前标签页，请完成滑块验证，脚本会继续等待。", "warn");
+          renderProgress({ phase: "capturing", percent: 12, message: `详情页需要验证，请在已聚焦的标签页完成验证…（${remainingText()}）` });
+          runControl.verificationWaitUsedMs = (runControl.verificationWaitUsedMs || 0) + 2000;
           await new Promise((resolve) => window.setTimeout(resolve, 2000));
           continue;
         }
@@ -671,7 +702,7 @@ export const anjukePropertyModule = {
         return;
       }
       running = true;
-      runControl = { paused: false, stopRequested: false, resumeResolvers: [] };
+      runControl = { paused: false, stopRequested: false, resumeResolvers: [], verificationWaitUsedMs: 0 };
       renderRunButtons();
       renderProgress({ phase: "opening", percent: 1, fetched: 0, written: 0, skipped: 0, blocked: 0, message: "正在读取当前安居客标签页…" });
       setMessage(elements.anjukePropertyResultMessage, "抓取将在当前浏览器标签页中执行；遇到验证会等待人工完成。", "warn");
@@ -722,7 +753,7 @@ export const anjukePropertyModule = {
         context.setStatus("安居客抓取失败", "error");
       } finally {
         running = false;
-        runControl = { paused: false, stopRequested: false, resumeResolvers: [] };
+        runControl = { paused: false, stopRequested: false, resumeResolvers: [], verificationWaitUsedMs: 0 };
         renderRunButtons();
       }
     }
