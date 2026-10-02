@@ -3255,7 +3255,12 @@ function runAnjukeProperty(message, emit) {
       mapAssetsDirectory = "";
     }
     const runnerRequest = mapAssetsDirectory ? { ...request, mapAssetsDir: mapAssetsDirectory } : { ...request };
-    const args = [ANJUKE_PROPERTY_SCRIPT, "--request-json", JSON.stringify(runnerRequest)];
+    // 请求里带整页 HTML（多候选可达数 MB），超出 macOS 约 1MB 的 execve 参数上限（E2BIG），
+    // 必须经临时文件传给 Python，不能拼进 argv。
+    const requestDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "anjuke-request-"));
+    const requestFile = path.join(requestDirectory, "request.json");
+    fs.writeFileSync(requestFile, JSON.stringify(runnerRequest));
+    const args = [ANJUKE_PROPERTY_SCRIPT, "--request-file", requestFile];
     const launch = processLauncher.commandLaunchSpec(PYTHON_BIN, args);
     const child = spawn(launch.command, launch.args, {
       cwd: path.dirname(ANJUKE_PROPERTY_SCRIPT),
@@ -3283,6 +3288,7 @@ function runAnjukeProperty(message, emit) {
     readline.createInterface({ input: child.stderr }).on("line", () => {});
     child.on("error", (error) => complete({ ok: false, reason: error?.code === "ENOENT" ? "PYTHON_NOT_FOUND" : anjukeProperty.safeError(error) }));
     child.on("close", (code, signal) => {
+      fs.rmSync(requestDirectory, { recursive: true, force: true });
       if (settled) return;
       if (!finalPayload) {
         complete({ ok: false, reason: code === 0 ? "ANJUKE_RESULT_MISSING" : "ANJUKE_RUNNER_FAILED", exitCode: code, signal: signal || null });

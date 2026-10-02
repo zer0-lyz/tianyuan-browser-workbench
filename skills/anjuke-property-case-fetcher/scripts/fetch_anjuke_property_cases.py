@@ -962,6 +962,7 @@ def open_only(url: str, user_data_dir: str) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="抓取安居客物业出售/租赁案例并输出证据和 A-W Excel")
     parser.add_argument("--request-json", default="")
+    parser.add_argument("--request-file", default="")
     parser.add_argument("--list-url", action="append", default=[])
     parser.add_argument("--detail-url", action="append", default=[])
     parser.add_argument("--keyword", default="")
@@ -981,7 +982,10 @@ def main() -> int:
         if not args.url or not args.user_data_dir:
             return 1
         return open_only(args.url, args.user_data_dir)
-    if args.request_json:
+    if args.request_file:
+        # 大请求（多候选 × 整页 HTML）会超出命令行参数长度上限，必须走临时文件。
+        request = json.loads(Path(args.request_file).read_text(encoding="utf-8"))
+    elif args.request_json:
         request = json.loads(args.request_json)
     else:
         request = {
