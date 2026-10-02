@@ -1038,7 +1038,7 @@ export const alibabaLeaseModule = {
   manifest: {
     id: "alibaba-lease",
     type: "feature",
-    stage: "beta",
+    stage: "stable",
     route: "alibaba-lease",
     displayName: "阿里资产租赁",
     messageNamespace: "alibaba-lease",

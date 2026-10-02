@@ -37,7 +37,7 @@ assert.equal(alibabaLeaseModule.manifest.route, "alibaba-lease");
 assert.equal(alibabaLeaseModule.manifest.messageNamespace, "alibaba-lease");
 assert.equal(alibabaLeaseModule.manifest.entryElementId, "openAlibabaLease");
 assert.equal(alibabaLeaseModule.manifest.pageElementId, "page-alibaba-lease");
-assert.equal(alibabaLeaseModule.manifest.stage, "beta");
+assert.equal(alibabaLeaseModule.manifest.stage, "stable");
 assert.ok(fs.existsSync(path.join(moduleRoot, "template.js")));
 assert.ok(fs.existsSync(path.join(moduleRoot, "styles.css")));
 
