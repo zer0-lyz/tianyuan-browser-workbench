@@ -213,7 +213,9 @@ async function captureAnjukeCurrentTab(options = {}) {
       && new RegExp(`/${sourcePath.split("/")[1]}/`, "i").test(url.pathname)
       && !isRecommendationUrl(url)
       );
-    const url = canonicalDetailUrl(candidates.find((candidate) => isDetailUrl(candidate)) || candidates[0]);
+    const picked = candidates.find((candidate) => isDetailUrl(candidate)) || candidates[0];
+    if (!picked) continue;
+    const url = canonicalDetailUrl(picked);
     if (!url || (keyword && !cardText.includes(keyword) && !url.href.includes(keyword))) continue;
     if (seen.has(url.href)) continue;
     seen.add(url.href);
@@ -601,6 +603,9 @@ export const anjukePropertyModule = {
           args: [{ maxCases: request.maxCases, keyword: request.keyword }],
         });
         const capture = result?.result;
+        if (capture === undefined) {
+          throw new Error(`ANJUKE_INJECT_SCRIPT_FAILED:${String(result?.error || "页面脚本无返回，请重试或更换列表页").slice(0, 160)}`);
+        }
         if (capture?.ok) {
           const outcomes = [];
           let stopped = false;
