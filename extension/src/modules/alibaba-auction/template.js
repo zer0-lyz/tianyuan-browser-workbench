@@ -5,7 +5,7 @@ export const alibabaAuctionTemplate = `
   <div class="page-heading alibaba-auction-heading">
     <div>
       <h2>阿里司法拍卖</h2>
-      <p>在当前浏览器标签页登录后，由固定脚本自动读取列表并核验成交详情</p>
+      <p>登录后由固定脚本读取列表并核验成交详情；可选阿里资产搜索入口抓出售案例</p>
     </div>
     <button id="backFromAlibabaAuction" type="button" class="secondary">返回首页</button>
   </div>
@@ -22,6 +22,10 @@ export const alibabaAuctionTemplate = `
       <label><span>省份</span><select id="alibabaAuctionProvince" aria-label="省份"><option value="330000">浙江省</option></select></label>
       <label><span>城市</span><select id="alibabaAuctionCity" aria-label="城市"><option value="330100">杭州市</option></select></label>
       <label><span>区县</span><select id="alibabaAuctionDistrict" aria-label="区县" disabled><option value="">不限定区县</option></select></label>
+      <label><span>列表入口</span><select id="alibabaAuctionEntry" aria-label="列表入口">
+        <option value="sf">司法拍卖列表</option>
+        <option value="zc">阿里资产搜索（出售）</option>
+      </select></label>
       <label><span>物业类型</span><select id="alibabaAuctionPropertyType">
         <option value="residential">住宅用房</option>
         <option value="commercial">商业房</option>
