@@ -16,6 +16,7 @@ const DEFAULT_CONFIG = {
   headed: true,
   userDataDir: DEFAULT_PROFILE_PATH,
   outputDirectory: "",
+  autoOpenResult: true,
 };
 
 function elementMap(documentRef) {
@@ -29,7 +30,7 @@ function elementMap(documentRef) {
     "stopAnjukeProperty", "clearAnjukePropertyResults", "anjukePropertyResultCount", "anjukePropertyResultStatus",
     "anjukePropertyProgressPhase", "anjukePropertyProgressPercent", "anjukePropertyProgressBar",
     "anjukePropertyProgressFetched", "anjukePropertyProgressWritten", "anjukePropertyProgressSkipped",
-    "anjukePropertyProgressBlocked", "anjukePropertyResultMessage",
+    "anjukePropertyProgressBlocked", "anjukePropertyAutoOpenResult", "anjukePropertyResultMessage",
   ];
   return Object.fromEntries(ids.map((id) => [id, documentRef.getElementById(id)]));
 }
@@ -78,13 +79,13 @@ function isAnjukeDetailUrl(value) {
   } catch {
     return false;
   }
-  return url.protocol === "https:"
-    && /(^|\.)anjuke\.com$/i.test(url.hostname)
-    && (/\/prop\/view\/[A-Za-z0-9_-]+/i.test(url.pathname)
-      || /\/(?:fang5|sale|rent)\/[A-Za-z0-9_-]+/i.test(url.pathname)
-      || /\/(?:xzl-shou|xzl-zu|sp-shou|sp-zu|sp-rent)\/(?:[^/]+\/)*\d+(?:\/|$)/i.test(url.pathname)
-      || /\/\d+(?:\/|$)/.test(url.pathname)
-      || /\.html(?:$|\?)/i.test(url.pathname));
+  if (url.protocol !== "https:" || !/(^|\.)anjuke\.com$/i.test(url.hostname)) return false;
+  return /\/prop\/view\/[A-Za-z0-9_-]+/i.test(url.pathname)
+    || /\/(?:fang5|sale|rent)\/[A-Za-z0-9_-]+/i.test(url.pathname)
+    // 商业地产详情是 /{频道}/{≥7位房源id}/；分页（如 gongshu-p2）与列表根凭位数即可区分。
+    || /\/(?:xzl-shou|xzl-zu|sp-shou|sp-zu|sp-rent)\/(?:[^/]+\/)*\d{7,}(?:\/|$)/i.test(url.pathname)
+    || /\/\d{7,}(?:\/|$)/.test(url.pathname)
+    || /\.html(?:$|\?)/i.test(url.pathname);
 }
 
 function inferCaseType(url) {
@@ -112,6 +113,7 @@ function normalizeConfig(value = {}) {
     headed: true,
     userDataDir: String(source.userDataDir || DEFAULT_PROFILE_PATH).trim(),
     outputDirectory: String(source.outputDirectory || "").trim(),
+    autoOpenResult: source.autoOpenResult !== false,
   };
 }
 
@@ -147,8 +149,8 @@ async function captureAnjukeCurrentTab(options = {}) {
   const blocked = (text) => verificationMarkers.some((marker) => text.includes(marker));
   const isDetailUrl = (url) => /\/prop\/view\/[A-Za-z0-9_-]+/i.test(url.pathname)
     || /\/(?:fang5|sale|rent)\/[A-Za-z0-9_-]+/i.test(url.pathname)
-    || /\/(?:xzl-shou|xzl-zu|sp-shou|sp-zu|sp-rent)\/(?:[^/]+\/)*\d+(?:\/|$)/i.test(url.pathname)
-    || /\/\d+(?:\/|$)/.test(url.pathname)
+    || /\/(?:xzl-shou|xzl-zu|sp-shou|sp-zu|sp-rent)\/(?:[^/]+\/)*\d{7,}(?:\/|$)/i.test(url.pathname)
+    || /\/\d{7,}(?:\/|$)/.test(url.pathname)
     || /\.html(?:$|\?)/i.test(url.pathname);
   const currentText = bodyText();
   const sourcePath = location.pathname.replace(/\/+$/, "");
@@ -196,30 +198,31 @@ async function captureAnjukeCurrentTab(options = {}) {
     }
     return anchor.parentElement;
   };
+  // 真实列表页的详情入口就是 /{频道}/{≥7位房源id}/ 的标题链接；分页（gongshu-p2）、
+  // 列表根与推荐位链接都不能当候选，找不到详情形链接的卡片直接跳过，不做兜底替换。
   for (const anchor of anchors) {
-    const card = cardOf(anchor);
-    const cardText = cardTextOf(card);
-    if (!card || !/(?:㎡|平米|平方米)/.test(cardText) || !/(?:万|元\/㎡|元\/月)/.test(cardText)) continue;
-    const candidates = Array.from(card.querySelectorAll("a[href]")).map((candidate) => {
-      try {
-        const url = new URL(candidate.href, location.href);
-        url.hash = "";
-        return url;
-      } catch {
-        return null;
-      }
-    }).filter((url) => url && url.protocol === "https:" && /(^|\.)anjuke\.com$/i.test(url.hostname)
-      && url.pathname.replace(/\/$/, "") !== listPath
-      && new RegExp(`/${sourcePath.split("/")[1]}/`, "i").test(url.pathname)
-      && !isRecommendationUrl(url)
-      );
-    const picked = candidates.find((candidate) => isDetailUrl(candidate)) || candidates[0];
-    if (!picked) continue;
-    const url = canonicalDetailUrl(picked);
-    if (!url || (keyword && !cardText.includes(keyword) && !url.href.includes(keyword))) continue;
-    if (seen.has(url.href)) continue;
-    seen.add(url.href);
-    detailUrls.push(url.href);
+    let href = anchor.getAttribute("href") || "";
+    if (!href || href.toLowerCase().startsWith("javascript:")) continue;
+    let url;
+    try {
+      url = new URL(anchor.href, location.href);
+    } catch {
+      continue;
+    }
+    url.hash = "";
+    if (url.protocol !== "https:" || !/(^|\.)anjuke\.com$/i.test(url.hostname)) continue;
+    if (url.pathname.replace(/\/$/, "") === listPath) continue;
+    if (!new RegExp(`/${sourcePath.split("/")[1]}/`, "i").test(url.pathname)) continue;
+    if (isRecommendationUrl(url)) continue;
+    if (!isDetailUrl(url)) continue;
+    const canonical = canonicalDetailUrl(url);
+    if (seen.has(canonical.href)) continue;
+    if (keyword) {
+      const cardText = cardTextOf(cardOf(anchor));
+      if (!cardText.includes(keyword) && !canonical.href.includes(keyword)) continue;
+    }
+    seen.add(canonical.href);
+    detailUrls.push(canonical.href);
     if (detailUrls.length >= candidateLimit) break;
   }
   if (!detailUrls.length) {
@@ -306,6 +309,7 @@ export const anjukePropertyModule = {
         screenshot: elements.anjukePropertyScreenshot.checked,
         waitVerification: elements.anjukePropertyWaitVerification.checked,
         outputDirectory: elements.anjukePropertyOutputDirectory.value,
+        autoOpenResult: elements.anjukePropertyAutoOpenResult.checked,
         userDataDir: config.userDataDir,
       });
     }
@@ -333,6 +337,7 @@ export const anjukePropertyModule = {
       elements.anjukePropertyScreenshot.checked = config.screenshot;
       elements.anjukePropertyWaitVerification.checked = config.waitVerification;
       elements.anjukePropertyOutputDirectory.value = config.outputDirectory;
+      elements.anjukePropertyAutoOpenResult.checked = config.autoOpenResult;
       renderParameterState();
     }
 
@@ -693,6 +698,9 @@ export const anjukePropertyModule = {
         await context.storage.save(state());
         renderConfig();
         renderResults();
+        if (config.autoOpenResult && paths.resultHtmlPath) {
+          await openPath(paths.resultHtmlPath, "结果页", { quiet: true });
+        }
         const skippedNote = counts.skipped ? `跳过 ${counts.skipped} 条` : "";
         const blockedNote = counts.blocked ? `验证阻断 ${counts.blocked} 条` : "";
         const restoreNote = result.restoreStatus === "restore_failed" ? "；列表页恢复失败，请手动返回。" : "";
@@ -719,9 +727,10 @@ export const anjukePropertyModule = {
       }
     }
 
-    async function openPath(value, label) {
+    async function openPath(value, label, options = {}) {
       if (!value) return;
       const result = await context.sendNativeMessage({ action: "open_anjuke_property_path", path: value, outputDirectory: config.outputDirectory }, 15000);
+      if (options.quiet && result?.ok) return;
       setMessage(elements.anjukePropertyResultMessage, result?.ok ? `已打开${label}。` : `${label}打开失败：${result?.reason || "未知错误"}`, result?.ok ? "ok" : "error");
     }
 
@@ -774,7 +783,7 @@ export const anjukePropertyModule = {
           renderResults();
           setMessage(elements.anjukePropertyResultMessage, "已清空本地结果记录，原始文件未自动删除。", "ok");
         });
-        for (const id of ["anjukePropertyCaseType", "anjukePropertyMaxCases", "anjukePropertyKeyword", "anjukePropertyWaitVerification", "anjukePropertyScreenshot"]) {
+        for (const id of ["anjukePropertyCaseType", "anjukePropertyMaxCases", "anjukePropertyKeyword", "anjukePropertyWaitVerification", "anjukePropertyScreenshot", "anjukePropertyAutoOpenResult"]) {
           context.scope.on(elements[id], "input", () => {
             config = readConfig();
             renderParameterState();

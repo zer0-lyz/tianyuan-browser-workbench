@@ -82,6 +82,9 @@ export const anjukePropertyTemplate = `
         <button id="clearAnjukePropertyResults" type="button" class="tiny secondary" disabled>清空结果</button>
       </div>
     </div>
+    <div class="anjuke-property-options">
+      <label><input id="anjukePropertyAutoOpenResult" type="checkbox" checked> 完成后自动打开结果页</label>
+    </div>
     <div class="anjuke-property-progress" aria-live="polite">
       <div class="anjuke-property-progress-heading">
         <span id="anjukePropertyProgressPhase">等待开始</span>
