@@ -5062,12 +5062,27 @@ async function processConnectorActionQueue() {
       set_audit_check_result: "查证核对情况填写",
       scan_audit_index_check_rows: "查证资料索引批量扫描",
       batch_set_audit_check_results: "查证核对情况批量填写",
+      inspect_page_structure: "页面结构探查",
     };
     setConnectorBindingFeedback(
       `${binding.displayName || binding.providerId || "当前 Agent"} 已下达${actionLabels[claimedAction.type] || "天源页面任务"}，正在通过当前天源页面执行...`,
       "idle",
     );
     setStatus(`正在执行${binding.displayName || binding.providerId || "当前 Agent"}天源页面任务...`, "idle");
+    if (claimedAction.type === "inspect_page_structure") {
+      const inspectTab = await connectorBoundTab();
+      const inspectResult = await sendToTab(inspectTab, { type: ACTION_REQUEST_TYPE, payload: claimedAction.payload || {} });
+      await reportConnectorActionResult(claimedAction.actionId, inspectResult);
+      setConnectorBindingFeedback(
+        inspectResult?.ok
+          ? "页面结构探查完成，结果已回传 Agent"
+          : `页面结构探查被阻断：${inspectResult?.reason || inspectResult?.message || "未知原因"}`,
+        inspectResult?.ok ? "ok" : "warn",
+      );
+      setStatus(inspectResult?.ok ? "页面结构探查完成" : "页面结构探查被阻断", inspectResult?.ok ? "ok" : "warn");
+      await checkConnectorConnection({ silent: true });
+      return;
+    }
     let tab = await connectorBoundTab();
     tab = await navigateConnectorActionTarget(tab, claimedAction.target || {});
     const context = await sendToTab(tab, { type: REQUEST_TYPE });
