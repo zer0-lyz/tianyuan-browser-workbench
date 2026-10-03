@@ -48,6 +48,7 @@ test("depreciation native helper runs the bundled workbook engine end to end", a
     "depreciation_capex_forecast_write_params",
     "depreciation_capex_forecast_write_stock",
     "depreciation_capex_forecast_write_added",
+    "depreciation_capex_forecast_read_input",
     "depreciation_capex_forecast_preflight",
     "depreciation_capex_forecast_run_with_details",
     "depreciation_capex_forecast_read_monthly",
@@ -130,6 +131,32 @@ test("depreciation native helper runs the bundled workbook engine end to end", a
   assert.equal(statusAfterInput.parameters.valuationDate, "2024-05-31");
   assert.equal(statusAfterInput.counts.stock, 1);
   assert.equal(statusAfterInput.counts.added, 1);
+
+  const existingInput = await service.handle({ operation: "read_input" });
+  assert.equal(existingInput.ok, true);
+  assert.ok(existingInput.sections.stock.headers.includes("名称"));
+  assert.equal(existingInput.sections.stock.count, 1);
+  assert.equal(existingInput.sections.added.count, 1);
+  assert.equal(existingInput.sections.stock.rows[0].rowIndex, 4);
+  assert.equal(existingInput.sections.stock.rows[0].名称, "存量设备");
+  assert.match(String(existingInput.sections.stock.rows[0].启用时间), /^\d{4}-\d{2}-\d{2}$/);
+
+  const stockOnlyInput = await service.handle({ operation: "read_input", kind: "stock" });
+  assert.equal(stockOnlyInput.ok, true);
+  assert.ok(stockOnlyInput.sections.stock);
+  assert.equal(stockOnlyInput.sections.added, undefined);
+
+  const updatedStock = await service.handle({
+    operation: "write_stock",
+    values: [{ 序号: "S-1", 名称: "存量设备-改名", rowIndex: existingInput.sections.stock.rows[0].rowIndex }],
+  });
+  assert.equal(updatedStock.ok, true);
+  const readbackAfterUpdate = await service.handle({ operation: "read_input", kind: "stock" });
+  assert.equal(readbackAfterUpdate.sections.stock.rows[0].名称, "存量设备-改名");
+  assert.equal(readbackAfterUpdate.sections.stock.rows[0].资产科目, "机器设备");
+  const statusAfterUpdate = await service.handle({ operation: "status" });
+  assert.equal(statusAfterUpdate.counts.stock, 1);
+  assert.equal(statusAfterUpdate.counts.added, 1);
 
   const preflight = await service.handle({ operation: "preflight" });
   assert.equal(preflight.ok, true);

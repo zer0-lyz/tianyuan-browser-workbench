@@ -18,4 +18,4 @@ bundle:
   digest:
     algorithm: sha256
     scope: required_files_excluding_manifest
-    value: "7e8df92241d26fc7bd52def3385e6dcf6fb2809cfc07e2708f95479a72af693a"
+    value: "9ce8d0c148c29fb74e337612f0cde169ab4a9054a0a1d927a207411e8f22c7b3"

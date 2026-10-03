@@ -89,7 +89,11 @@ async function load() {
     elements.previousPage.disabled = page <= 1;
     elements.nextPage.disabled = table.rows.length < pageSize || (Number.isFinite(Number(totalRows)) && page * pageSize >= Number(totalRows));
   } catch (error) {
-    setMessage(elements.detailStatus, error.message, "error");
+    const message = String(error.message || error);
+    const hint = message.includes("RESULT_SHEET_NOT_FOUND")
+      ? "当前工作簿还没有该明细表：请先在参数页勾选“包含明细运行”再运行预测。"
+      : "";
+    setMessage(elements.detailStatus, hint ? `${message}。${hint}` : message, "error");
     elements.previousPage.disabled = true;
     elements.nextPage.disabled = true;
   } finally {
