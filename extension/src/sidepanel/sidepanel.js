@@ -219,6 +219,7 @@ const elements = {
   saveConnectorBinding: document.getElementById("saveAgentBinding"),
   clearConnectorBinding: document.getElementById("clearAgentBinding"),
   connectorBindingFeedback: document.getElementById("agentBindingFeedback"),
+  connectorBindingFieldTitle: document.getElementById("connectorBindingFieldTitle"),
   refreshAgentSources: document.getElementById("refreshAgentSources"),
   agentConnectionStatus: document.getElementById("agentConnectionStatus"),
   agentConnectionSummary: document.getElementById("agentConnectionSummary"),
@@ -4349,7 +4350,7 @@ async function connectorFetch(path, options = {}) {
 }
 
 function resetConnectorBindingForm() {
-  elements.connectorProjectSelect.innerHTML = '<option value="">请选择 Codex 项目</option>';
+  elements.connectorProjectSelect.innerHTML = `<option value="">请选择 ${agentBindingProviderLabel()} 项目</option>`;
   elements.connectorThreadSelect.innerHTML = '<option value="">请先选择项目</option>';
   elements.connectorThreadField.classList.remove("hidden");
 }
@@ -4372,6 +4373,12 @@ function connectorProjectLabel(project) {
 
 function connectorThreadLabel(thread) {
   return String(thread?.title || thread?.threadTitle || thread?.threadId || thread?.id || "未命名对话");
+}
+
+function agentBindingProviderLabel(provider = selectedAgentBindingProvider) {
+  if (provider === "workbuddy") return "WorkBuddy";
+  if (provider === "zcode") return "Zcode";
+  return "Codex";
 }
 
 function connectorProjectThreads(project = selectedConnectorProject()) {
@@ -4419,7 +4426,7 @@ function renderConnectorProjectPicker() {
   const selected = selectedConnectorProject();
   setPickerButton(
     elements.connectorProjectPickerButton,
-    selected ? connectorProjectLabel(selected) : (connectorCatalog.projects.length ? "请选择 Codex 项目" : "未发现 Codex 项目"),
+    selected ? connectorProjectLabel(selected) : (connectorCatalog.projects.length ? `请选择 ${agentBindingProviderLabel()} 项目` : `未发现 ${agentBindingProviderLabel()} 项目`),
     selected ? compactPath(selected.projectPath || selected.path || "") : "",
   );
   if (!elements.connectorProjectPickerList) return;
@@ -4453,7 +4460,7 @@ function renderConnectorThreadPicker() {
   const selected = threads.find((thread) => String(thread.threadId || thread.id || "") === selectedThreadId) || null;
   setPickerButton(
     elements.connectorThreadPickerButton,
-    selected ? connectorThreadLabel(selected) : (selectedConnectorProject() ? (threads.length ? "请选择 Codex 对话" : "该项目暂无可识别对话") : "请先选择项目"),
+    selected ? connectorThreadLabel(selected) : (selectedConnectorProject() ? (threads.length ? `请选择 ${agentBindingProviderLabel()} 对话` : "该项目暂无可识别对话") : "请先选择项目"),
     selected ? compactPath(selected.projectPath || selected.cwd || "") : "",
   );
   if (!elements.connectorThreadPickerList) return;
@@ -4496,7 +4503,7 @@ function renderConnectorThreadOptions() {
   elements.connectorThreadSelect.innerHTML = "";
   const placeholder = document.createElement("option");
   placeholder.value = "";
-  placeholder.textContent = threads.length ? "请选择 Codex 对话" : "该项目暂无可识别对话";
+  placeholder.textContent = threads.length ? `请选择 ${agentBindingProviderLabel()} 对话` : "该项目暂无可识别对话";
   elements.connectorThreadSelect.appendChild(placeholder);
   for (const thread of threads) {
     const option = document.createElement("option");
@@ -4513,7 +4520,9 @@ function renderConnectorCatalog() {
   elements.connectorProjectSelect.innerHTML = "";
   const empty = document.createElement("option");
   empty.value = "";
-  empty.textContent = connectorCatalog.projects.length ? "请选择 Codex 项目" : "未发现 Codex 项目";
+  empty.textContent = connectorCatalog.projects.length
+    ? `请选择 ${agentBindingProviderLabel()} 项目`
+    : `未发现 ${agentBindingProviderLabel()} 项目`;
   elements.connectorProjectSelect.appendChild(empty);
   for (const project of connectorCatalog.projects) {
     const option = document.createElement("option");
@@ -4545,33 +4554,39 @@ function renderConnectorBindingForm(binding) {
   }
   renderConnectorThreadOptions();
   elements.connectorThreadSelect.value = binding.threadId || "";
-  if (selectedAgentBindingProvider === "codex") {
+  if (selectedAgentBindingProvider !== "workbuddy") {
     elements.agentBindingAccessSelect.value = binding.accessMode === "read" ? "read" : "control";
   }
   renderConnectorProjectPicker();
   renderConnectorThreadPicker();
 }
 
-async function loadConnectorCatalog() {
+async function loadConnectorCatalog(provider = selectedAgentBindingProvider) {
+  const providerId = provider === "zcode" ? "zcode" : "codex";
+  const providerLabel = providerId === "zcode" ? "Zcode" : "Codex";
   try {
-    const catalog = await connectorFetch("/api/catalog");
+    const catalog = await connectorFetch(providerId === "zcode" ? "/api/catalog?providerId=zcode" : "/api/catalog");
     connectorCatalog = {
       projects: Array.isArray(catalog.projects) ? catalog.projects : [],
       threads: Array.isArray(catalog.threads) ? catalog.threads : [],
       updatedAt: catalog.updatedAt || null,
     };
     renderConnectorCatalog();
-    const sourceLabel = ["codex-sidebar-catalog", "connector-suite-registry", "connector-suite-bridge", "connector-platform"].includes(catalog.source)
-      ? "统一 Connector Suite 目录"
-      : "本机统一目录回退";
+    const sourceLabel = providerId === "zcode"
+      ? "Zcode 本机目录"
+      : ["codex-sidebar-catalog", "connector-suite-registry", "connector-suite-bridge", "connector-platform"].includes(catalog.source)
+        ? "统一 Connector Suite 目录"
+        : "本机统一目录回退";
     elements.connectorBindingFeedback.textContent = connectorCatalog.projects.length || connectorCatalog.threads.length
       ? `已加载 ${connectorCatalog.projects.length} 个项目、${connectorCatalog.threads.length} 个对话（${sourceLabel}）`
-      : "统一目录暂未发现项目或对话，请先在 Codex 中打开项目后刷新";
+      : `${sourceLabel}暂未发现项目或对话，请先在 ${providerLabel} 中打开项目后刷新`;
     return catalog;
   } catch (error) {
     connectorCatalog = { projects: [], threads: [], updatedAt: null };
     renderConnectorCatalog();
-    elements.connectorBindingFeedback.textContent = `项目/对话列表暂不可用：${error.message}。请确认 Connector Suite 或 Codex 已启动后刷新`;
+    elements.connectorBindingFeedback.textContent = providerId === "zcode"
+      ? `Zcode 项目/对话列表暂不可用：${error.message}。请确认本机 Zcode 已使用过且 Connector 桥接已启动后刷新`
+      : `项目/对话列表暂不可用：${error.message}。请确认 Connector Suite 或 Codex 已启动后刷新`;
     return null;
   }
 }
@@ -4595,9 +4610,12 @@ function connectorBindingPayload() {
 function renderAgentBindingProvider() {
   const provider = elements.agentBindingProviderSelect?.value || selectedAgentBindingProvider || "codex";
   selectedAgentBindingProvider = provider;
-  elements.codexAgentBindingFields?.classList.toggle("hidden", provider !== "codex");
+  elements.codexAgentBindingFields?.classList.toggle("hidden", provider !== "codex" && provider !== "zcode");
   elements.workbuddyAgentBindingFields?.classList.toggle("hidden", provider !== "workbuddy");
-  if (provider === "codex") {
+  if (elements.connectorBindingFieldTitle) {
+    elements.connectorBindingFieldTitle.textContent = `选择 ${agentBindingProviderLabel(provider)} 项目和对话`;
+  }
+  if (provider === "codex" || provider === "zcode") {
     const binding = connectorSession?.codexBinding || null;
     elements.agentBindingAccessSelect.value = binding?.accessMode === "read" ? "read" : "control";
     if (!connectorBindingFormDirty) renderConnectorBindingForm(binding);
@@ -4687,9 +4705,10 @@ async function ensureCurrentPageConnectorSession() {
 
 async function saveConnectorCodexBinding() {
   const payload = connectorBindingPayload();
+  const providerLabel = agentBindingProviderLabel();
   if (!payload.projectId) {
-    setConnectorBindingFeedback("请先选择 Codex 项目。", "warn");
-    setStatus("请先选择 Codex 项目", "warn");
+    setConnectorBindingFeedback(`请先选择 ${providerLabel} 项目。`, "warn");
+    setStatus(`请先选择 ${providerLabel} 项目`, "warn");
     return;
   }
   setBusy(true);
@@ -4703,11 +4722,11 @@ async function saveConnectorCodexBinding() {
     connectorBindingFormDirty = false;
     renderConnectorSession(result.session);
     setConnectorBindingFeedback(payload.scope === "project"
-      ? "已绑定整个 Codex 项目"
-      : "已绑定指定 Codex 对话", "ok");
-    setStatus("Codex 绑定已保存", "ok");
+      ? `已绑定整个 ${providerLabel} 项目`
+      : `已绑定指定 ${providerLabel} 对话`, "ok");
+    setStatus(`${providerLabel} 绑定已保存`, "ok");
   } catch (error) {
-    if (error.message === "CONTROL_TRANSFER_CONFIRMATION_REQUIRED" && window.confirm("当前页面已有其他 Agent 控制者。确认切换给 Codex？旧控制者尚未执行的任务会取消。")) {
+    if (error.message === "CONTROL_TRANSFER_CONFIRMATION_REQUIRED" && window.confirm(`当前页面已有其他 Agent 控制者。确认切换给 ${providerLabel}？旧控制者尚未执行的任务会取消。`)) {
       try {
         const result = await connectorFetch(`/api/sessions/${encodeURIComponent(connectorSessionId)}/binding`, {
           method: "POST",
@@ -4715,14 +4734,14 @@ async function saveConnectorCodexBinding() {
         });
         connectorBindingFormDirty = false;
         renderConnectorSession(result.session);
-        setConnectorBindingFeedback("控制权已切换给 Codex，旧控制者队列已取消", "ok");
+        setConnectorBindingFeedback(`控制权已切换给 ${providerLabel}，旧控制者队列已取消`, "ok");
         return;
       } catch (retryError) {
         error = retryError;
       }
     }
     setConnectorBindingFeedback(`绑定失败：${error.message}`, "error");
-    setStatus(`Codex 绑定失败：${error.message}`, "error");
+    setStatus(`${providerLabel} 绑定失败：${error.message}`, "error");
   } finally {
     setBusy(false);
   }
@@ -4739,8 +4758,9 @@ async function clearConnectorCodexBinding() {
     const result = await connectorFetch(`/api/sessions/${encodeURIComponent(connectorSessionId)}/binding`, { method: "DELETE" });
     connectorBindingFormDirty = false;
     renderConnectorSession(result.session);
-    setConnectorBindingFeedback("已解除 Codex 绑定，当前页面不会接受 Codex 操作", "ok");
-    setStatus("Codex 绑定已解除", "warn");
+    const providerLabel = agentBindingProviderLabel();
+    setConnectorBindingFeedback(`已解除 ${providerLabel} 绑定，当前页面不会接受 ${providerLabel} 操作`, "ok");
+    setStatus(`${providerLabel} 绑定已解除`, "warn");
   } catch (error) {
     setConnectorBindingFeedback(`解除绑定失败：${error.message}`, "error");
     setStatus(`解除绑定失败：${error.message}`, "error");
@@ -4904,7 +4924,7 @@ async function bindCurrentPage() {
   setConnectorBindingFeedback("正在启动 Connector 并绑定当前天源页面...", "idle");
   try {
     await ensureCurrentPageConnectorSession();
-    setConnectorBindingFeedback("当前天源页面已绑定，请继续选择 Codex 项目和对话。", "ok");
+    setConnectorBindingFeedback(`当前天源页面已绑定，请继续选择 ${agentBindingProviderLabel()} 项目和对话。`, "ok");
     setStatus("当前天源页面已绑定，可以开始核对操作能力", "ok");
   } catch (error) {
     setConnectorBindingFeedback(`页面绑定失败：${error?.message || String(error)}`, "error");
