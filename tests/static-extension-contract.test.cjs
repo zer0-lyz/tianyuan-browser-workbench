@@ -166,25 +166,23 @@ assert.equal(updatesTemplate.includes('id="testUpdate"'), true);
 assert.equal(updatesTemplate.includes('id="installUpdate"'), true);
 assert.match(html, /<span id="moduleCountBadge" class="badge">\d+ 个模块<\/span>/);
 assert.equal(html.includes('id="moduleSectionStable"'), true);
-assert.equal(html.includes('id="moduleSectionBuilding"'), true);
 assert.equal(html.includes('id="moduleSectionStableTitle">正式可用</h3>'), true);
-assert.equal(html.includes('id="moduleSectionBuildingTitle">制作中</h3>'), true);
-assert.ok(html.indexOf('id="moduleSectionStable"') < html.indexOf('id="moduleSectionBuilding"'));
+// 2026-10-04 验收交付：安居客/折旧模块通过实机验收后并入"正式可用"，
+// 全部模块 stable，"制作中"分组随移除而不再存在（见 index.html moduleSectionStable）。
+assert.equal(html.includes('id="moduleSectionBuilding"'), false);
+assert.equal(html.includes('module-section-building'), false);
 const stableSection = html.slice(
   html.indexOf('id="moduleSectionStable"'),
-  html.indexOf('id="moduleSectionBuilding"'),
+  html.indexOf('class="home-note"'),
 );
-const buildingSection = html.slice(html.indexOf('id="moduleSectionBuilding"'));
 assert.equal(stableSection.includes('id="openTableFormat"'), true);
+assert.equal(stableSection.includes('id="openAnjukeProperty"'), true);
+assert.equal(stableSection.includes('id="openDepreciationCapex"'), true);
 assert.equal(stableSection.includes('id="openMapSettings"'), false);
 assert.equal(html.includes('id="basicSettings"'), false);
 const connectionBar = html.slice(html.indexOf('class="connection-bar"'), html.indexOf('</nav>', html.indexOf('class="connection-bar"')));
 assert.equal(connectionBar.includes('id="openMapSettings"'), true);
 assert.equal(connectionBar.includes('id="mapSettingsStatus"'), true);
-assert.equal(stableSection.includes('id="openAnjukeProperty"'), false);
-assert.equal(stableSection.includes('id="openDepreciationCapex"'), false);
-assert.equal(buildingSection.includes('id="openAnjukeProperty"'), true);
-assert.equal(buildingSection.includes('id="openDepreciationCapex"'), true);
 assert.equal(html.includes('id="openFeedbackTop"'), true);
 assert.equal(html.includes('id="openUpdatesTop"'), true);
 assert.equal(html.includes('id="connectionStatusPanel"'), true);
