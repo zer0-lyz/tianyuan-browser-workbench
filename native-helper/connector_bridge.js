@@ -98,6 +98,7 @@ function createBridge(options = {}) {
   const processesPath = options.processesPath || path.join(codexHome, "process_manager", "chat_processes.json");
   const sqlitePath = options.sqlitePath || path.join(codexHome, "sqlite", "codex-dev.db");
   const workbuddyDbPath = options.workbuddyDbPath || process.env.TIANYUAN_WORKBUDDY_DB_PATH || path.join(home, ".workbuddy", "workbuddy.db");
+  const zcodeDbPath = options.zcodeDbPath || process.env.TIANYUAN_ZCODE_DB_PATH || path.join(home, ".zcode", "cli", "db", "db.sqlite");
   const compatibilityPath = options.compatibilityPath || process.env.TIANYUAN_CONNECTOR_RUNTIME_COMPATIBILITY_PATH || path.join(__dirname, "runtime-compat.json");
   const officeBridgeUrl = options.officeBridgeUrl || process.env.OFFICE_CONNECTOR_BRIDGE_URL || "http://127.0.0.1:40115";
   const platformUrl = process.env.TIANYUAN_CONNECTOR_PLATFORM_URL || "http://127.0.0.1:40315";
@@ -496,8 +497,63 @@ function createBridge(options = {}) {
     };
   }
 
+  function zcodeRows(query) {
+    if (!fs.existsSync(zcodeDbPath)) throw error("ZCODE_CATALOG_UNAVAILABLE", 503);
+    try {
+      const output = execFileSync("sqlite3", ["-json", zcodeDbPath, query], {
+        encoding: "utf8",
+        maxBuffer: 2 * 1024 * 1024,
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+      return output ? JSON.parse(output) : [];
+    } catch {
+      throw error("ZCODE_CATALOG_UNAVAILABLE", 503);
+    }
+  }
+
+  function zcodeCatalog() {
+    const rows = zcodeRows("SELECT id, project_id, COALESCE(NULLIF(directory, ''), NULLIF(path, '')) AS directory, title, task_type, time_updated FROM session WHERE time_archived IS NULL AND parent_id IS NULL ORDER BY time_updated DESC LIMIT 300;");
+    const projects = new Map();
+    const threads = [];
+    for (const row of rows) {
+      const projectPath = normalizePath(row?.directory);
+      const projectId = limited(row?.project_id, 200) || (projectPath ? `zcode-project:${projectPath}` : "");
+      if (!row?.id || !projectId) continue;
+      const projectName = limited(path.basename(projectPath) || projectId, 200);
+      if (!projects.has(projectId)) {
+        projects.set(projectId, {
+          projectId,
+          projectName,
+          projectPath,
+          path: projectPath,
+          updatedAt: Number(row.time_updated || 0) || null,
+          source: "zcode-local-db",
+        });
+      }
+      threads.push({
+        threadId: limited(row.id, 200),
+        title: limited(row.title || `Zcode 对话 ${String(row.id).slice(-8)}`, 300),
+        projectId,
+        projectName,
+        projectPath,
+        cwd: projectPath,
+        status: limited(row.task_type, 80),
+        recencyAt: Math.floor(Number(row.time_updated || 0) / 1000) || null,
+        source: "zcode-local-db",
+      });
+    }
+    return {
+      projects: [...projects.values()].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0)),
+      threads,
+      updatedAt: now(),
+      source: "zcode-local-db",
+    };
+  }
+
   async function agentCatalog(providerId = "codex") {
-    return providerId === "workbuddy" ? workbuddyCatalog() : codexCatalog();
+    if (providerId === "workbuddy") return workbuddyCatalog();
+    if (providerId === "zcode") return zcodeCatalog();
+    return codexCatalog();
   }
 
   async function handle(req, res) {
@@ -509,7 +565,7 @@ function createBridge(options = {}) {
       if (req.method === "POST" && url.pathname === "/api/agent-sources/local") { const browser = requireBrowser(req); return json(res, 200, { ok: true, source: publicSource(localScriptSource(browser.extensionId)) }, origin); }
       if (req.method === "GET" && url.pathname === "/api/agent-sources") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); return json(res, 200, { ok: true, sources: [...sources.values()].map((source) => ({ ...publicSource(source), connection: sourceConnection(source) })) }, origin); }
       if (req.method === "POST" && url.pathname === "/api/agent-sources/manual") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const created = manualSource(await body(req)); return json(res, 200, { ok: true, source: publicSource(created.source), workbuddyConfig: { transport: "stdio", command: "node", args: ["~/plugins/tianyuan-browser-connector/runtime/apps/mcp/server.mjs"], env: { TIANYUAN_CONNECTOR_BRIDGE_URL: "http://127.0.0.1:40415", TIANYUAN_CONNECTOR_AGENT_CONFIG_PATH: created.configPath } } }, origin); }
-      if (req.method === "GET" && url.pathname === "/api/catalog") { requireBrowser(req); const providerId = limited(url.searchParams.get("providerId") || "codex", 80).toLowerCase(); if (!["codex", "workbuddy"].includes(providerId)) throw error("AGENT_PROVIDER_UNSUPPORTED", 400); return json(res, 200, { ok: true, providerId, ...(await agentCatalog(providerId)) }, origin); }
+      if (req.method === "GET" && url.pathname === "/api/catalog") { requireBrowser(req); const providerId = limited(url.searchParams.get("providerId") || "codex", 80).toLowerCase(); if (!["codex", "workbuddy", "zcode"].includes(providerId)) throw error("AGENT_PROVIDER_UNSUPPORTED", 400); return json(res, 200, { ok: true, providerId, ...(await agentCatalog(providerId)) }, origin); }
       if (req.method === "POST" && url.pathname === "/api/sessions/register") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const input = await body(req); const sessionId = limited(input.sessionId || id("tianyuan"), 200); const existing = sessions.get(sessionId); const session = { sessionId, status: "online", registeredAt: existing?.registeredAt || now(), lastSeenAt: now(), binding: safePage(input.binding), client: safeClient(input.client), context: safeContext(input.context), capabilities: capabilities() }; sessions.set(sessionId, session); return json(res, 200, { ok: true, session: publicSession(session) }, origin); }
       if (req.method === "GET" && url.pathname === "/api/sessions") { const agent = isBrowser(req) ? null : identity(req, true); const result = [...sessions.values()].filter((session) => !agent || bindingsFor(session.binding).some((binding) => binding.agentId === agent.agentId && binding.providerId === agent.providerId && binding.installationId === agent.installationId)).map((session) => publicSession(session, agent)); return json(res, 200, { ok: true, sessions: result }, origin); }
       if (req.method === "POST" && parts.length === 4 && parts[0] === "api" && parts[1] === "sessions" && parts[3] === "heartbeat") { if (!isBrowser(req)) throw error("BROWSER_EXTENSION_REQUIRED", 403); const session = sessionForBinding(parts[2]); const input = await body(req); session.lastSeenAt = now(); if (input.binding) session.binding = safePage(input.binding); if (input.context) session.context = safeContext(input.context); return json(res, 200, { ok: true, session: publicSession(session) }, origin); }
@@ -529,7 +585,7 @@ function createBridge(options = {}) {
       throw error("NOT_FOUND", 404);
     } catch (cause) { return fail(res, cause, origin); }
   }
-  return { async start(port) { const server = createServer((req, res) => { handle(req, res).catch((cause) => fail(res, cause)); }); await new Promise((resolve) => server.listen(Number(port || 40415), "127.0.0.1", resolve)); return server; }, handle, paths: { bindingsPath, sourcesPath, configDir, workbuddyDbPath } };
+  return { async start(port) { const server = createServer((req, res) => { handle(req, res).catch((cause) => fail(res, cause)); }); await new Promise((resolve) => server.listen(Number(port || 40415), "127.0.0.1", resolve)); return server; }, handle, paths: { bindingsPath, sourcesPath, configDir, workbuddyDbPath, zcodeDbPath } };
 }
 
 async function health(port = 40415) { try { const response = await fetch(`http://127.0.0.1:${Number(port)}/health`); return response.ok ? await response.json() : { ok: false, reason: `CONNECTOR_HTTP_${response.status}` }; } catch { return { ok: false, reason: "CONNECTOR_NOT_RUNNING" }; } }
