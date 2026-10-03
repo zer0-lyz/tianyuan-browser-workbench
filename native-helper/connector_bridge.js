@@ -273,16 +273,17 @@ function createBridge(options = {}) {
   }
   function createAction(session, agent, input) {
     const type = limited(input.action, 80);
-    const allowed = new Set(["preview_batch_save", "batch_save_asset_draft", "preview_batch_exit_edit", "batch_exit_edit", "preview_audit_attachment_upload", "upload_audit_attachment", "batch_upload_audit_attachments", "save_batch_upload_draft", "inspect_audit_check_row", "set_audit_check_result", "scan_audit_index_check_rows", "batch_set_audit_check_results", "clear_audit_attachments", "clear_audit_test_rows"]);
+    const allowed = new Set(["preview_batch_save", "batch_save_asset_draft", "preview_batch_exit_edit", "batch_exit_edit", "preview_audit_attachment_upload", "upload_audit_attachment", "batch_upload_audit_attachments", "save_batch_upload_draft", "inspect_audit_check_row", "set_audit_check_result", "scan_audit_index_check_rows", "batch_set_audit_check_results", "clear_audit_attachments", "clear_audit_test_rows", "inspect_page_structure"]);
     if (!allowed.has(type)) throw error("ACTION_NOT_ALLOWED");
+    const isReadOnlyInspect = type === "inspect_page_structure";
     const binding = authorize(session, agent, input, actionIsWrite(type));
     if (session.status !== "online") throw error("SESSION_NOT_ONLINE", 409);
-    if (!session.binding.projectId || !session.binding.companyId || session.binding.pageType !== "asset-draft") throw error("ASSET_DRAFT_SESSION_REQUIRED", 409);
+    if (!isReadOnlyInspect && (!session.binding.projectId || !session.binding.companyId || session.binding.pageType !== "asset-draft")) throw error("ASSET_DRAFT_SESSION_REQUIRED", 409);
     const isBatchSubjectAction = ["preview_batch_save", "batch_save_asset_draft", "preview_batch_exit_edit", "batch_exit_edit"].includes(type);
     const isBatchPageAction = isBatchSubjectAction;
     const rowNumbers = Array.isArray(input.rowNumbers) ? input.rowNumbers.map(Number).filter((row) => Number.isInteger(row) && row >= 2 && row <= 100000) : [];
     const rowNumber = Number(input.rowNumber);
-    if (!isBatchPageAction && !rowNumbers.length && !["scan_audit_index_check_rows"].includes(type) && (!Number.isInteger(rowNumber) || rowNumber < 2)) throw error("ROW_NUMBER_INVALID");
+    if (!isBatchPageAction && !isReadOnlyInspect && !rowNumbers.length && !["scan_audit_index_check_rows"].includes(type) && (!Number.isInteger(rowNumber) || rowNumber < 2)) throw error("ROW_NUMBER_INVALID");
     const subjectCode = limited(input.subjectCode === "current" ? "" : input.subjectCode || session.binding.subjectCode, 120);
     if (subjectCode && !/^C\d+(?:-\d+)*$/.test(subjectCode)) throw error("SUBJECT_CODE_INVALID");
     const subjectCodes = isBatchSubjectAction
