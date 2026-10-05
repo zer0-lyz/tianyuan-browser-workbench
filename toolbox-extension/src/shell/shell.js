@@ -8,9 +8,11 @@ import { alibabaLeaseModule } from "../modules/alibaba-lease/module.js";
 import { anjukePropertyModule } from "../modules/anjuke-property/module.js";
 import { tableFormatModule } from "../modules/table-format/module.js";
 import { mapSettingsModule } from "../modules/map-settings/module.js";
+import { updatesModule } from "../modules/updates/module.js";
 import { depreciationCapexModule } from "../modules/depreciation-capex-forecast/module.js";
 
 const NATIVE_HOST_NAME = "com.tianyuan.workbench.helper";
+const CONNECTOR_PROTOCOL_VERSION = "connector-agent-binding-v3";
 
 const elements = Object.fromEntries(
   ["goHome", "subtitle", "status"].map((id) => [id, document.getElementById(id)]),
@@ -30,6 +32,7 @@ moduleRegistry.register(alibabaLeaseModule);
 moduleRegistry.register(anjukePropertyModule);
 moduleRegistry.register(tableFormatModule);
 moduleRegistry.register(mapSettingsModule);
+moduleRegistry.register(updatesModule);
 moduleRegistry.register(depreciationCapexModule);
 
 function setStatus(text, kind = "idle") {
@@ -133,6 +136,14 @@ async function bootstrapApplication() {
       chrome,
       document,
       extensionManifest,
+      connectorProtocolVersion: CONNECTOR_PROTOCOL_VERSION,
+      isBusy: () => false,
+      setConnection: (element, text, kind = "idle") => {
+        // 工具箱没有状态胶囊栏；updates 模块会把顶栏元素传进来（当前为空），判空即用。
+        if (!element) return;
+        element.className = `conn conn-${kind}`;
+        element.textContent = text;
+      },
       navigate: navigateToRoute,
       setStatus,
       sendNativeMessage,
