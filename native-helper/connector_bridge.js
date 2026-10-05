@@ -518,7 +518,10 @@ function createBridge(options = {}) {
     const threads = [];
     for (const row of rows) {
       const projectPath = normalizePath(row?.directory);
-      const projectId = limited(row?.project_id, 200) || (projectPath ? `zcode-project:${projectPath}` : "");
+      // Zcode 的 project_id 由路径去中文字符生成，中文目录名会互相碰撞
+      // （如 .../Codex/天源评估系统 与 .../Codex/飞书 同为 proj_users-…-codex），
+      // 因此按目录路径去重，project_id 仅作回退。
+      const projectId = projectPath ? `zcode-project:${projectPath}` : limited(row?.project_id, 200);
       if (!row?.id || !projectId) continue;
       const projectName = limited(path.basename(projectPath) || projectId, 200);
       if (!projects.has(projectId)) {
