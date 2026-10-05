@@ -9,6 +9,7 @@ import { alibabaAuctionModule } from "../toolbox-extension/src/modules/alibaba-a
 import { alibabaLeaseModule } from "../toolbox-extension/src/modules/alibaba-lease/module.js";
 import { anjukePropertyModule } from "../toolbox-extension/src/modules/anjuke-property/module.js";
 import { tableFormatModule } from "../toolbox-extension/src/modules/table-format/module.js";
+import { mapSettingsModule } from "../toolbox-extension/src/modules/map-settings/module.js";
 import { depreciationCapexModule } from "../toolbox-extension/src/modules/depreciation-capex-forecast/module.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -21,6 +22,7 @@ const definitions = [
   alibabaLeaseModule,
   anjukePropertyModule,
   tableFormatModule,
+  mapSettingsModule,
   depreciationCapexModule,
 ];
 
@@ -47,10 +49,10 @@ test("toolbox manifest pins the expected stable extension id", () => {
   assert.equal(manifest.side_panel.default_path, "src/shell/index.html");
 });
 
-test("toolbox keeps only the six decoupled feature modules", () => {
-  assert.equal(definitions.length, 6);
-  assert.equal(new Set(definitions.map((item) => item.manifest.id)).size, 6);
-  assert.equal(new Set(definitions.map((item) => item.manifest.route)).size, 6);
+test("toolbox keeps the decoupled feature modules", () => {
+  assert.equal(definitions.length, 7);
+  assert.equal(new Set(definitions.map((item) => item.manifest.id)).size, 7);
+  assert.equal(new Set(definitions.map((item) => item.manifest.route)).size, 7);
   for (const definition of definitions) {
     assert.equal(definition.manifest.stage, "stable", `${definition.manifest.id} must ship enabled`);
     assert.ok(definition.manifest.messageNamespace.startsWith(definition.manifest.id));

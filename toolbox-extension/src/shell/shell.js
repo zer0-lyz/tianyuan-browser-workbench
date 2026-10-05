@@ -7,6 +7,7 @@ import { alibabaAuctionModule } from "../modules/alibaba-auction/module.js";
 import { alibabaLeaseModule } from "../modules/alibaba-lease/module.js";
 import { anjukePropertyModule } from "../modules/anjuke-property/module.js";
 import { tableFormatModule } from "../modules/table-format/module.js";
+import { mapSettingsModule } from "../modules/map-settings/module.js";
 import { depreciationCapexModule } from "../modules/depreciation-capex-forecast/module.js";
 
 const NATIVE_HOST_NAME = "com.tianyuan.workbench.helper";
@@ -28,6 +29,7 @@ moduleRegistry.register(alibabaAuctionModule);
 moduleRegistry.register(alibabaLeaseModule);
 moduleRegistry.register(anjukePropertyModule);
 moduleRegistry.register(tableFormatModule);
+moduleRegistry.register(mapSettingsModule);
 moduleRegistry.register(depreciationCapexModule);
 
 function setStatus(text, kind = "idle") {
