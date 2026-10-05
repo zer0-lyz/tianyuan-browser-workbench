@@ -4439,6 +4439,13 @@ async function handle(message) {
       currentBuildNumber: message.currentBuildNumber,
       currentRuntimeBuildId: message.currentRuntimeBuildId,
       currentRuntimeBuildKind: message.currentRuntimeBuildKind,
+      // 工具箱等独立扩展按请求覆盖更新源与仓库；不传时保持工作台默认行为。
+      updateManifestUrls: Array.isArray(message.updateManifestUrls)
+        ? message.updateManifestUrls.map((item) => String(item || "").trim()).filter(Boolean)
+        : undefined,
+      repository: typeof message.repository === "string" && message.repository.trim()
+        ? message.repository.trim()
+        : undefined,
       platform: process.platform,
       architecture: process.arch,
     });

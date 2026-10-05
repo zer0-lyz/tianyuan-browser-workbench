@@ -1,7 +1,9 @@
 const LEGACY_STORAGE_KEY = "appraisalToolboxUpdateResult";
+// 工具箱使用独立发布仓库；清单未发布前检查会显式失败，绝不回落到主工作台的发布清单。
+const TOOLBOX_UPDATE_REPOSITORY = "zer0-lyz/appraisal-toolbox-releases";
 const TOOLBOX_UPDATE_MANIFEST_URLS = [
-  "https://gitee.com/zer0_y/tianyuan-browser-workbench-releases/raw/master/toolbox-update-manifest.json",
-  "https://github.com/zer0-lyz/tianyuan-browser-workbench-releases/releases/latest/download/toolbox-update-manifest.json",
+  "https://gitee.com/zer0_y/appraisal-toolbox-releases/raw/master/update-manifest.json",
+  "https://github.com/zer0-lyz/appraisal-toolbox-releases/releases/latest/download/update-manifest.json",
 ];
 // 工具箱与主工作台共用同一个本机运行组件。install_workbench_update /
 // test_workbench_update 的安装目标写死为主工作台运行副本与共享 Helper，
@@ -501,6 +503,7 @@ export const updatesModule = {
         const result = await context.sendNativeMessage({
           action: "check_github_update",
           updateManifestUrls: TOOLBOX_UPDATE_MANIFEST_URLS,
+          repository: TOOLBOX_UPDATE_REPOSITORY,
           currentVersion: config.productVersion
             || context.extensionManifest.version_name
             || context.extensionManifest.version,
