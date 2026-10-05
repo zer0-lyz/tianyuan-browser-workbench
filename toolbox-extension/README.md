@@ -10,6 +10,7 @@
 | 表格设置 | `src/modules/table-format` | 批量统一 Word 表格格式 |
 | 安居客数据 | `src/modules/anjuke-property` | 物业出售/租赁案例与原始证据 |
 | 折旧摊销与资本性支出预测 | `src/modules/depreciation-capex-forecast` | 长周期折旧摊销预测工作簿 |
+| 地图基础配置 | `src/modules/map-settings` | 高德密钥配置，供结果页地图生成使用（辅助模块，不计入模块徽标） |
 
 ## 与主工作台（extension/）的关系
 
