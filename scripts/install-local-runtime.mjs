@@ -11,6 +11,7 @@ const HOST_NAME = "com.tianyuan.workbench.helper";
 const EXTENSION_IDS = [
   "lkflndcnklpeaejohaacoaolnmhgigoc",
   "fdbllnmaaklkcmoacoapbibiggnndkfpa",
+  "aamfmhcbjgofhmannejoiilkkpchfkgm",
 ];
 const PROJECT_NAME = "天源评估系统";
 const require = createRequire(import.meta.url);

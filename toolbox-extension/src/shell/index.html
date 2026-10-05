@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>评估工具箱</title>
+    <link rel="stylesheet" href="../styles/shell.css">
+  </head>
+  <body>
+    <main class="app">
+      <header class="header">
+        <div class="brand-block">
+          <button id="goHome" type="button" class="brand-button">评估工具箱</button>
+          <p id="subtitle">首页</p>
+        </div>
+      </header>
+
+      <section id="status" class="status status-idle" role="status" aria-live="polite">正在加载功能模块…</section>
+
+      <section id="page-home" class="route-page" data-route="home">
+        <div class="page-heading">
+          <div>
+            <h2>功能模块</h2>
+            <p>选择一个功能开始处理</p>
+          </div>
+          <span id="moduleCountBadge" class="badge">6 个模块</span>
+        </div>
+        <div class="module-sections">
+          <section class="module-section" aria-labelledby="moduleSectionTitle">
+            <div class="module-section-heading">
+              <h3 id="moduleSectionTitle">正式可用</h3>
+              <small>已完成并可直接使用</small>
+            </div>
+            <div class="module-grid">
+              <button id="openLandPublicity" type="button" class="module-card">
+                <span class="module-icon module-icon-land-publicity" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path class="ph-duotone" d="M3.75 18.75h16.5L12 4.5z"></path>
+                    <path d="M12 3.75a.75.75 0 0 1 .65.38l8.25 14.25a.75.75 0 0 1-.65 1.12H3.75a.75.75 0 0 1-.65-1.12l8.25-14.25a.75.75 0 0 1 .65-.38m0 2.25L5.05 18h13.9zM12 9a.75.75 0 0 1 .75.75v3.75a.75.75 0 0 1-1.5 0V9.75A.75.75 0 0 1 12 9m0 6a.94.94 0 1 1 0 1.88A.94.94 0 0 1 12 15"></path>
+                  </svg>
+                </span>
+                <strong>浙江土地市场网</strong>
+                <small>按行政区、用途和价格面积筛选并生成地图结果</small>
+              </button>
+              <button id="openAlibabaAuction" type="button" class="module-card">
+                <span class="module-icon module-icon-land-publicity" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path class="ph-duotone" d="M4.5 18.75h15L12 4.5z"></path>
+                    <path d="M12 3.75a.75.75 0 0 1 .65.38l8.25 14.25a.75.75 0 0 1-.65 1.12H3.75a.75.75 0 0 1-.65-1.12l8.25-14.25a.75.75 0 0 1 .65-.38m0 2.25L5.05 18h13.9zM12 9a.75.75 0 0 1 .75.75v3.75a.75.75 0 0 1-1.5 0V9.75A.75.75 0 0 1 12 9m0 6a.94.94 0 1 1 0 1.88A.94.94 0 0 1 12 15"></path>
+                  </svg>
+                </span>
+                <strong>阿里司法拍卖</strong>
+                <small>登录后自动读取列表并核验成交详情</small>
+              </button>
+              <button id="openAlibabaLease" type="button" class="module-card">
+                <span class="module-icon module-icon-land-publicity" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path class="ph-duotone" d="M4.5 18.75h15L12 4.5z"></path>
+                    <path d="M12 3.75a.75.75 0 0 1 .65.38l8.25 14.25a.75.75 0 0 1-.65 1.12H3.75a.75.75 0 0 1-.65-1.12l8.25-14.25a.75.75 0 0 1 .65-.38m0 2.25L5.05 18h13.9zM12 9a.75.75 0 0 1 .75.75v3.75a.75.75 0 0 1-1.5 0V9.75A.75.75 0 0 1 12 9m0 6a.94.94 0 1 1 0 1.88A.94.94 0 0 1 12 15"></path>
+                  </svg>
+                </span>
+                <strong>阿里资产租赁</strong>
+                <small>抓取使用权出租案例并核验首年租金与租期</small>
+              </button>
+              <button id="openTableFormat" type="button" class="module-card">
+                <span class="module-icon module-icon-detail" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path class="ph-duotone" d="M4.5 4.5h15v15h-15z"></path>
+                    <path d="M4.5 3.75h15a.75.75 0 0 1 .75.75v15a.75.75 0 0 1-.75.75h-15a.75.75 0 0 1-.75-.75v-15a.75.75 0 0 1 .75-.75m.75 1.5v13.5h13.5V5.25zm0 3h13.5v1.5H5.25zm0 3.75h13.5v1.5H5.25zm4.5-6.75h1.5v13.5h-1.5z"></path>
+                  </svg>
+                </span>
+                <strong>表格设置</strong>
+                <small>批量统一 Word 文档中所有表格的格式</small>
+              </button>
+              <button id="openAnjukeProperty" type="button" class="module-card">
+                <span class="module-icon module-icon-land-publicity" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path class="ph-duotone" d="M4.5 19.5h15L12 4.5z"></path>
+                    <path d="M12 3.75a.75.75 0 0 1 .65.38l8.25 14.25a.75.75 0 0 1-.65 1.12H3.75a.75.75 0 0 1-.65-1.12l8.25-14.25a.75.75 0 0 1 .65-.38m0 2.25L5.05 18h13.9z"></path>
+                  </svg>
+                </span>
+                <strong>安居客数据</strong>
+                <small>抓取物业出售、租赁案例并保存原始证据</small>
+              </button>
+              <button id="openDepreciationCapex" type="button" class="module-card">
+                <span class="module-icon module-icon-detail" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path class="ph-duotone" d="M4.5 19.5h15a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5h-15A1.5 1.5 0 0 0 3 6v12a1.5 1.5 0 0 0 1.5 1.5"></path>
+                    <path d="M6.75 16.5h1.5v-3h-1.5zm4.5 0h1.5V9h-1.5zm4.5 0h1.5v-5.25h-1.5zM21 4.5H3a.75.75 0 0 0-.75.75V18A1.5 1.5 0 0 0 3.75 19.5h16.5a1.5 1.5 0 0 0 1.5-1.5V5.25A.75.75 0 0 0 21 4.5m-.75 13.5H3.75V6h16.5z"></path>
+                  </svg>
+                </span>
+                <strong>折旧摊销与资本性支出预测</strong>
+                <small>设置参数、录入资产并运行长周期折旧摊销预测</small>
+              </button>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="page-land-publicity" class="route-page hidden" data-route="land-publicity"></section>
+      <section id="page-alibaba-auction" class="route-page hidden" data-route="alibaba-auction"></section>
+      <section id="page-alibaba-lease" class="route-page hidden" data-route="alibaba-lease"></section>
+      <section id="page-anjuke-property" class="route-page hidden" data-route="anjuke-property"></section>
+      <section id="page-table-format" class="route-page hidden" data-route="table-format"></section>
+      <section id="page-depreciation-capex-forecast" class="route-page hidden" data-route="depreciation-capex-forecast"></section>
+    </main>
+    <script type="module" src="./shell.js"></script>
+  </body>
+</html>
