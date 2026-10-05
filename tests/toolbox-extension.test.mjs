@@ -10,6 +10,7 @@ import { alibabaLeaseModule } from "../toolbox-extension/src/modules/alibaba-lea
 import { anjukePropertyModule } from "../toolbox-extension/src/modules/anjuke-property/module.js";
 import { tableFormatModule } from "../toolbox-extension/src/modules/table-format/module.js";
 import { mapSettingsModule } from "../toolbox-extension/src/modules/map-settings/module.js";
+import { updatesModule } from "../toolbox-extension/src/modules/updates/module.js";
 import { depreciationCapexModule } from "../toolbox-extension/src/modules/depreciation-capex-forecast/module.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -23,6 +24,7 @@ const definitions = [
   anjukePropertyModule,
   tableFormatModule,
   mapSettingsModule,
+  updatesModule,
   depreciationCapexModule,
 ];
 
@@ -50,9 +52,9 @@ test("toolbox manifest pins the expected stable extension id", () => {
 });
 
 test("toolbox keeps the decoupled feature modules", () => {
-  assert.equal(definitions.length, 7);
-  assert.equal(new Set(definitions.map((item) => item.manifest.id)).size, 7);
-  assert.equal(new Set(definitions.map((item) => item.manifest.route)).size, 7);
+  assert.equal(definitions.length, 8);
+  assert.equal(new Set(definitions.map((item) => item.manifest.id)).size, 8);
+  assert.equal(new Set(definitions.map((item) => item.manifest.route)).size, 8);
   for (const definition of definitions) {
     assert.equal(definition.manifest.stage, "stable", `${definition.manifest.id} must ship enabled`);
     assert.ok(definition.manifest.messageNamespace.startsWith(definition.manifest.id));
@@ -72,7 +74,15 @@ test("toolbox shell hosts every module entry and page element", () => {
     assert.ok(shell.includes(`modules/${definition.manifest.id}/module.js`),
       `shell not registering ${definition.manifest.id}`);
   }
-  for (const forbidden of ["connector", "zhrdc", "checkConnections", "setConnection"]) {
+  // 外壳不得接入天源页面绑定/连接诊断接线；updates 需要的 setConnection 只是判空桩。
+  for (const forbidden of [
+    "zhrdc",
+    "checkConnections",
+    "checkLocalConnections",
+    "openConnections",
+    "getRuntimeMcpToken",
+    "setConnection(",
+  ]) {
     assert.ok(!shell.includes(forbidden), `shell must not reference ${forbidden}`);
   }
 });
@@ -113,6 +123,39 @@ test("native host installers whitelist the toolbox extension id", () => {
   assert.match(installer, new RegExp(EXPECTED_EXTENSION_ID));
   assert.match(installer, /TOOLBOX_EXTENSION_ID/);
   assert.match(runtime, new RegExp(EXPECTED_EXTENSION_ID));
+});
+
+test("toolbox updates module uses its own feed and never installs in place", () => {
+  const source = fs.readFileSync(path.join(toolboxRoot, "src/modules/updates/module.js"), "utf8");
+  assert.match(source, /updateManifestUrls: TOOLBOX_UPDATE_MANIFEST_URLS/);
+  assert.match(source, /toolbox-update-manifest\.json/);
+  assert.match(source, /PAGE_INSTALL_SUPPORTED = false/);
+  // 守卫必须在任何 install/test 请求发出之前返回（文件内函数顺序：test → waitFor → install）
+  const testFn = source.slice(
+    source.indexOf("async function testUpdateModule"),
+    source.indexOf("async function waitForInstallComplete"),
+  );
+  assert.ok(
+    testFn.indexOf("PAGE_INSTALL_SUPPORTED") < testFn.indexOf("test_workbench_update"),
+    "test guard must precede native test call",
+  );
+  const installFn = source.slice(
+    source.indexOf("async function installCompleteUpdate"),
+    source.indexOf("async function openUrl"),
+  );
+  assert.ok(
+    installFn.indexOf("PAGE_INSTALL_SUPPORTED") < installFn.indexOf("install_workbench_update"),
+    "install guard must precede native install call",
+  );
+  const version = JSON.parse(fs.readFileSync(path.join(toolboxRoot, "version.json"), "utf8"));
+  assert.equal(version.productVersion, "0.1.0");
+  assert.equal(version.bridgeProtocol, "connector-agent-binding-v3");
+  const compat = JSON.parse(fs.readFileSync(path.join(toolboxRoot, "runtime-compat.json"), "utf8"));
+  assert.equal(compat.extensionVersion, "0.1.0");
+  const shell = fs.readFileSync(path.join(toolboxRoot, "src/shell/shell.js"), "utf8");
+  assert.match(shell, /isBusy: \(\) => false/);
+  assert.match(shell, /setConnection/);
+  assert.match(shell, /connectorProtocolVersion: CONNECTOR_PROTOCOL_VERSION/);
 });
 
 test("toolbox module pages and assets ship with the package", () => {

@@ -11,6 +11,7 @@
 | 安居客数据 | `src/modules/anjuke-property` | 物业出售/租赁案例与原始证据 |
 | 折旧摊销与资本性支出预测 | `src/modules/depreciation-capex-forecast` | 长周期折旧摊销预测工作簿 |
 | 地图基础配置 | `src/modules/map-settings` | 高德密钥配置，供结果页地图生成使用（辅助模块，不计入模块徽标） |
+| 版本更新 | `src/modules/updates` | 检查工具箱专属发布清单（toolbox-update-manifest.json）；页内一键安装关闭，更新经发布页下载 |
 
 ## 与主工作台（extension/）的关系
 
