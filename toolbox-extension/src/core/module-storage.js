@@ -33,6 +33,15 @@ export class ModuleStorage {
   async clear() {
     await removeStorageValue(this.chrome, this.key);
   }
+
+  async migrateLegacy(legacyKey, fallback = null) {
+    const current = await this.load(undefined);
+    if (current !== undefined) return current;
+    const legacy = await getStorageValue(this.chrome, legacyKey);
+    if (legacy === undefined) return fallback;
+    await this.save(legacy);
+    return legacy;
+  }
 }
 
 export function createModuleStorageFactory(chromeApi) {

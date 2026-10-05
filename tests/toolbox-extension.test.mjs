@@ -128,8 +128,16 @@ test("native host installers whitelist the toolbox extension id", () => {
 test("toolbox updates module uses its own feed and never installs in place", () => {
   const source = fs.readFileSync(path.join(toolboxRoot, "src/modules/updates/module.js"), "utf8");
   assert.match(source, /updateManifestUrls: TOOLBOX_UPDATE_MANIFEST_URLS/);
-  assert.match(source, /toolbox-update-manifest\.json/);
+  assert.match(source, /repository: TOOLBOX_UPDATE_REPOSITORY/);
+  assert.match(source, /appraisal-toolbox-releases/);
+  assert.match(source, /toolbox-update-manifest\.json|raw\/master\/update-manifest\.json/);
   assert.match(source, /PAGE_INSTALL_SUPPORTED = false/);
+  // helper 侧必须按请求转发更新源覆盖并校验仓库参数（否则回落主工作台清单）
+  const host = fs.readFileSync(path.join(repoRoot, "native-helper/native_host.js"), "utf8");
+  assert.match(host, /updateManifestUrls: Array\.isArray\(message\.updateManifestUrls\)/);
+  const checker = fs.readFileSync(path.join(repoRoot, "native-helper/update_checker.js"), "utf8");
+  assert.match(checker, /function resolveRepository/);
+  assert.match(checker, /UPDATE_REPOSITORY_INVALID/);
   // 守卫必须在任何 install/test 请求发出之前返回（文件内函数顺序：test → waitFor → install）
   const testFn = source.slice(
     source.indexOf("async function testUpdateModule"),
