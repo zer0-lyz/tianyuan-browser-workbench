@@ -58,6 +58,7 @@ async function main() {
     `INSERT INTO session (id, project_id, directory, path, title, time_created, time_updated, task_type) VALUES ('sess-a1', 'proj-a', '${projectA}', '${projectA}', 'Zcode 对话一', 1000, 2000, 'interactive');`,
     `INSERT INTO session (id, project_id, directory, path, title, time_created, time_updated, task_type, time_archived) VALUES ('sess-b1', 'proj-b', '${projectB}', '${projectB}', '已归档对话', 1000, 4000, 'interactive', 1);`,
     `INSERT INTO session (id, project_id, directory, path, title, time_created, time_updated, task_type, parent_id) VALUES ('sess-child', 'proj-a', '${projectA}', '${projectA}', '子代理对话', 1000, 5000, 'interactive', 'sess-a1');`,
+    `INSERT INTO session (id, project_id, directory, path, title, time_created, time_updated, task_type) VALUES ('sess-c1', 'proj-a', '${projectB}', '${projectB}', '碰撞目录对话', 1000, 6000, 'interactive');`,
   ].join(" ")]);
 
   const bridge = createBridge({ bindingsPath, sourcesPath, compatibilityPath, zcodeDbPath });
@@ -73,22 +74,28 @@ async function main() {
     assert.equal(catalog.payload.ok, true);
     assert.equal(catalog.payload.providerId, "zcode");
     assert.equal(catalog.payload.source, "zcode-local-db");
-    assert.equal(catalog.payload.projects.length, 1);
-    assert.equal(catalog.payload.threads.length, 2);
+    assert.equal(catalog.payload.projects.length, 2);
+    assert.equal(catalog.payload.threads.length, 3);
 
+    // 同一 project_id 撞库的不同目录必须拆成两个项目（Zcode 对中文目录名生成相同 project_id）
     const project = catalog.payload.projects[0];
-    assert.equal(project.projectId, "proj-a");
-    assert.equal(project.projectName, "zcode-project-a");
-    assert.equal(project.projectPath, projectA);
-    assert.equal(project.updatedAt, 3000);
+    assert.equal(project.projectId, `zcode-project:${projectB}`);
+    assert.equal(project.projectName, "zcode-project-b");
+    assert.equal(project.projectPath, projectB);
+    assert.equal(project.updatedAt, 6000);
+    const projectAEntry = catalog.payload.projects[1];
+    assert.equal(projectAEntry.projectId, `zcode-project:${projectA}`);
+    assert.equal(projectAEntry.updatedAt, 3000);
 
-    assert.equal(catalog.payload.threads[0].threadId, "sess-a2");
-    assert.equal(catalog.payload.threads[0].title, "Zcode 对话二");
-    assert.equal(catalog.payload.threads[0].projectId, "proj-a");
-    assert.equal(catalog.payload.threads[0].projectName, "zcode-project-a");
-    assert.equal(catalog.payload.threads[0].projectPath, projectA);
-    assert.equal(catalog.payload.threads[0].recencyAt, 3);
-    assert.equal(catalog.payload.threads[1].threadId, "sess-a1");
+    assert.equal(catalog.payload.threads[0].threadId, "sess-c1");
+    assert.equal(catalog.payload.threads[0].projectId, `zcode-project:${projectB}`);
+    assert.equal(catalog.payload.threads[1].threadId, "sess-a2");
+    assert.equal(catalog.payload.threads[1].title, "Zcode 对话二");
+    assert.equal(catalog.payload.threads[1].projectId, `zcode-project:${projectA}`);
+    assert.equal(catalog.payload.threads[1].projectName, "zcode-project-a");
+    assert.equal(catalog.payload.threads[1].projectPath, projectA);
+    assert.equal(catalog.payload.threads[1].recencyAt, 3);
+    assert.equal(catalog.payload.threads[2].threadId, "sess-a1");
     assert.equal(catalog.payload.threads.some((thread) => thread.threadId === "sess-b1"), false);
     assert.equal(catalog.payload.threads.some((thread) => thread.threadId === "sess-child"), false);
 
