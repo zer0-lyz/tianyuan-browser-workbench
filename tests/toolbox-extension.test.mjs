@@ -127,34 +127,32 @@ test("native host installers whitelist the toolbox extension id", () => {
 
 test("toolbox updates module uses its own feed and never installs in place", () => {
   const source = fs.readFileSync(path.join(toolboxRoot, "src/modules/updates/module.js"), "utf8");
+  const template = fs.readFileSync(path.join(toolboxRoot, "src/modules/updates/template.js"), "utf8");
   assert.match(source, /updateManifestUrls: TOOLBOX_UPDATE_MANIFEST_URLS/);
   assert.match(source, /repository: TOOLBOX_UPDATE_REPOSITORY/);
   assert.match(source, /appraisal-toolbox-releases/);
-  assert.match(source, /toolbox-update-manifest\.json|raw\/master\/update-manifest\.json/);
-  assert.match(source, /PAGE_INSTALL_SUPPORTED = false/);
-  // helper 侧必须按请求转发更新源覆盖并校验仓库参数（否则回落主工作台清单）
-  const host = fs.readFileSync(path.join(repoRoot, "native-helper/native_host.js"), "utf8");
-  assert.match(host, /updateManifestUrls: Array\.isArray\(message\.updateManifestUrls\)/);
-  const checker = fs.readFileSync(path.join(repoRoot, "native-helper/update_checker.js"), "utf8");
-  assert.match(checker, /function resolveRepository/);
-  assert.match(checker, /UPDATE_REPOSITORY_INVALID/);
-  // 守卫必须在任何 install/test 请求发出之前返回（文件内函数顺序：test → waitFor → install）
-  const testFn = source.slice(
-    source.indexOf("async function testUpdateModule"),
-    source.indexOf("async function waitForInstallComplete"),
-  );
-  assert.ok(
-    testFn.indexOf("PAGE_INSTALL_SUPPORTED") < testFn.indexOf("test_workbench_update"),
-    "test guard must precede native test call",
-  );
-  const installFn = source.slice(
-    source.indexOf("async function installCompleteUpdate"),
-    source.indexOf("async function openUrl"),
-  );
-  assert.ok(
-    installFn.indexOf("PAGE_INSTALL_SUPPORTED") < installFn.indexOf("install_workbench_update"),
-    "install guard must precede native install call",
-  );
+  // 页内安装/自测动作彻底移除：不得出现主工作台安装 action 或对应 UI 文案。
+  for (const forbidden of [
+    "install_workbench_update",
+    "test_workbench_update",
+    "PAGE_INSTALL_SUPPORTED",
+    "更新全部组件",
+    "测试更新模块",
+    "天源浏览器工作台",
+    "Bridge",
+    "Connector",
+    "Agent 插件缓存",
+    "MCP token",
+    "GitHub Release",
+  ]) {
+    assert.ok(!source.includes(forbidden), `updates module must not contain ${forbidden}`);
+    assert.ok(!template.includes(forbidden), `updates template must not contain ${forbidden}`);
+  }
+  assert.match(source, /product: "评估工具箱"/);
+  assert.match(template, /打开发布页/);
+  assert.match(template, /评估工具箱专属发布源/);
+  // 无正式 Release 时显示“尚未发布”而非检查失败。
+  assert.match(source, /尚未发布/);
   const version = JSON.parse(fs.readFileSync(path.join(toolboxRoot, "version.json"), "utf8"));
   assert.equal(version.productVersion, "0.1.0");
   assert.equal(version.bridgeProtocol, "connector-agent-binding-v3");
@@ -164,6 +162,54 @@ test("toolbox updates module uses its own feed and never installs in place", () 
   assert.match(shell, /isBusy: \(\) => false/);
   assert.match(shell, /setConnection/);
   assert.match(shell, /connectorProtocolVersion: CONNECTOR_PROTOCOL_VERSION/);
+  // 主工作台的更新行为不受影响：extension 侧仍保留页内安装能力。
+  const workbenchUpdates = fs.readFileSync(
+    path.join(repoRoot, "extension/src/modules/updates/module.js"), "utf8");
+  assert.match(workbenchUpdates, /install_workbench_update/);
+  assert.match(workbenchUpdates, /更新全部组件/);
+});
+
+test("toolbox home groups six business tools and two auxiliary entries", () => {
+  const html = fs.readFileSync(path.join(toolboxRoot, "src/shell/index.html"), "utf8");
+  const cards = [...html.matchAll(/id="open([A-Za-z]+)"/g)].map((m) => m[1]);
+  assert.equal(cards.length, 8);
+  const registry = fs.readFileSync(path.join(toolboxRoot, "src/core/module-registry.js"), "utf8");
+  assert.match(registry, /个业务工具/);
+  // 地图配置与版本更新不计入业务工具徽标 → 徽标数 = 6。
+  const notCounted = ["updates", "map-settings"];
+  for (const id of notCounted) {
+    const source = fs.readFileSync(
+      path.join(toolboxRoot, `src/modules/${id}/module.js`), "utf8");
+    assert.match(source, /countInModuleBadge: false/, `${id} must not count into business badge`);
+  }
+  const counted = definitions.filter((item) => item.manifest.countInModuleBadge !== false);
+  assert.equal(counted.length, 6);
+  // 分组：业务工具区块包含 6 张卡片，辅助配置区块包含 2 张。
+  const businessSection = html.slice(html.indexOf("moduleSectionTitle"), html.indexOf("moduleSectionUtilityTitle"));
+  const utilitySection = html.slice(html.indexOf("moduleSectionUtilityTitle"));
+  const businessCards = [...businessSection.matchAll(/id="open[A-Za-z]+"/g)].length;
+  const utilityCards = [...utilitySection.matchAll(/id="open[A-Za-z]+"/g)].length;
+  assert.equal(businessCards, 6);
+  assert.equal(utilityCards, 2);
+  // 警告三角形图标不得再出现在首页图标中。
+  assert.ok(!html.includes("8.25 14.25"), "warning triangle path must be gone");
+  // 土地卡片带健康状态标记（由真实请求结果驱动）。
+  assert.match(html, /id="landPublicityHealth" hidden/);
+});
+
+test("table-format and anjuke gate their primary actions on preconditions", () => {
+  for (const [id, buttonId, gateId] of [
+    ["table-format", "runTableFormat", "tableFormatGate"],
+    ["anjuke-property", "runAnjukeProperty", "anjukePropertyGate"],
+  ]) {
+    const source = fs.readFileSync(
+      path.join(toolboxRoot, `src/modules/${id}/module.js`), "utf8");
+    const template = fs.readFileSync(
+      path.join(toolboxRoot, `src/modules/${id}/template.js`), "utf8");
+    assert.match(source, new RegExp(`renderRunGate`), `${id} must implement run gate`);
+    assert.match(template, new RegExp(`id="${gateId}"`), `${id} template must carry gate reason`);
+    assert.match(template, new RegExp(`id="${buttonId}"`));
+  }
 });
 
 test("toolbox module pages and assets ship with the package", () => {

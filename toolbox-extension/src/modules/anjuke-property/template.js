@@ -59,6 +59,7 @@ export const anjukePropertyTemplate = `
       <button id="importAnjukePropertyCurrentUrl" type="button">导入当前网址</button>
       <button id="runAnjukeProperty" type="button">开始网络抓取</button>
     </div>
+    <p id="anjukePropertyGate" class="gate-reason" data-kind="warn" role="status"></p>
   </section>
 
   <section class="section anjuke-property-results">

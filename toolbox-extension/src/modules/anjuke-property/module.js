@@ -25,7 +25,7 @@ function elementMap(documentRef) {
     "anjukePropertyCaseType", "anjukePropertyMaxCases", "anjukePropertyKeyword", "anjukePropertyWaitVerification",
     "anjukePropertyScreenshot", "applyAnjukePropertyParams", "resetAnjukePropertyParams",
     "anjukePropertyParameterState", "anjukePropertyParameterMessage", "anjukePropertyOutputDirectory",
-    "chooseAnjukePropertyOutput", "anjukePropertyProfileHint", "openAnjukePropertySource", "runAnjukeProperty", "openAnjukePropertyExcel", "openAnjukePropertyCsv",
+    "chooseAnjukePropertyOutput", "anjukePropertyProfileHint", "openAnjukePropertySource", "runAnjukeProperty", "anjukePropertyGate", "openAnjukePropertyExcel", "openAnjukePropertyCsv",
     "openAnjukePropertyHtml", "openAnjukePropertyResult", "openAnjukePropertyMap", "pauseAnjukeProperty",
     "stopAnjukeProperty", "clearAnjukePropertyResults", "anjukePropertyResultCount", "anjukePropertyResultStatus",
     "anjukePropertyProgressPhase", "anjukePropertyProgressPercent", "anjukePropertyProgressBar",
@@ -333,6 +333,7 @@ export const anjukePropertyModule = {
       const applied = parametersApplied();
       elements.anjukePropertyParameterState.textContent = applied ? "参数已应用" : "参数有改动，需重新应用";
       elements.anjukePropertyParameterState.dataset.kind = applied ? "ok" : "warn";
+      renderRunGate();
     }
 
     function renderConfig() {
@@ -347,11 +348,32 @@ export const anjukePropertyModule = {
       renderParameterState();
     }
 
+    // 主操作门禁：未导入网址 / 未选目录 / 参数未应用 / 运行中，均实时禁用并说明原因。
+    function renderRunGate() {
+      const button = elements.runAnjukeProperty;
+      const gate = elements.anjukePropertyGate;
+      if (!button) return;
+      const missing = [];
+      if (running) {
+        missing.push("正在抓取中");
+      } else {
+        if (!config.currentUrl) missing.push("先导入安居客列表网址");
+        if (!config.outputDirectory) missing.push("先选择输出目录");
+        if (!parametersApplied()) missing.push("先点击“确认并应用参数”");
+      }
+      const blocked = missing.length > 0;
+      button.disabled = blocked;
+      if (gate) {
+        gate.textContent = blocked ? `暂时无法开始抓取：${missing.join("、")}` : "";
+        gate.dataset.kind = blocked ? "warn" : "";
+      }
+    }
+
     function renderRunButtons() {
       elements.pauseAnjukeProperty.disabled = !running;
       elements.stopAnjukeProperty.disabled = !running;
       elements.pauseAnjukeProperty.textContent = runControl.paused ? "继续抓取" : "暂停抓取";
-      elements.runAnjukeProperty.disabled = running;
+      renderRunGate();
       elements.openAnjukePropertySource.disabled = running;
       elements.importAnjukePropertyCurrentUrl.disabled = running;
     }

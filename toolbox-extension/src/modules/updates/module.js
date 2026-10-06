@@ -5,10 +5,9 @@ const TOOLBOX_UPDATE_MANIFEST_URLS = [
   "https://gitee.com/zer0_y/appraisal-toolbox-releases/raw/master/update-manifest.json",
   "https://github.com/zer0-lyz/appraisal-toolbox-releases/releases/latest/download/update-manifest.json",
 ];
-// 工具箱与主工作台共用同一个本机运行组件。install_workbench_update /
-// test_workbench_update 的安装目标写死为主工作台运行副本与共享 Helper，
-// 工具箱指向自己的清单去触发它们会污染主工作台，因此页内安装/自测关闭。
-const PAGE_INSTALL_SUPPORTED = false;
+// 工具箱与主工作台共用同一个本机运行组件。Helper 的页内安装/自测动作
+// 目标写死为主工作台运行副本，工具箱绝不调用（本文件不出现任何此类
+// action），更新一律经发布页下载安装。
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const AUTO_CHECK_TIMER_MS = 30 * 60 * 1000;
 
@@ -83,15 +82,11 @@ function elementMap(documentRef) {
     "updateCheckedAt",
     "updateFeedback",
     "updatePrimaryAction",
-    "updateTestNote",
         "updateMoreActions",
         "updateNotesDetails",
         "updateNotesRemainingDetails",
         "updateNotesRemaining",
         "updateTechnicalDetails",
-    "checkForUpdates",
-    "testUpdate",
-    "installUpdate",
     "downloadUpdate",
     "openReleasePage",
     "updateProgressPanel",
@@ -117,6 +112,7 @@ export const updatesModule = {
     entryElementId: "openUpdatesTop",
     pageElementId: "page-updates",
     storageVersion: 1,
+    countInModuleBadge: false,
     usesLegacyScope: false,
     scope: { companies: false, subjects: false },
   },
@@ -125,8 +121,6 @@ export const updatesModule = {
     let context;
     let elements;
     let checking = false;
-    let testing = false;
-    let installing = false;
     let latestResult = null;
     let versionConfig = null;
     let runtimeContract = null;
@@ -153,7 +147,7 @@ export const updatesModule = {
         }))
         : [];
       return JSON.stringify({
-        product: "天源浏览器工作台",
+        product: "评估工具箱",
         currentVersion: String(currentVersion()),
         latestVersion: String(result?.latestVersion || ""),
         platform: String(result?.platform || ""),
@@ -211,9 +205,9 @@ export const updatesModule = {
         UPDATE_DOWNLOAD_SIZE_MISMATCH: "安装包大小与发布记录不一致，已停止处理。",
         UPDATE_FETCH_UNAVAILABLE: "本机 Node.js 运行时不支持下载，请更新本机运行组件。",
         UPDATE_INSTALLER_NOT_STARTED: "更新程序没有成功启动，请重试并查看诊断日志。",
-        UPDATE_RUNNER_NOT_FOUND: "Windows 更新脚本没有成功启动，请重新加载工作台后重试。",
-        UPDATE_PARENT_PROCESS_NOT_EXITED: "旧工作台服务没有及时退出，已停止更新以保护当前版本。",
-        UPDATE_FILE_LOCKED: "工作台文件仍被占用，当前版本已保留；请关闭相关浏览器窗口后重试。",
+        UPDATE_RUNNER_NOT_FOUND: "更新脚本没有成功启动，请重新加载扩展后重试。",
+        UPDATE_PARENT_PROCESS_NOT_EXITED: "旧版本服务没有及时退出，已停止更新以保护当前版本。",
+        UPDATE_FILE_LOCKED: "工具箱文件仍被占用，当前版本已保留；请关闭相关浏览器窗口后重试。",
         UPDATE_ALREADY_RUNNING: "已有更新正在执行，请等待当前更新结束。",
         UPDATE_COMPLETION_STATUS_MISSING: "安装程序未返回完成状态，当前版本已保留。",
         WORKBENCH_UPDATE_TIMEOUT: "更新等待超时，当前版本已保留；请查看诊断日志后重试。",
@@ -232,7 +226,7 @@ export const updatesModule = {
       }
       if (String(reason || "").startsWith("UPDATE_DOWNLOAD_HTTP_")) {
         const code = String(reason).slice("UPDATE_DOWNLOAD_HTTP_".length);
-        return `GitHub 安装包下载失败（HTTP ${code}），请稍后重试。`;
+        return `安装包下载失败（HTTP ${code}），请打开发布页重试。`;
       }
       if (String(reason || "").startsWith("UPDATE_PACKAGE_FILE_MISSING:")) {
         return "安装包文件不完整，已停止处理。";
@@ -253,13 +247,13 @@ export const updatesModule = {
         downloading: "正在下载更新包",
         verifying: "正在校验更新包",
         extracting: "正在解压更新包",
-        installing: "正在安装工作台组件",
+        installing: "正在安装工具箱组件",
         verifying_install: "正在验证安装结果",
         complete: "更新已完成",
         preparing: "正在准备更新",
-        stopping_services: "正在停止工作台服务",
+        stopping_services: "正在停止旧版本服务",
         waiting_for_file_release: "正在等待文件释放",
-        restarting_services: "正在重启工作台服务",
+        restarting_services: "正在重启服务",
         rollback: "正在恢复原版本",
       };
       return labels[phase] || (phase === "failed"
@@ -270,7 +264,7 @@ export const updatesModule = {
     function renderProgress(status = operationStatus) {
       operationStatus = status;
       const normalizedPhase = status?.normalizedPhase || status?.phase;
-      const active = installing || testing || (
+      const active = checking || (
         status
         && !["idle", "complete", "test_complete", "failed"].includes(normalizedPhase)
       );
@@ -375,7 +369,7 @@ export const updatesModule = {
 
       const assetUrl = safeReleaseUrl(preferredCandidate?.url || result?.asset?.url);
       const releaseUrl = safeReleaseUrl(result?.releaseUrl);
-      const operationBusy = checking || testing || installing;
+      const operationBusy = checking;
       if (elements.downloadUpdate) {
         elements.downloadUpdate.disabled = operationBusy || !assetUrl;
         elements.downloadUpdate.dataset.url = assetUrl;
@@ -384,28 +378,19 @@ export const updatesModule = {
         elements.openReleasePage.disabled = operationBusy || !releaseUrl;
         elements.openReleasePage.dataset.url = releaseUrl;
       }
-      if (elements.testUpdate) elements.testUpdate.disabled = operationBusy
-        || !assetUrl
-        || !result?.ok;
-      if (elements.installUpdate) elements.installUpdate.disabled = operationBusy
-        || !assetUrl
-        || !result?.ok
-        || (!result?.updateAvailable && !result?.repairRequired);
       if (elements.updatePrimaryAction) {
         elements.updatePrimaryAction.disabled = operationBusy;
+        // 页内不安装：发现新版本/需修复时主按钮直接打开发布页。
         elements.updatePrimaryAction.textContent = result?.updateAvailable || result?.repairRequired
-          ? `更新到 v${result.latestVersion}`
-          : "重新检查";
-      }
-      if (elements.updateTestNote && asset?.size) {
-        elements.updateTestNote.textContent = `安全自测会下载当前平台安装包（${formatBytes(asset.size)}），并验证 SHA-256、解压和文件完整性；不会安装、重启或改变当前版本，测试文件完成后自动删除。`;
+          ? "打开发布页"
+          : "检查更新";
       }
 
       if (!result) {
-        elements.updateHeadline.textContent = `天源浏览器工作台 v${currentVersion}`;
-        elements.updateDescription.textContent = "检查不使用 MCP token；安装前会再次确认。";
+        elements.updateHeadline.textContent = `评估工具箱 v${currentVersion}`;
+        elements.updateDescription.textContent = "检查不使用任何凭据；工具箱更新经发布页下载安装，不在页内覆盖组件。";
         elements.updateBadge.textContent = "未检查";
-        elements.updateFeedback.textContent = "尚未检查发布源";
+        elements.updateFeedback.textContent = "尚未检查工具箱专属发布源";
         elements.updateFeedback.dataset.kind = "";
         setTopStatus(`v${currentVersion}`, "idle");
         return;
@@ -444,8 +429,8 @@ export const updatesModule = {
         elements.updateDescription.textContent = "产品版本相同，但运行指纹不同，需要重新下载安装当前版本。";
         elements.updateBadge.textContent = "需要修复";
         elements.updateFeedback.textContent = assetUrl
-          ? `可点击“更新到 v${currentVersion}”自动修复${result.preferredDownloadChannel === "github-api" ? "；已优先选择 GitHub API 通道" : ""}`
-          : "请打开发布页重新下载安装";
+          ? "版本指纹与发布源不一致，请从发布页重新下载安装当前版本"
+          : "请打开发布页重新下载安装当前版本";
         elements.updateFeedback.dataset.kind = "error";
         setTopStatus("需修复", "error");
         return;
@@ -453,12 +438,12 @@ export const updatesModule = {
       if (result.updateAvailable) {
         elements.updateHeadline.textContent = `发现新版本 v${result.latestVersion}`;
         elements.updateDescription.textContent = result.mandatory
-          ? "当前版本低于最低支持版本，需要更新后再继续正式操作。"
-          : "可一次更新扩展、Helper、Bridge、Connector 和 Agent 插件缓存。";
+          ? "当前版本低于最低支持版本，需要更新后再继续使用。"
+          : "工具箱只更新扩展本体；请从发布页下载安装包后覆盖加载目录。";
         elements.updateBadge.textContent = result.mandatory ? "必须更新" : "有新版本";
         elements.updateFeedback.textContent = assetUrl
-          ? `已找到适用于 ${result.platform} 的安装包${result.preferredDownloadChannel === "github-api" ? "，已优先选择 GitHub API 下载通道" : ""}`
-          : "未找到当前平台安装包，请查看 GitHub 发布页";
+          ? `已找到适用于 ${result.platform} 的安装包，请打开发布页下载`
+          : "未找到当前平台安装包，请打开发布页查看";
         elements.updateFeedback.dataset.kind = result.mandatory ? "error" : "ok";
         setTopStatus(
           result.mandatory ? "必须更新" : "有更新",
@@ -472,14 +457,14 @@ export const updatesModule = {
           `当前为 v${currentVersion}，GitHub 最新正式版本为 v${result.latestVersion}。`;
         elements.updateBadge.textContent = "本机较新";
         elements.updateFeedback.textContent =
-          "可以使用“测试更新模块”验证公开安装包链路；测试不会降级或安装组件";
+          "如需回退，请从发布页下载历史版本安装包";
         elements.updateFeedback.dataset.kind = "ok";
         setTopStatus(`v${currentVersion}`, "ok");
         renderProgress();
         return;
       }
       elements.updateHeadline.textContent = "已是最新版本";
-      elements.updateDescription.textContent = `当前版本 v${currentVersion} 与 GitHub 最新正式版本一致。`;
+      elements.updateDescription.textContent = `当前版本 v${currentVersion} 与工具箱发布源最新正式版本一致。`;
       elements.updateBadge.textContent = "最新";
       elements.updateFeedback.textContent = "无需更新";
       elements.updateFeedback.dataset.kind = "ok";
@@ -488,11 +473,9 @@ export const updatesModule = {
     }
 
     async function check({ automatic = false } = {}) {
-      if (checking || testing || installing) return latestResult;
+      if (checking) return latestResult;
       checking = true;
-      elements.checkForUpdates.disabled = true;
-      elements.testUpdate.disabled = true;
-      elements.installUpdate.disabled = true;
+
       elements.downloadUpdate.disabled = true;
       setTopStatus("检查中", "idle");
       elements.updateBadge.textContent = "检查中";
@@ -540,7 +523,6 @@ export const updatesModule = {
         return latestResult;
       } finally {
         checking = false;
-        elements.checkForUpdates.disabled = false;
         render(latestResult);
       }
     }
@@ -554,227 +536,6 @@ export const updatesModule = {
       const checkedAt = new Date(latestResult?.checkedAt || 0).getTime();
       if (checkedAt && Date.now() - checkedAt < CHECK_INTERVAL_MS) return;
       await check({ automatic: true });
-    }
-
-    async function readInstallStatus() {
-      return await context.sendNativeMessage({
-        action: "get_workbench_update_status",
-      }, 15000);
-    }
-
-    async function testUpdateModule() {
-      if (!PAGE_INSTALL_SUPPORTED) {
-        context.setStatus("工具箱未接入页内安装，更新模块自测不适用。", "warn");
-        return;
-      }
-      if (testing || installing || checking || !hasDownloadAsset()) return;
-      const confirmed = window.confirm([
-        "确认测试更新模块？",
-        "",
-        `将下载当前平台安装包（${formatBytes(latestResult?.asset?.size)}），并测试：`,
-        "1. 发布源下载与重试通道",
-        "2. SHA-256 校验",
-        "3. 解压和安装包文件完整性",
-        "",
-        "不会安装组件、改变版本或重启；测试文件完成后自动删除。",
-      ].join("\n"));
-      if (!confirmed) return;
-
-      testing = true;
-      elements.testUpdate.textContent = "测试中...";
-      setTopStatus("测试中", "idle");
-      renderProgress({
-        mode: "test",
-        phase: "checking",
-        percent: 3,
-        message: "正在准备更新模块安全自测",
-      });
-      render(latestResult);
-      context.setStatus("正在测试更新链路，不会执行安装...", "idle");
-      try {
-        const { config, contract } = await loadVersionContext();
-        let requestFinished = false;
-        const request = context.sendNativeMessage({
-          action: "test_workbench_update",
-          currentVersion: config.productVersion
-            || context.extensionManifest.version_name
-            || context.extensionManifest.version,
-          currentBuildNumber: Number(config.buildNumber || 0),
-          currentRuntimeBuildId: String(contract?.runtimeBuildId || ""),
-          currentRuntimeBuildKind: String(contract?.runtimeBuildKind || "release"),
-        }, 20 * 60 * 1000).finally(() => {
-          requestFinished = true;
-        });
-
-        while (!requestFinished) {
-          await Promise.race([
-            sleep(1000),
-            request.then(() => undefined, () => undefined),
-          ]);
-          if (requestFinished) break;
-          try {
-            const status = await readInstallStatus();
-            if (status?.mode === "test") renderProgress(status);
-          } catch {
-          }
-        }
-
-        const result = await request;
-        if (!result?.ok || result?.phase !== "test_complete") {
-          throw new Error(result?.reason || "WORKBENCH_UPDATE_TEST_FAILED");
-        }
-        renderProgress(result);
-        elements.updateFeedback.textContent =
-          "测试通过：下载、SHA-256 校验、解压和文件完整性均正常；未安装任何组件";
-        elements.updateFeedback.dataset.kind = "ok";
-        setTopStatus("测试通过", "ok");
-        context.setStatus("更新模块测试通过，当前版本和已安装组件均未改变。", "ok");
-      } catch (error) {
-        const reason = String(error?.message || error);
-        const friendly = updateFailureText(reason);
-        renderProgress({
-          mode: "test",
-          phase: "failed",
-          percent: 0,
-          reason,
-          errorCode: reason,
-          currentVersionUnchanged: true,
-          message: friendly,
-        });
-        elements.updateFeedback.textContent = `更新模块测试失败：${friendly}`;
-        elements.updateFeedback.dataset.kind = "error";
-        setTopStatus("测试失败", "error");
-        context.setStatus(`更新模块测试失败：${friendly}`, "error");
-      } finally {
-        const finalStatus = operationStatus;
-        testing = false;
-        elements.testUpdate.textContent = "测试更新模块";
-        render(latestResult);
-        renderProgress(finalStatus);
-        if (finalStatus?.phase === "test_complete") {
-          elements.updateFeedback.textContent =
-            "测试通过：下载、SHA-256 校验、解压和文件完整性均正常；未安装任何组件";
-          elements.updateFeedback.dataset.kind = "ok";
-          setTopStatus("测试通过", "ok");
-        } else if (finalStatus?.phase === "failed") {
-          const friendly = updateFailureText(finalStatus.reason);
-          elements.updateFeedback.textContent = `更新模块测试失败：${friendly} 当前版本未改变。`;
-          elements.updateFeedback.dataset.kind = "error";
-          setTopStatus("测试失败", "error");
-        }
-      }
-    }
-
-    async function waitForInstallComplete() {
-      const deadline = Date.now() + 15 * 60 * 1000;
-      let lastStatus = null;
-      while (Date.now() < deadline) {
-        try {
-          lastStatus = await readInstallStatus();
-        } catch {
-          await sleep(1200);
-          continue;
-        }
-        renderProgress(lastStatus);
-        if (lastStatus?.phase === "complete") return lastStatus;
-        if (lastStatus?.phase === "failed") {
-          throw new Error(lastStatus.reason || "WORKBENCH_UPDATE_FAILED");
-        }
-        await sleep(1200);
-      }
-      throw new Error(lastStatus?.reason || "WORKBENCH_UPDATE_TIMEOUT");
-    }
-
-    async function installCompleteUpdate() {
-      if (!PAGE_INSTALL_SUPPORTED) {
-        elements.updateFeedback.textContent =
-          "工具箱暂不支持页内一键更新：检测到新版本时请点“打开发布页”下载安装包，或由开发会话同步仓库。";
-        elements.updateFeedback.dataset.kind = "warn";
-        context.setStatus("工具箱不通过页内更新覆盖组件，避免影响主工作台。", "warn");
-        return;
-      }
-      if (installing || testing || checking || !hasDownloadAsset()) return;
-      const confirmed = window.confirm([
-        `确认将天源浏览器工作台更新到 v${latestResult.latestVersion}？`,
-        "",
-        "将同步更新：浏览器扩展、Native Helper、Bridge、Connector 和 Agent 插件缓存。",
-        "不会保存或输出 MCP token、Cookie、Authorization、密码或验证码。",
-        "更新完成后浏览器扩展会自动重新加载；Codex 或 WorkBuddy 可能需要重启。",
-      ].join("\n"));
-      if (!confirmed) return;
-
-      installing = true;
-      render(latestResult);
-      elements.installUpdate.textContent = "更新中...";
-      setTopStatus("更新中", "idle");
-      renderProgress({ phase: "checking", percent: 3, message: "正在准备更新" });
-      context.setStatus("正在下载并安装全部工作台组件...", "idle");
-      try {
-        const { config, contract } = await loadVersionContext();
-        let requestFinished = false;
-        const request = context.sendNativeMessage({
-          action: "install_workbench_update",
-          currentVersion: config.productVersion
-            || context.extensionManifest.version_name
-            || context.extensionManifest.version,
-          currentBuildNumber: Number(config.buildNumber || 0),
-          currentRuntimeBuildId: String(contract?.runtimeBuildId || ""),
-          currentRuntimeBuildKind: String(contract?.runtimeBuildKind || "release"),
-        }, 10 * 60 * 1000).finally(() => {
-          requestFinished = true;
-        });
-
-        while (!requestFinished) {
-          await sleep(1000);
-          try {
-            renderProgress(await readInstallStatus());
-          } catch {
-          }
-        }
-
-        const started = await request;
-        if (!started?.ok) {
-          if (started?.reason === "UNKNOWN_ACTION") {
-            await openUrl(elements.downloadUpdate);
-          }
-          throw new Error(started?.reason || "WORKBENCH_UPDATE_START_FAILED");
-        }
-        const completed = await waitForInstallComplete();
-        renderProgress(completed);
-        elements.updateFeedback.textContent = "全部组件更新完成，正在重新加载扩展";
-        elements.updateFeedback.dataset.kind = "ok";
-        setTopStatus("已更新", "ok");
-        context.setStatus("全部组件更新完成；Codex 或 WorkBuddy 如仍显示旧工具，请重启。", "ok");
-        await sleep(1200);
-        context.chrome.runtime.reload();
-      } catch (error) {
-        const reason = String(error?.message || error);
-        const friendly = updateFailureText(reason);
-        renderProgress({
-          phase: "failed",
-          percent: 0,
-          reason,
-          errorCode: reason,
-          currentVersionUnchanged: true,
-          message: friendly,
-        });
-        elements.updateFeedback.textContent = `${friendly} 当前版本未改变。`;
-        elements.updateFeedback.dataset.kind = "error";
-        setTopStatus("更新失败", "error");
-        context.setStatus(`更新失败：${friendly}`, "error");
-      } finally {
-        const finalStatus = operationStatus;
-        installing = false;
-        elements.installUpdate.textContent = "更新全部组件";
-        render(latestResult);
-        renderProgress(finalStatus);
-        if (finalStatus?.phase === "failed") {
-          const friendly = updateFailureText(finalStatus.reason);
-          elements.updateFeedback.textContent = `${friendly} 当前版本未改变。`;
-          elements.updateFeedback.dataset.kind = "error";
-          setTopStatus("更新失败", "error");
-        }
-      }
     }
 
     async function openUrl(element) {
@@ -817,16 +578,11 @@ export const updatesModule = {
         context.scope.on(elements.backFromUpdates, "click", () =>
           context.navigate("home")
         );
-        context.scope.on(elements.checkForUpdates, "click", () =>
-          check({ automatic: false })
-        );
         context.scope.on(elements.updatePrimaryAction, "click", () => (
           latestResult?.updateAvailable || latestResult?.repairRequired
-            ? installCompleteUpdate()
+            ? openUrl(elements.openReleasePage)
             : check({ automatic: false })
         ));
-        context.scope.on(elements.testUpdate, "click", testUpdateModule);
-        context.scope.on(elements.installUpdate, "click", installCompleteUpdate);
         context.scope.on(elements.downloadUpdate, "click", () =>
           openUrl(elements.downloadUpdate)
         );
