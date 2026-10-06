@@ -87,6 +87,9 @@ function normalizeConfig(value = {}) {
     historyDirectory: String(source.historyDirectory || "").trim(),
     historyPath: String(source.historyPath || "").trim(),
     historyRefresh: source.historyRefresh !== false,
+    // 数据源健康状态只来自真实请求结果，持久化以便下次打开先展示最近一次检查结论。
+    dataSourceStatus: ["ok", "unavailable"].includes(source.dataSourceStatus) ? source.dataSourceStatus : "",
+    dataSourceCheckedAt: String(source.dataSourceCheckedAt || "").trim(),
   };
 }
 
@@ -166,6 +169,39 @@ export const landPublicityModule = {
       county.value = counties.some((item) => item.name === config.county) ? config.county : "";
     }
 
+    // 首页健康状态：只由真实请求结果驱动（行政区/列表任一成功→ok；任一失败→unavailable）。
+    // 初始渲染使用上一次真实检查的持久化结果，不做静态假设。
+    function renderHealthMarker() {
+      const marker = context.document.getElementById("landPublicityHealth");
+      if (!marker) return;
+      const status = config.dataSourceStatus;
+      const checkedAt = config.dataSourceCheckedAt
+        ? new Date(config.dataSourceCheckedAt).toLocaleTimeString("zh-CN", { hour12: false })
+        : "";
+      if (status === "ok") {
+        marker.hidden = false;
+        marker.dataset.kind = "ok";
+        marker.textContent = `数据源正常${checkedAt ? `（${checkedAt} 检查）` : ""}`;
+      } else if (status === "unavailable") {
+        marker.hidden = false;
+        marker.dataset.kind = "warn";
+        marker.textContent = `数据源异常${checkedAt ? `（${checkedAt} 检查）` : ""}，进入模块重试`;
+      } else {
+        marker.hidden = true;
+        marker.textContent = "";
+      }
+    }
+
+    function recordDataSourceStatus(status, reason = "") {
+      config.dataSourceStatus = status;
+      config.dataSourceCheckedAt = new Date().toISOString();
+      renderHealthMarker();
+      void context.storage.save({ ...config });
+      if (status === "unavailable") {
+        console.warn(`land-publicity data source unavailable: ${reason}`);
+      }
+    }
+
     async function loadRegionCatalog() {
       if (regionLoading) return regionLoading;
       setRegionStatus("正在从浙江土地市场网加载行政区…");
@@ -175,11 +211,13 @@ export const landPublicityModule = {
           regionCatalog = result.regions;
           renderRegionOptions();
           setRegionStatus(`已加载 ${regionRoots().length} 个地市，可继续选择区县。`, "ok");
+          recordDataSourceStatus("ok");
           return result;
         })
         .catch((error) => {
           renderRegionOptions();
           setRegionStatus(`行政区加载失败：${error?.message || String(error)}；可点击“刷新行政区”重试。`, "error");
+          recordDataSourceStatus("unavailable", error?.message || String(error));
           return null;
         })
         .finally(() => { regionLoading = null; });
@@ -458,6 +496,7 @@ export const landPublicityModule = {
         elements = elementMap(context.document);
         config = normalizeConfig(await context.storage.load({}));
         renderConfig();
+        renderHealthMarker();
         context.scope.on(elements.openLandPublicity, "click", () => context.navigate("land-publicity"));
         context.scope.on(elements.backFromLandPublicity, "click", () => context.navigate("home"));
         context.scope.on(elements.chooseLandPublicityOutput, "click", chooseOutputDirectory);

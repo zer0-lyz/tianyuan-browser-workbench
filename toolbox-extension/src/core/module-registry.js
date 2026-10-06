@@ -153,6 +153,6 @@ export class ModuleRegistry {
   #renderModuleCount() {
     const count = [...this.entries.values()].filter((entry) => entry.enabled && entry.manifest.countInModuleBadge !== false).length;
     const badge = this.document.getElementById("moduleCountBadge");
-    if (badge) badge.textContent = `${count} 个模块`;
+    if (badge) badge.textContent = count === 1 ? "1 个业务工具" : `${count} 个业务工具`;
   }
 }

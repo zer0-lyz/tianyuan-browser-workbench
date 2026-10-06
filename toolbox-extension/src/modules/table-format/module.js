@@ -27,6 +27,7 @@ function elementMap(documentRef) {
     "tableFormatResultMessage",
     "tableFormatResultList",
     "runTableFormat",
+    "tableFormatGate",
   ];
   return Object.fromEntries(ids.map((id) => [id, documentRef.getElementById(id)]));
 }
@@ -92,10 +93,32 @@ export const tableFormatModule = {
     let inputPaths = [];
     let running = false;
 
+    // 主操作门禁：按钮禁用态与前置条件实时同步，原因紧贴按钮持续显示。
+    function renderRunGate() {
+      const button = elements.runTableFormat;
+      const gate = elements.tableFormatGate;
+      if (!button) return;
+      let reason = "";
+      if (running) {
+        reason = "正在执行表格设置…";
+      } else if (!inputPaths.length) {
+        reason = "请先选择至少一个 .docx 文件";
+      } else if (config.outputMode === "new_directory" && !config.outputDirectory) {
+        reason = "当前输出方式需要先选择目标文件夹";
+      }
+      const blocked = Boolean(reason);
+      button.disabled = blocked;
+      if (gate) {
+        gate.textContent = blocked ? `暂时无法开始执行：${reason}` : "";
+        gate.dataset.kind = blocked ? "warn" : "";
+      }
+    }
+
     function renderInputList() {
       const paths = [...inputPaths];
       elements.tableFormatInputCount.textContent = paths.length ? `${paths.length} 个文件` : "未选择";
       elements.clearTableFormatFiles.disabled = !paths.length || running;
+      renderRunGate();
       elements.tableFormatFileList.innerHTML = "";
       if (!paths.length) {
         const item = context.document.createElement("li");
@@ -119,6 +142,7 @@ export const tableFormatModule = {
         "hidden",
         config.outputMode !== "new_directory",
       );
+      renderRunGate();
     }
 
     function renderProgress(payload = {}) {
@@ -200,7 +224,7 @@ export const tableFormatModule = {
         return;
       }
       running = true;
-      elements.runTableFormat.disabled = true;
+      renderRunGate();
       elements.clearTableFormatFiles.disabled = true;
       renderResults([]);
       renderProgress({ percent: 1, total: inputPaths.length, successCount: 0, failedCount: 0, message: "正在准备表格设置" });
@@ -232,7 +256,6 @@ export const tableFormatModule = {
         context.setStatus(`表格设置失败：${error?.message || String(error)}`, "error");
       } finally {
         running = false;
-        elements.runTableFormat.disabled = false;
         renderInputList();
       }
     }

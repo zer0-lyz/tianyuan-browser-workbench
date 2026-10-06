@@ -2,7 +2,7 @@ export const updatesTemplate = `
   <div class="page-heading">
     <div>
       <h2>版本更新</h2>
-      <p>通过发布源检查天源浏览器工作台更新</p>
+      <p>从评估工具箱专属发布源检查新版本</p>
     </div>
     <button id="backFromUpdates" type="button" class="secondary">返回首页</button>
   </div>
@@ -10,7 +10,7 @@ export const updatesTemplate = `
     <div class="section-title-row">
       <div>
         <h2 id="updateHeadline">正在读取当前版本</h2>
-        <p id="updateDescription" class="section-description">检查不使用 MCP token；安装前会再次确认。</p>
+        <p id="updateDescription" class="section-description">检查不使用任何凭据；工具箱更新经发布页下载安装，不在页内覆盖组件。</p>
       </div>
       <span id="updateBadge" class="badge">未检查</span>
     </div>
@@ -22,7 +22,7 @@ export const updatesTemplate = `
       <div><dt>目标平台</dt><dd id="updatePlatform">-</dd></div>
       <div><dt>最后检查</dt><dd id="updateCheckedAt">-</dd></div>
     </dl>
-    <div id="updateFeedback" class="inline-feedback" role="status" aria-live="polite">尚未检查 GitHub Release</div>
+    <div id="updateFeedback" class="inline-feedback" role="status" aria-live="polite">尚未检查工具箱专属发布源</div>
     <div id="updateProgressPanel" class="update-progress hidden" role="status" aria-live="polite">
       <progress id="updateProgressBar" max="100" value="0"></progress>
       <span id="updateProgressText">等待开始</span>
@@ -30,28 +30,20 @@ export const updatesTemplate = `
     <div class="button-row update-primary-actions">
       <button id="updatePrimaryAction" type="button">检查更新</button>
     </div>
-    <div class="update-legacy-actions hidden" aria-hidden="true">
-      <button id="checkForUpdates" type="button">检查更新</button>
-      <button id="installUpdate" type="button" disabled>更新全部组件</button>
-    </div>
     <details id="updateMoreActions" class="update-more-actions">
       <summary>更多操作</summary>
       <div class="button-row">
-        <button id="testUpdate" type="button" class="secondary" disabled>测试更新模块</button>
         <button id="downloadUpdate" type="button" class="secondary" disabled>手动下载安装包</button>
-        <button id="openReleasePage" type="button" class="secondary" disabled>查看发布页</button>
+        <button id="openReleasePage" type="button" class="secondary" disabled>打开发布页</button>
         <button id="copyUpdateDiagnostics" type="button" class="secondary">复制诊断摘要</button>
       </div>
     </details>
-    <p id="updateTestNote" class="section-description update-test-note">
-      安全自测会下载当前平台安装包（大小以发布源为准），并验证 SHA-256、解压和文件完整性；不会安装、重启或改变当前版本，测试文件完成后自动删除。
-    </p>
   </section>
   <section class="section update-notes-panel">
     <div class="section-title-row">
       <div>
         <h2>更新内容</h2>
-        <p class="section-description">更新会同步扩展、Native Helper、Bridge、Connector 和 Agent 插件缓存。</p>
+        <p class="section-description">更新只涉及评估工具箱扩展本体；共享运行组件与主工作台不受影响。</p>
       </div>
     </div>
     <details id="updateNotesDetails" open>

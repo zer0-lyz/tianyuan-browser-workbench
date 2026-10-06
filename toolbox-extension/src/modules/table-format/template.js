@@ -80,6 +80,7 @@ export const tableFormatTemplate = `
       <div class="task-actions">
         <button id="runTableFormat" type="button">开始执行</button>
       </div>
+      <p id="tableFormatGate" class="gate-reason" data-kind="warn" role="status"></p>
     </div>
     <ul id="tableFormatResultList" class="table-format-result-list" aria-live="polite"></ul>
   </section>

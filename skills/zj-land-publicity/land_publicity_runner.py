@@ -27,6 +27,7 @@ import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from land_http import LandSourceError
 from scrape_zj_land import (
     build_map_assets,
     calc_total_price_wan,
@@ -1282,14 +1283,30 @@ def execute_request(
         else:
             progress("fetching", 5, "正在按条件读取浙江土地成交公示候选列表", fetched=0, filtered=0, written=0)
             list_filter = _list_district_filter(config)
-            records = fetcher(
-                district_filter=list_filter,
-                max_pages=config["maxPages"],
-                record_filter=lambda record: _list_record_matches_request(config, record),
-                stop_before=_list_stop_before(config),
-                server_filters=_website_server_filters(config),
-            )
+            try:
+                records = fetcher(
+                    district_filter=list_filter,
+                    max_pages=config["maxPages"],
+                    record_filter=lambda record: _list_record_matches_request(config, record),
+                    stop_before=_list_stop_before(config),
+                    server_filters=_website_server_filters(config),
+                )
+            except LandSourceError as error:
+                # 数据源请求失败/HTML 壳/schema 不匹配：结构化失败，禁止落入零结果成功。
+                raise ValueError(json.dumps({
+                    "errorCode": error.errorCode,
+                    "reason": str(error),
+                    "diagnostics": error.diagnostics,
+                }, ensure_ascii=False)) from error
         fetched_count = len(records)
+        if fetched_count == 0 and config.get("provinceWide") and not config.get("startDate") and not config.get("endDate"):
+            # 全省 + 不限日期的真实接口全年不可能为 0 条；首个有效页为空说明
+            # 数据源异常（HTML 壳、风控空数据等），不得默认成功。
+            raise ValueError(json.dumps({
+                "errorCode": "LAND_LIST_PROVINCEWIDE_EMPTY_SUSPICIOUS",
+                "reason": "全省且不限日期的查询返回 0 条，数据源异常或需人工核验",
+                "diagnostics": None,
+            }, ensure_ascii=False))
         progress("fetching", 38, f"条件候选读取完成，共 {fetched_count} 条，正在复核详情", fetched=fetched_count, filtered=0, written=0)
         enriched: List[Dict[str, Any]] = []
         stored_items = history_info["items"] if history_info else []
@@ -1411,7 +1428,10 @@ def execute_request(
             for path in (final_paths["coords"], final_paths["points"], final_paths["map"]):
                 if path.exists():
                     path.unlink()
-        progress("complete", 100, f"已写出 {len(filtered)} 条，Excel/结果页回读通过", fetched=fetched_count, filtered=len(filtered), written=len(filtered))
+        if len(filtered) == 0:
+            progress("complete", 100, "查询完成：接口响应有效，当前筛选条件下无匹配结果", fetched=fetched_count, filtered=0, written=0)
+        else:
+            progress("complete", 100, f"已写出 {len(filtered)} 条，Excel/结果页回读通过", fetched=fetched_count, filtered=len(filtered), written=len(filtered))
         return {
             "ok": True,
             "action": "run_land_publicity",
@@ -1455,6 +1475,22 @@ def main() -> int:
             "reason": str(error)[:500],
             "security": {"credentialsReturned": False},
         }
+        # LandSourceError 与 runner 包装错误以 JSON 载荷携带稳定错误码与脱敏诊断。
+        if isinstance(error, LandSourceError):
+            result["errorCode"] = error.errorCode
+            if error.diagnostics:
+                result["diagnostics"] = error.diagnostics
+        else:
+            text = str(error)
+            if text.startswith("{") and '"errorCode"' in text:
+                try:
+                    payload = json.loads(text)
+                    result["errorCode"] = payload.get("errorCode")
+                    result["reason"] = payload.get("reason") or text[:500]
+                    if payload.get("diagnostics"):
+                        result["diagnostics"] = payload.get("diagnostics")
+                except ValueError:
+                    pass
     emit_result(result)
     return 0 if result.get("ok") else 1
 

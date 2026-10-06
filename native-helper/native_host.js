@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const { execFile, spawn } = require("node:child_process");
+const landPublicityHttp = require("./land-publicity-http.js");
 const fs = require("node:fs");
 const http = require("node:http");
 const https = require("node:https");
@@ -2895,31 +2896,9 @@ async function runLinkRestore(message, emit) {
 }
 
 function fetchLandPublicityJson(url) {
-  return new Promise((resolve, reject) => {
-    const request = https.get(url, {
-      headers: {
-        Accept: "application/json,text/plain,*/*",
-        "User-Agent": "Mozilla/5.0 TianyuanWorkbench",
-      },
-    }, (response) => {
-      let body = "";
-      response.setEncoding("utf8");
-      response.on("data", (chunk) => { body += chunk; });
-      response.on("end", () => {
-        if ((response.statusCode || 0) < 200 || (response.statusCode || 0) >= 300) {
-          reject(new Error("LAND_REGION_HTTP_" + (response.statusCode || 0)));
-          return;
-        }
-        try {
-          resolve(JSON.parse(body));
-        } catch {
-          reject(new Error("LAND_REGION_RESPONSE_INVALID"));
-        }
-      });
-    });
-    request.setTimeout(15000, () => request.destroy(new Error("LAND_REGION_TIMEOUT")));
-    request.on("error", reject);
-  });
+  // 兼容旧调用点：严格校验后只返回 payload；错误带 .errorCode/.diagnostics。
+  return landPublicityHttp.fetchLandPublicityJson(url, { stage: "REGION" })
+    .then((result) => result.payload);
 }
 
 function normalizeLandPublicityRegionNode(node, depth = 0) {
@@ -2936,33 +2915,38 @@ function normalizeLandPublicityRegionNode(node, depth = 0) {
 async function listLandPublicityRegions() {
   const urls = [
     "https://www.zjzrzyjy.com/trade/uniportal/index/districtList",
+    "https://www.zjzrzyjy.com/trade/uniread/index/districtList",
     "https://www.zjzrzyjy.com/trade/view/preApply/preAnnouncement/districtList",
   ];
   let lastReason = "LAND_REGION_CATALOG_UNAVAILABLE";
+  let lastDiagnostics = null;
   for (const url of urls) {
     try {
-      const payload = await fetchLandPublicityJson(url);
-      const regions = Array.isArray(payload?.data)
-        ? payload.data.map((node) => normalizeLandPublicityRegionNode(node)).filter(Boolean)
-        : [];
+      const { payload, diagnostics } = await landPublicityHttp.fetchLandPublicityJson(url, { stage: "REGION" });
+      landPublicityHttp.validateLandRegionCatalog(payload);
+      const regions = payload.data.map((node) => normalizeLandPublicityRegionNode(node)).filter(Boolean);
       if (regions.length) {
         return {
           ok: true,
           action: "list_land_publicity_regions",
           regions,
           source: url,
+          diagnostics,
           security: { credentialsReturned: false },
         };
       }
       lastReason = "LAND_REGION_CATALOG_EMPTY";
+      lastDiagnostics = diagnostics;
     } catch (error) {
-      lastReason = error?.message || String(error);
+      lastReason = error?.errorCode || error?.message || String(error);
+      lastDiagnostics = error?.diagnostics || lastDiagnostics;
     }
   }
   return {
     ok: false,
     action: "list_land_publicity_regions",
     reason: lastReason,
+    diagnostics: lastDiagnostics,
     regions: [],
     security: { credentialsReturned: false },
   };
