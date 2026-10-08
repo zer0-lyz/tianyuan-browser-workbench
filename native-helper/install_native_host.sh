@@ -6,6 +6,7 @@ HOST_SCRIPT="$ROOT_DIR/native-helper/native_host.js"
 HOST_NAME="com.tianyuan.workbench.helper"
 EXTENSION_ID="lkflndcnklpeaejohaacoaolnmhgigoc"
 LEGACY_EXTENSION_ID="fdbllnmaaklkcmoacoapbibiggnndkfpa"
+TOOLBOX_EXTENSION_ID="aamfmhcbjgofhmannejoiilkkpchfkgm"
 HOST_DIR="$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts"
 HOST_JSON="$HOST_DIR/$HOST_NAME.json"
 INSTALL_DIR="$HOME/.tianyuan-workbench/native-helper"
@@ -155,7 +156,8 @@ payload = {
     "type": "stdio",
     "allowed_origins": [
         "chrome-extension://$EXTENSION_ID/",
-        "chrome-extension://$LEGACY_EXTENSION_ID/"
+        "chrome-extension://$LEGACY_EXTENSION_ID/",
+        "chrome-extension://$TOOLBOX_EXTENSION_ID/"
     ],
 }
 path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\\n", encoding="utf-8")
@@ -181,5 +183,5 @@ if not payload.get("ok") or not connector.get("ok"):
 print("Connector:", connector.get("pid"), connector.get("protocolVersion"))
 '
 
-echo "Native host installed for extension IDs: $EXTENSION_ID, $LEGACY_EXTENSION_ID"
+echo "Native host installed for extension IDs: $EXTENSION_ID, $LEGACY_EXTENSION_ID, $TOOLBOX_EXTENSION_ID"
 echo "Local runtime installed at: $INSTALL_DIR"

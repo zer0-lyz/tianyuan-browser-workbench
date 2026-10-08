@@ -5,7 +5,7 @@ import path from "node:path";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 
-import { alibabaAuctionModule, alibabaPageReady, directCandidateInScope, directMergeListingEvidence, directPageBeforeRequestedRange, directParseDetail, executeCurrentPageMain, executeCurrentTab, isAlibabaVerificationUrl, normalizeConfig, readAlibabaPageWithManualVerification } from "../extension/src/modules/alibaba-auction/module.js";
+import { alibabaAuctionModule, alibabaPageReady, buildZcAuctionSourceUrl, directCandidateInScope, directMergeListingEvidence, directPageBeforeRequestedRange, directParseDetail, executeCurrentPageMain, executeCurrentTab, buildSourceUrl, extractZcAuctionListPage, isAlibabaListPage, isAlibabaVerificationUrl, listPageMatchesRequest, normalizeConfig, readAlibabaPageWithManualVerification } from "../extension/src/modules/alibaba-auction/module.js";
 import {
   browserPageReady,
   candidateInScope,
@@ -481,3 +481,60 @@ try {
 }
 
 console.log("Alibaba auction module tests passed.");
+
+// ---- 阿里资产出售入口（zc-paimai） ----
+
+assert.equal(normalizeConfig({}).entry, "sf");
+assert.equal(normalizeConfig({ entry: "zc" }).entry, "zc");
+assert.equal(normalizeConfig({ entry: "other" }).entry, "sf");
+
+const zcConfig = normalizeConfig({ entry: "zc", propertyType: "residential", districtCode: "330102", status: "finished" });
+const zcUrl = new URL(buildZcAuctionSourceUrl(zcConfig));
+assert.equal(zcUrl.origin + zcUrl.pathname, "https://zc-paimai.taobao.com/wow/pm/default/pc/zichansearch");
+assert.equal(zcUrl.searchParams.get("fcatV4Ids"), '["206060601"]');
+assert.equal(zcUrl.searchParams.get("h_t_mode"), "[1]");
+assert.equal(zcUrl.searchParams.get("structFieldMap"), '{"h_t_mode":"[1]"}');
+assert.equal(zcUrl.searchParams.get("statusOrders"), '["2"]');
+assert.equal(zcUrl.searchParams.get("locationCodes"), '["330102"]');
+const zcCommercial = new URL(buildSourceUrl(normalizeConfig({ entry: "zc", propertyType: "commercial", districtCode: "330102" })));
+assert.equal(zcCommercial.searchParams.get("fcatV4Ids"), '["206057102"]');
+assert.equal(new URL(buildSourceUrl(normalizeConfig({ entry: "zc", status: "all" }))).searchParams.get("statusOrders"), null);
+assert.equal(new URL(buildZcAuctionSourceUrl(zcConfig, 2)).searchParams.get("page"), "2");
+
+assert.equal(isAlibabaListPage("https://zc-paimai.taobao.com/wow/pm/default/pc/zichansearch?disableNav=YES"), true);
+assert.equal(isAlibabaListPage("https://sf.taobao.com/list/50025969__2.htm"), true);
+assert.equal(isAlibabaListPage("https://zc-item.taobao.com/auction/1.htm"), false);
+assert.equal(listPageMatchesRequest(zcUrl.href, zcConfig), true);
+assert.equal(listPageMatchesRequest("https://zc-paimai.taobao.com/wow/pm/default/pc/zichansearch?locationCodes=%5B%22330103%22%5D&fcatV4Ids=%5B%22206060601%22%5D&h_t_mode=%5B1%5D&structFieldMap=x", zcConfig), false);
+assert.equal(listPageMatchesRequest("https://sf.taobao.com/list/50025969__2.htm?location_code=330102", zcConfig), false);
+
+// zc 列表注入提取函数：DOM 桩 + 输出形状与 sf 候选一致
+{
+  const anchor = { href: "https://sf-item.taobao.com/sf_item/1081017188891.htm?spm=x", getAttribute: () => null, getBoundingClientRect: () => ({ width: 10, height: 10 }) };
+  anchor.innerText = "杭州市上城区闻潮尚庭2幢1单元401室房产";
+  const saleCard = {
+    className: "card", getAttribute: () => null, innerText: "杭州市上城区闻潮尚庭2幢1单元401室房产\n支持贷款\n当前价\n¥\n344.03\n万\n(1次出价)\n评估价\n¥\n430万\n结束\n2026年09月24日\n2人报名\n已结束",
+    querySelector: (selector) => selector.includes("sf-item") ? anchor : null,
+    getBoundingClientRect: () => ({ width: 10, height: 10 }),
+    parentElement: null,
+  };
+  const root = { children: [saleCard], querySelector: () => null };
+  const stubWindow = { getComputedStyle: () => ({ display: "", visibility: "", opacity: "" }) };
+  const stubDocument = {
+    querySelector: (selector) => selector.includes("pc-search-list--area") ? root : null,
+    querySelectorAll: () => [],
+    body: { innerText: "共 40 条" },
+  };
+  const vm = await import("node:vm");
+  const sandbox = { document: stubDocument, window: stubWindow, location: { href: "https://zc-paimai.taobao.com/wow/pm/default/pc/zichansearch" }, Date, Number, String, RegExp, Math, Array, Object, Set, JSON, Error };
+  const result = vm.runInNewContext(`(${extractZcAuctionListPage.toString()})()`, sandbox);
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].href, "https://sf-item.taobao.com/sf_item/1081017188891.htm?spm=x");
+  assert.equal(result.items[0].listedBidCount, 1);
+  assert.equal(result.items[0].listedHasEndedText, true);
+  // 卡片只有“当前价”时不算明确拍下价证据；成交判据由详情页核验（directMergeListingEvidence 管线）。
+  assert.equal(result.items[0].listedHasExplicitSoldPrice, false);
+  assert.equal(result.items[0].listedAmount, "3440300");
+  assert.match(result.items[0].title, /闻潮尚庭/);
+  assert.equal(result.total, "40");
+}

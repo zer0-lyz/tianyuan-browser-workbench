@@ -362,6 +362,22 @@ function createDepreciationCapexForecastService(options = {}) {
     };
   }
 
+  async function readExistingInput(input = {}) {
+    const target = workingPath(input);
+    const section = String(input.section || input.kind || "").trim().toLowerCase();
+    const args = ["--input", target];
+    if (section) args.push("--section", section);
+    const result = await invoke("read-input", args);
+    if (!result.ok) return result;
+    return {
+      ...result,
+      action: "depreciation_capex_forecast_input_read",
+      namespace: NAMESPACE,
+      workbookPath: target,
+      security: security({ fileContentsReturned: true }),
+    };
+  }
+
   async function preflight(input = {}) {
     const target = workingPath(input);
     const result = await invoke("preflight", ["--input", target]);
@@ -550,6 +566,10 @@ function createDepreciationCapexForecastService(options = {}) {
       write_stock: (value) => writeInput({ ...value, section: "stock" }),
       write_added: (value) => writeInput({ ...value, section: "added" }),
       write_new: (value) => writeInput({ ...value, section: "added" }),
+      read_input: readExistingInput,
+      "read-input": readExistingInput,
+      read_existing_input: readExistingInput,
+      "read-existing-input": readExistingInput,
       preflight: preflight,
       run: run,
       run_default: (value) => run({ ...value, withDetails: false }),
