@@ -14,7 +14,7 @@ test("alibaba auction module is wired for deterministic current-tab scraping", (
     "extension/src/modules/alibaba-auction/module.js",
     "extension/src/modules/alibaba-auction/template.js",
     "extension/src/modules/alibaba-auction/styles.css",
-    "extension/src/modules/alibaba-auction/regions.js",
+    "extension/src/data/china-regions.js",
     "native-helper/alibaba-auction.js",
   ]) assert.ok(fs.existsSync(path.join(repoRoot, relative)), `missing ${relative}`);
 

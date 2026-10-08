@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const { execFile, spawn } = require("node:child_process");
+const landPublicityHttp = require("./land-publicity-http.js");
 const fs = require("node:fs");
 const http = require("node:http");
 const https = require("node:https");
@@ -93,6 +94,17 @@ const anjukeProperty = (() => {
   } catch (cause) {
     try {
       return createRequire(path.join(path.dirname(process.execPath), "native_host.js"))("./anjuke-property.js");
+    } catch {
+      throw cause;
+    }
+  }
+})();
+const alibabaLease = (() => {
+  try {
+    return require("./alibaba-lease.js");
+  } catch (cause) {
+    try {
+      return createRequire(path.join(path.dirname(process.execPath), "native_host.js"))("./alibaba-lease.js");
     } catch {
       throw cause;
     }
@@ -401,6 +413,7 @@ const DEPRECIATION_CAPEX_ACTIONS = Object.freeze({
   depreciation_capex_forecast_write_params: "write_params",
   depreciation_capex_forecast_write_stock: "write_stock",
   depreciation_capex_forecast_write_added: "write_added",
+  depreciation_capex_forecast_read_input: "read_input",
   depreciation_capex_forecast_preflight: "preflight",
   depreciation_capex_forecast_run: "run",
   depreciation_capex_forecast_run_with_details: "run_with_details",
@@ -2146,6 +2159,15 @@ async function chooseAnjukePropertyOutputDirectory() {
   );
 }
 
+async function chooseAlibabaLeaseOutputDirectory() {
+  return await chooseManagedOutputDirectory(
+    "选择阿里资产租赁上级目录",
+    "阿里资产租赁",
+    "alibaba_lease_output_directory_selected",
+    "ALIBABA_LEASE_OUTPUT_DIRECTORY_CREATE_FAILED",
+  );
+}
+
 function isWorkbookPath(value) {
   const extension = path.extname(String(value || "")).toLowerCase();
   return extension === ".xlsx" || extension === ".xlsm";
@@ -2874,31 +2896,9 @@ async function runLinkRestore(message, emit) {
 }
 
 function fetchLandPublicityJson(url) {
-  return new Promise((resolve, reject) => {
-    const request = https.get(url, {
-      headers: {
-        Accept: "application/json,text/plain,*/*",
-        "User-Agent": "Mozilla/5.0 TianyuanWorkbench",
-      },
-    }, (response) => {
-      let body = "";
-      response.setEncoding("utf8");
-      response.on("data", (chunk) => { body += chunk; });
-      response.on("end", () => {
-        if ((response.statusCode || 0) < 200 || (response.statusCode || 0) >= 300) {
-          reject(new Error("LAND_REGION_HTTP_" + (response.statusCode || 0)));
-          return;
-        }
-        try {
-          resolve(JSON.parse(body));
-        } catch {
-          reject(new Error("LAND_REGION_RESPONSE_INVALID"));
-        }
-      });
-    });
-    request.setTimeout(15000, () => request.destroy(new Error("LAND_REGION_TIMEOUT")));
-    request.on("error", reject);
-  });
+  // 兼容旧调用点：严格校验后只返回 payload；错误带 .errorCode/.diagnostics。
+  return landPublicityHttp.fetchLandPublicityJson(url, { stage: "REGION" })
+    .then((result) => result.payload);
 }
 
 function normalizeLandPublicityRegionNode(node, depth = 0) {
@@ -2915,33 +2915,38 @@ function normalizeLandPublicityRegionNode(node, depth = 0) {
 async function listLandPublicityRegions() {
   const urls = [
     "https://www.zjzrzyjy.com/trade/uniportal/index/districtList",
+    "https://www.zjzrzyjy.com/trade/uniread/index/districtList",
     "https://www.zjzrzyjy.com/trade/view/preApply/preAnnouncement/districtList",
   ];
   let lastReason = "LAND_REGION_CATALOG_UNAVAILABLE";
+  let lastDiagnostics = null;
   for (const url of urls) {
     try {
-      const payload = await fetchLandPublicityJson(url);
-      const regions = Array.isArray(payload?.data)
-        ? payload.data.map((node) => normalizeLandPublicityRegionNode(node)).filter(Boolean)
-        : [];
+      const { payload, diagnostics } = await landPublicityHttp.fetchLandPublicityJson(url, { stage: "REGION" });
+      landPublicityHttp.validateLandRegionCatalog(payload);
+      const regions = payload.data.map((node) => normalizeLandPublicityRegionNode(node)).filter(Boolean);
       if (regions.length) {
         return {
           ok: true,
           action: "list_land_publicity_regions",
           regions,
           source: url,
+          diagnostics,
           security: { credentialsReturned: false },
         };
       }
       lastReason = "LAND_REGION_CATALOG_EMPTY";
+      lastDiagnostics = diagnostics;
     } catch (error) {
-      lastReason = error?.message || String(error);
+      lastReason = error?.errorCode || error?.message || String(error);
+      lastDiagnostics = error?.diagnostics || lastDiagnostics;
     }
   }
   return {
     ok: false,
     action: "list_land_publicity_regions",
     reason: lastReason,
+    diagnostics: lastDiagnostics,
     regions: [],
     security: { credentialsReturned: false },
   };
@@ -3225,7 +3230,21 @@ function runAnjukeProperty(message, emit) {
         resolve(result);
       }
     };
-    const args = [ANJUKE_PROPERTY_SCRIPT, "--request-json", JSON.stringify(request)];
+    let mapAssetsDirectory = "";
+    try {
+      mapAssetsDirectory = typeof anjukeProperty.mapAssetsDir === "function" ? anjukeProperty.mapAssetsDir() : "";
+    } catch (error) {
+      // 本机目录里的 native_host.js 与 anjuke-property.js 版本可能错位（热补丁部署）；
+      // 地图资产缺失只会让地图降级，绝不能让整个抓取无响应。
+      mapAssetsDirectory = "";
+    }
+    const runnerRequest = mapAssetsDirectory ? { ...request, mapAssetsDir: mapAssetsDirectory } : { ...request };
+    // 请求里带整页 HTML（多候选可达数 MB），超出 macOS 约 1MB 的 execve 参数上限（E2BIG），
+    // 必须经临时文件传给 Python，不能拼进 argv。
+    const requestDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "anjuke-request-"));
+    const requestFile = path.join(requestDirectory, "request.json");
+    fs.writeFileSync(requestFile, JSON.stringify(runnerRequest));
+    const args = [ANJUKE_PROPERTY_SCRIPT, "--request-file", requestFile];
     const launch = processLauncher.commandLaunchSpec(PYTHON_BIN, args);
     const child = spawn(launch.command, launch.args, {
       cwd: path.dirname(ANJUKE_PROPERTY_SCRIPT),
@@ -3253,6 +3272,7 @@ function runAnjukeProperty(message, emit) {
     readline.createInterface({ input: child.stderr }).on("line", () => {});
     child.on("error", (error) => complete({ ok: false, reason: error?.code === "ENOENT" ? "PYTHON_NOT_FOUND" : anjukeProperty.safeError(error) }));
     child.on("close", (code, signal) => {
+      fs.rmSync(requestDirectory, { recursive: true, force: true });
       if (settled) return;
       if (!finalPayload) {
         complete({ ok: false, reason: code === 0 ? "ANJUKE_RESULT_MISSING" : "ANJUKE_RUNNER_FAILED", exitCode: code, signal: signal || null });
@@ -4403,6 +4423,13 @@ async function handle(message) {
       currentBuildNumber: message.currentBuildNumber,
       currentRuntimeBuildId: message.currentRuntimeBuildId,
       currentRuntimeBuildKind: message.currentRuntimeBuildKind,
+      // 工具箱等独立扩展按请求覆盖更新源与仓库；不传时保持工作台默认行为。
+      updateManifestUrls: Array.isArray(message.updateManifestUrls)
+        ? message.updateManifestUrls.map((item) => String(item || "").trim()).filter(Boolean)
+        : undefined,
+      repository: typeof message.repository === "string" && message.repository.trim()
+        ? message.repository.trim()
+        : undefined,
       platform: process.platform,
       architecture: process.arch,
     });
@@ -4588,6 +4615,66 @@ async function handle(message) {
     return {
       ...opened,
       action: "open_alibaba_auction_path",
+      path: resolved,
+      security: { credentialsReturned: false },
+    };
+  }
+  if (message?.action === "select_alibaba_lease_output_directory") {
+    return await chooseAlibabaLeaseOutputDirectory();
+  }
+  if (message?.action === "write_alibaba_lease_result") {
+    const request = alibabaLease.normalizeRequest(message?.request || {});
+    const results = Array.isArray(message?.results) ? message.results : [];
+    const candidates = Number.isFinite(Number(message?.candidates)) ? Number(message.candidates) : results.length;
+    const skipped = Number.isFinite(Number(message?.skipped)) ? Number(message.skipped) : 0;
+    const artifacts = results.length
+      ? await alibabaLease.writeResultArtifacts(results, request, { candidates, skipped })
+      : {
+        htmlPath: "",
+        jsonPath: "",
+        historyPath: "",
+        mapPath: "",
+        coordsPath: "",
+        pointsJsPath: "",
+        locatedCount: 0,
+        unlocatedCount: 0,
+        mapGeneration: "no_results",
+      };
+    return {
+      ok: results.length > 0,
+      action: "write_alibaba_lease_result",
+      ...artifacts,
+      candidates,
+      skipped,
+      security: { credentialsReturned: false },
+    };
+  }
+  if (message?.action === "write_alibaba_lease_excel") {
+    const request = alibabaLease.normalizeRequest(message?.request || {});
+    const results = Array.isArray(message?.results) ? message.results : [];
+    const candidates = Number.isFinite(Number(message?.candidates)) ? Number(message.candidates) : results.length;
+    const skipped = Number.isFinite(Number(message?.skipped)) ? Number(message.skipped) : 0;
+    try {
+      return await alibabaLease.writeResultExcel(results, request, { candidates, skipped });
+    } catch (error) {
+      return {
+        ok: false,
+        action: "write_alibaba_lease_excel",
+        errorCode: error?.code || "ALIBABA_LEASE_EXCEL_EXPORT_FAILED",
+        reason: alibabaLease.safeError(error),
+        security: { credentialsReturned: false },
+      };
+    }
+  }
+  if (message?.action === "open_alibaba_lease_path") {
+    const resolved = alibabaLease.openResultPath(message.path, message.outputDirectory || alibabaLease.RESULT_ROOT);
+    if (message.openInCurrentBrowserTab === true) {
+      return { ok: true, opened: false, action: "open_alibaba_lease_path", path: resolved, browserTab: true, security: { credentialsReturned: false } };
+    }
+    const opened = await platformAdapter.openPath(resolved);
+    return {
+      ...opened,
+      action: "open_alibaba_lease_path",
       path: resolved,
       security: { credentialsReturned: false },
     };

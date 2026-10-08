@@ -25,7 +25,7 @@ from depreciation_forecast.workbook import (  # noqa: E402
     create_template,
     read_input,
 )
-from workflow import run_workflow  # noqa: E402
+from workflow import read_existing_input, run_workflow  # noqa: E402
 
 
 class WorkbookInputTests(unittest.TestCase):
@@ -123,6 +123,46 @@ class PerpetualOutputTests(unittest.TestCase):
         self.assertEqual(perpetual["更新资本性支出"], 25.0)
         self.assertEqual(perpetual["资本性支出"], 25.0)
         self.assertEqual(expense["主营业务成本", "永续期"], 100.0)
+
+
+class ReadExistingInputTests(unittest.TestCase):
+    def _workbook_with_rows(self) -> Path:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "input.xlsx"
+        create_template(path)
+        wb = load_workbook(path)
+        wb[PARAM_SHEET]["B4"] = date(2024, 5, 31)
+        wb[PARAM_SHEET]["B5"] = date(2029, 12, 31)
+        stock = wb[STOCK_SHEET]
+        columns = {stock.cell(3, col).value: col for col in range(1, stock.max_column + 1)}
+        stock.cell(4, columns["序号"], "S-1")
+        stock.cell(4, columns["名称"], "存量设备")
+        stock.cell(4, columns["启用时间"], date(2022, 5, 31))
+        wb.save(path)
+        return path
+
+    def test_read_existing_input_returns_rows_with_row_index(self) -> None:
+        path = self._workbook_with_rows()
+        payload = read_existing_input(path)
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["sections"]["stock"]["count"], 1)
+        row = payload["sections"]["stock"]["rows"][0]
+        self.assertEqual(row["rowIndex"], 4)
+        self.assertEqual(row["序号"], "S-1")
+        self.assertEqual(row["名称"], "存量设备")
+        self.assertEqual(row["启用时间"], "2022-05-31")
+        self.assertIn("名称", payload["sections"]["stock"]["headers"])
+        self.assertEqual(payload["sections"]["added"]["count"], 0)
+        self.assertEqual(payload["parameters"]["valuationDate"], "2024-05-31")
+
+    def test_read_existing_input_section_filter(self) -> None:
+        path = self._workbook_with_rows()
+        payload = read_existing_input(path, "stock")
+        self.assertIn("stock", payload["sections"])
+        self.assertNotIn("added", payload["sections"])
+        with self.assertRaises(ValueError):
+            read_existing_input(path, "summary")
 
 
 class BundleManifestTests(unittest.TestCase):

@@ -1,5 +1,7 @@
 """抓取浙江自然资源土地成交公示（通用版，支持任意行政区）"""
 import requests
+
+import land_http
 import re
 import openpyxl
 from openpyxl.styles import Font, Alignment
@@ -907,28 +909,43 @@ def _collect_region_codes(node):
 
 
 def fetch_region_codes(region_name):
-    """读取官网行政区树，返回列表接口可接受的区域代码集合。"""
+    """读取官网行政区树，返回列表接口可接受的区域代码集合。
+
+    所有候选端点均严格校验（HTTP/Content-Type/JSON/结构/业务 code）；
+    全部失败时抛出 LandSourceError（LAND_REGION_SOURCE_UNAVAILABLE 及最近诊断），
+    不再静默返回空集合。匹配不到目标行政区仍是 LAND_REGION_FILTER_RESOLUTION_FAILED。
+    """
     if not region_name:
         return []
     urls = (
         "https://www.zjzrzyjy.com/trade/uniportal/index/districtList",
+        "https://www.zjzrzyjy.com/trade/uniread/index/districtList",
         "https://www.zjzrzyjy.com/trade/view/preApply/preAnnouncement/districtList",
     )
     wanted = _region_text(region_name)
+    last_error: Exception | None = None
     for url in urls:
         try:
-            response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
-            data = response.json()
-        except Exception:
+            data, _diagnostics = land_http.fetch_json(
+                url, "REGION", timeout=20, allow_missing_business_code=True
+            )
+            land_http.validate_region_catalog(data)
+            roots = data.get("data") or []
+            queue = list(roots)
+            while queue:
+                node = queue.pop(0)
+                if _region_text(node.get("districtName")) == wanted:
+                    return list(dict.fromkeys(_collect_region_codes(node)))
+                queue.extend(node.get("children") or [])
+        except land_http.LandSourceError as error:
+            last_error = error
             continue
-        roots = data.get("data") or []
-        queue = list(roots)
-        while queue:
-            node = queue.pop(0)
-            if _region_text(node.get("districtName")) == wanted:
-                return list(dict.fromkeys(_collect_region_codes(node)))
-            queue.extend(node.get("children") or [])
-    return []
+    if last_error is not None:
+        raise last_error
+    raise land_http.LandSourceError(
+        "LAND_REGION_FILTER_RESOLUTION_FAILED",
+        f"LAND_REGION_FILTER_RESOLUTION_FAILED: 未匹配到行政区 {region_name!r}",
+    )
 
 
 def _land_bidding_json_list(value):
@@ -1049,16 +1066,20 @@ def fetch_land_bidding_records(
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Referer": "https://www.zjzrzyjy.com/landView/land-bidding",
         }
-        try:
-            response = requests.get(url, headers=headers, timeout=30)
-            response.raise_for_status()
-            payload = response.json()
-            data = payload.get("data") or {}
-            records = data.get("records") or []
-        except Exception as error:
-            print(f"成交列表第{page}页请求失败: {error}")
-            break
+        # 严格校验：HTTP/Content-Type/JSON/结构/业务 code 任一失败都结构化上抛，
+        # 不再把失败伪装成零结果成功。
+        _payload, _diagnostics = land_http.fetch_json(url, "LIST", timeout=30)
+        records, total = land_http.validate_list_payload(_payload)
+        if len(records) > page_size:
+            raise land_http.LandSourceError(
+                "LAND_LIST_RESPONSE_SCHEMA_INVALID",
+                f"LAND_LIST_RESPONSE_SCHEMA_INVALID: 第{page}页 records({len(records)}) 超过 pageSize({page_size})",
+            )
         if not records:
+            if page == 1:
+                # 首个有效页为空：合法空结果（筛选过窄或上游确无数据）。
+                # 全省+不限日期的 0 条由 runner 侧高风险门禁另行拦截。
+                print(f"成交列表第{page}页为有效空列表: total={total}")
             break
 
         normalized_records = [normalize_land_bidding_record(record) for record in records]
@@ -1081,10 +1102,6 @@ def fetch_land_bidding_records(
         last_key = _release_date_key(normalized_records[-1].get("_queryDate") or normalized_records[-1].get("releaseTime"))
         if stop_key and last_key and last_key < stop_key:
             break
-        try:
-            total = int(data.get("total") or 0)
-        except (TypeError, ValueError):
-            total = 0
         if len(records) < page_size or (total and page * page_size >= total):
             break
         page += 1
@@ -1131,14 +1148,9 @@ def fetch_records(district_filter=None, max_pages=200, record_filter=None, stop_
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Referer": "https://www.zjzrzyjy.com/landWeb/publicityList"
         }
-        try:
-            resp = requests.get(url, headers=headers, timeout=30)
-            data = resp.json()
-        except Exception as e:
-            print(f"第{page}页请求失败: {e}")
-            break
-
-        records = data.get('data', {}).get('records', [])
+        # 严格校验：本函数为旧版公示接口路径，同样不允许把失败伪装成零结果。
+        _payload, _diagnostics = land_http.fetch_json(url, "LIST", timeout=30)
+        records, _total = land_http.validate_list_payload(_payload)
         if not records:
             break
 
