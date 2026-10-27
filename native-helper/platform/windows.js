@@ -30,6 +30,8 @@ function createWindowsAdapter(options = {}) {
     ? path.join(runtimeRoot, "print-format-skills")
     : path.join(runtimeRoot, "print-format-skills"));
   const WINDOWS_SAFE_PATH_LIMIT = 240;
+  const UPDATE_EXTRACT_RESULT_MARKER = "TIANYUAN_UPDATE_RESULT:";
+  const UPDATE_EXTRACT_ERROR_MARKER = "TIANYUAN_UPDATE_ERROR:";
 
   function redactPowerShellText(value) {
     return String(value || "")
@@ -188,6 +190,8 @@ function createWindowsAdapter(options = {}) {
     fs.mkdirSync(destination, { recursive: true });
     const script = [
       "$ErrorActionPreference = 'Stop'",
+      "$ProgressPreference = 'SilentlyContinue'",
+      "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
       "Add-Type -AssemblyName System.IO.Compression.FileSystem",
       "$ZipPath = [System.IO.Path]::GetFullPath($env:TIANYUAN_UPDATE_ZIP_PATH)",
       "$Destination = [System.IO.Path]::GetFullPath($env:TIANYUAN_UPDATE_DESTINATION)",
@@ -215,7 +219,7 @@ function createWindowsAdapter(options = {}) {
       "  $Stage = 'extracting'",
       "  Expand-Archive -LiteralPath $ZipPath -DestinationPath $Destination -Force",
       "  $payload = [ordered]@{ ok = $true; stage = 'complete'; destination = $Destination; longestEntry = $longest; longestTargetLength = $longestLength }",
-      "  [Console]::Out.WriteLine('TIANYU_UPDATE_RESULT:' + ($payload | ConvertTo-Json -Compress))",
+      `  [Console]::Out.WriteLine('${UPDATE_EXTRACT_RESULT_MARKER}' + ($payload | ConvertTo-Json -Compress))`,
       "} catch {",
       "  if ($zip) { $zip.Dispose() }",
       "  $raw = [string]$_.Exception.Message",
@@ -223,7 +227,7 @@ function createWindowsAdapter(options = {}) {
       "  $errorCode = if ($parts[0] -in @('UPDATE_PATH_TOO_LONG','UPDATE_ZIP_PATH_TRAVERSAL')) { $parts[0] } else { 'UPDATE_EXTRACT_FAILED' }",
       "  $reason = if ($parts.Length -gt 1) { $parts[1] } else { $raw }",
       "  $payload = [ordered]@{ ok = $false; errorCode = $errorCode; stage = $Stage; message = '更新包解压失败'; reason = $reason; zipPath = $ZipPath; destination = $Destination }",
-      "  [Console]::Error.WriteLine('TIANYUAN_UPDATE_ERROR:' + ($payload | ConvertTo-Json -Compress))",
+      `  [Console]::Error.WriteLine('${UPDATE_EXTRACT_ERROR_MARKER}' + ($payload | ConvertTo-Json -Compress))`,
       "  exit 1",
       "}",
     ].join("\n");
@@ -247,8 +251,8 @@ function createWindowsAdapter(options = {}) {
         },
       }, (error, stdout, stderr) => resolve({ error, stdout, stderr }));
     });
-    const parsed = parsePowerShellMarker(result.stderr, "TIANYUAN_UPDATE_ERROR:")
-      || parsePowerShellMarker(result.stdout, "TIANYUAN_UPDATE_ERROR:");
+    const parsed = parsePowerShellMarker(result.stderr, UPDATE_EXTRACT_ERROR_MARKER)
+      || parsePowerShellMarker(result.stdout, UPDATE_EXTRACT_ERROR_MARKER);
     if (result.error || parsed?.ok === false) {
       const errorCode = parsed?.errorCode || "UPDATE_EXTRACT_FAILED";
       const details = [
@@ -271,7 +275,7 @@ function createWindowsAdapter(options = {}) {
       failure.exitCode = result.error?.code || null;
       throw failure;
     }
-    const success = parsePowerShellMarker(result.stdout, "TIANYUAN_UPDATE_RESULT:");
+    const success = parsePowerShellMarker(result.stdout, UPDATE_EXTRACT_RESULT_MARKER);
     if (!success?.ok) {
       const failure = new Error(`UPDATE_EXTRACT_FAILED:解压过程未返回成功结果; stage=extracting; stderr=${redactPowerShellText(result.stderr)}`);
       failure.code = "UPDATE_EXTRACT_FAILED";
