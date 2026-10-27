@@ -2,6 +2,11 @@
 
 const http = require("node:http");
 const { execFile } = require("node:child_process");
+const fs = require("node:fs");
+const path = require("node:path");
+const { cliUnavailableMessage, discoverWindowsCliCandidates, probeExecutableCandidates, resolveExecutableCandidates } = require("./cli-runtime.js");
+const processLauncher = require("./process_launcher.js");
+const { createPlatformAdapter } = require("./platform/index.js");
 
 const DEFAULT_PORT = 8765;
 const DEFAULT_MCP_URL = "https://mcp.zhrdc.net/valuation-mcp";
@@ -63,24 +68,42 @@ function withTimeout(promise, ms, timeoutReason) {
   return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeout));
 }
 
-function checkCli() {
-  return new Promise((resolve) => {
-    execFile("/usr/local/bin/tycpv", ["--version"], { timeout: 3000 }, (error, stdout, stderr) => {
-      if (error) {
-        resolve({
-          ok: false,
-          reason: error.code === "ENOENT" ? "TYCPV_NOT_FOUND" : "TYCPV_VERSION_FAILED",
-        });
-        return;
-      }
-      resolve({
-        ok: true,
-        version: String(stdout || stderr || "").trim().split(/\r?\n/)[0] || "可用",
-      });
-    });
+async function checkCli() {
+  let runtimeConfig = {};
+  try {
+    const configPath = process.env.TIANYUAN_RUNTIME_CONFIG_PATH || path.join(__dirname, "runtime-config.json");
+    runtimeConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  } catch {
+    // An unconfigured helper can still discover a separately installed CLI.
+  }
+  const adapter = createPlatformAdapter({ runtimeConfig });
+  const candidates = resolveExecutableCandidates({
+    configuredBin: runtimeConfig.tycpvBin,
+    candidates: [
+      ...discoverWindowsCliCandidates({ platform: process.platform }),
+      ...adapter.cliCandidates,
+    ],
+    fallback: adapter.cliFallback, platform: process.platform,
   });
+  if (!candidates.length) {
+    return { ok: false, required: false, optional: true, reason: "TYCPV_NOT_FOUND", message: cliUnavailableMessage("TYCPV_NOT_FOUND") };
+  }
+  const probeArgs = process.platform === "win32" ? ["--help"] : ["--version"];
+  const probe = await probeExecutableCandidates({
+    candidates, args: probeArgs, commandLaunchSpec: processLauncher.commandLaunchSpec, execFile,
+    timeoutMs: process.platform === "win32" ? 15_000 : 5_000,
+    maxDurationMs: process.platform === "win32" ? 30_000 : 5_000,
+  });
+  if (!probe.ok) {
+    const reason = probe.reason || "TYCPV_VERSION_FAILED";
+    return { ok: false, required: false, optional: true, reason, message: cliUnavailableMessage(reason) };
+  }
+  return {
+    ok: true, required: false, optional: true,
+    version: process.platform === "win32" ? "可用（--help 探测通过）"
+      : String(probe.stdout || probe.stderr || "").trim().split(/\r?\n/)[0] || "可用",
+  };
 }
-
 function jsonResponse(res, statusCode, payload) {
   const body = JSON.stringify(payload, null, 2);
   res.writeHead(statusCode, {

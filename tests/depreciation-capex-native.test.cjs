@@ -196,3 +196,18 @@ test("depreciation native helper runs the bundled workbook engine end to end", a
   assert.equal(digest(prepared.workbookPath), sourceDigest);
   assert.equal(fs.existsSync(exported.output_path), true);
 });
+
+test("depreciation output selection rejects an empty successful picker result", async () => {
+  const service = createDepreciationCapexForecastService({
+    runtimeDirectory: path.join(os.tmpdir(), "tianyuan-depreciation-empty-picker-test"),
+    skillRoot,
+    platformAdapter: { chooseDirectory: async () => ({ ok: true, paths: [] }) },
+  });
+  const result = await service.handle({ operation: "select_output_directory" });
+  assert.equal(result.ok, false);
+  assert.equal(result.cancelled, false);
+  assert.equal(result.errorCode, "EMPTY_RESULT");
+  assert.equal(result.stage, "picker_result");
+  assert.equal(result.outputDirectory, "");
+  assert.match(result.userMessage, /没有返回文件夹/);
+});

@@ -78,4 +78,5 @@ assert.ok(restoreIndex >= 0 && formatIndex > restoreIndex && commitIndex > forma
 assert.match(installer, /src\/modules\/detail-table-workflow\/module\.js/);
 assert.match(installer, /src\/modules\/detail-table-workflow\/template\.js/);
 assert.match(installer, /src\/modules\/detail-table-workflow\/styles\.css/);
+assert.match(installer, /src\/core\/directory-picker\.js/);
 console.log("Detail table workflow module tests passed.");

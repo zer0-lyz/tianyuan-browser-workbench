@@ -352,16 +352,27 @@ export const anjukePropertyModule = {
     }
 
     async function chooseOutput() {
-      const result = await context.sendNativeMessage({ action: "select_anjuke_property_output_directory" }, 130000);
-      const selected = result?.outputDirectory || result?.path || result?.paths?.[0] || "";
-      if (!result?.ok || !selected) {
-        if (!result?.cancelled) setMessage(elements.anjukePropertyParameterMessage, result?.reason || "未选择输出目录", "warn");
-        return;
+      context.clearDirectoryPickerStatus(elements.chooseAnjukePropertyOutput);
+      try {
+        const result = await context.sendNativeMessage({ action: "select_anjuke_property_output_directory" }, 130000);
+        const selected = result?.outputDirectory || result?.path || result?.paths?.[0] || "";
+        if (!result?.ok || !selected) {
+          if (context.isDirectoryPickerCancelled(result)) return;
+          const feedback = context.setDirectoryPickerStatus(elements.chooseAnjukePropertyOutput, result, { subject: "安居客数据输出目录" });
+          setMessage(elements.anjukePropertyParameterMessage, feedback?.message || "无法完成目录选择，请重新选择。", "error");
+          context.setStatus(feedback?.message || "无法完成目录选择，请重新选择。", "error");
+          return;
+        }
+        config.outputDirectory = selected;
+        renderConfig();
+        await context.storage.save(state());
+        context.clearDirectoryPickerStatus(elements.chooseAnjukePropertyOutput);
+        setMessage(elements.anjukePropertyParameterMessage, `已选择专用子文件夹：${result.directoryName || "安居客物业案例"}。`, "ok");
+      } catch (error) {
+        const feedback = context.setDirectoryPickerStatus(elements.chooseAnjukePropertyOutput, error, { subject: "安居客数据输出目录" });
+        setMessage(elements.anjukePropertyParameterMessage, feedback?.message || "无法完成目录选择，请重新选择。", "error");
+        context.setStatus(feedback?.message || "无法完成目录选择，请重新选择。", "error");
       }
-      config.outputDirectory = selected;
-      renderConfig();
-      await context.storage.save(state());
-      setMessage(elements.anjukePropertyParameterMessage, `已选择专用子文件夹：${result.directoryName || "安居客物业案例"}。`, "ok");
     }
 
     function buildRequest() {

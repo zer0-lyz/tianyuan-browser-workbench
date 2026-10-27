@@ -1,5 +1,7 @@
 export const MODULE_ID = "depreciation-capex-forecast";
 export const NATIVE_ACTION = "depreciation_capex_forecast";
+import { isDirectoryPickerCancelled } from "../../core/directory-picker.js";
+export { clearDirectoryPickerStatus, directoryPickerError, isDirectoryPickerCancelled, setDirectoryPickerStatus } from "../../core/directory-picker.js";
 
 export const ACTIONS = Object.freeze({
   status: "status",
@@ -48,7 +50,13 @@ export function nativeRequest(message, timeoutMs = 60_000) {
         return;
       }
       if (!response || response.ok === false) {
-        reject(new Error(response?.message || response?.reason || "Native Helper 返回失败"));
+        if (response && isDirectoryPickerCancelled(response)) {
+          resolve(response);
+          return;
+        }
+        const error = new Error(response?.userMessage || response?.reason || "Native Helper 返回失败");
+        error.payload = response || null;
+        reject(error);
         return;
       }
       resolve(response);
