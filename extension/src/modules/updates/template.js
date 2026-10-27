@@ -29,9 +29,9 @@ export const updatesTemplate = `
     </div>
     <div class="button-row update-primary-actions">
       <button id="updatePrimaryAction" type="button">检查更新</button>
+      <button id="checkForUpdates" type="button" class="secondary" hidden>重新检查</button>
     </div>
     <div class="update-legacy-actions hidden" aria-hidden="true">
-      <button id="checkForUpdates" type="button">检查更新</button>
       <button id="installUpdate" type="button" disabled>更新全部组件</button>
     </div>
     <details id="updateMoreActions" class="update-more-actions">

@@ -6183,7 +6183,12 @@ window.setInterval(() => {
 window.setInterval(connectorHeartbeat, 20000);
 window.setInterval(processConnectorActionQueue, 1500);
 
-on(elements.refresh, "click", () => refreshAll({ probe: true }));
+on(elements.refresh, "click", () => {
+  if (currentRoute === "updates") {
+    window.dispatchEvent(new Event("tianyuan-workbench:refresh-update-module"));
+  }
+  return refreshAll({ probe: true });
+});
 on(elements.checkConnections, "click", () => checkConnections({ probe: true }));
 on(elements.startConnector, "click", startConnector);
 on(elements.bindCurrentPage, "click", bindCurrentPage);
