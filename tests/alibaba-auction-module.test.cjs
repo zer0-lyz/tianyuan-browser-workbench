@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 const { test } = require("node:test");
 
 const repoRoot = path.resolve(__dirname, "..");
@@ -475,7 +476,7 @@ test("Alibaba status sync uses the custom menu fixture and verifies visible/nati
   try {
     globalThis.document = fixture.document;
     globalThis.window = fixture.window;
-    const { synchronizeAlibabaAuctionStatus } = await import(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js"));
+    const { synchronizeAlibabaAuctionStatus } = await import(pathToFileURL(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js")).href);
 
     const initialAll = await synchronizeAlibabaAuctionStatus("all");
     assert.equal(initialAll.ok, true);
@@ -522,7 +523,7 @@ test("Alibaba status sync fails closed when the custom control does not echo the
   try {
     globalThis.document = fixture.document;
     globalThis.window = fixture.window;
-    const { synchronizeAlibabaAuctionStatus } = await import(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js"));
+    const { synchronizeAlibabaAuctionStatus } = await import(pathToFileURL(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js")).href);
     const result = await synchronizeAlibabaAuctionStatus("finished");
     assert.equal(result.ok, false);
     assert.equal(result.errorCode, "ALIBABA_STATUS_READBACK_FAILED");
@@ -542,7 +543,7 @@ test("Alibaba status sync waits for a delayed real control mount", async () => {
   try {
     globalThis.document = fixture.document;
     globalThis.window = fixture.window;
-    const { synchronizeAlibabaAuctionStatus } = await import(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js"));
+    const { synchronizeAlibabaAuctionStatus } = await import(pathToFileURL(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js")).href);
     const result = await synchronizeAlibabaAuctionStatus("finished");
     assert.equal(result.ok, true);
     assert.equal(result.changed, true);
@@ -563,7 +564,7 @@ test("Alibaba status sync finds a semantic combobox without fixed IDs", async ()
   try {
     globalThis.document = fixture.document;
     globalThis.window = fixture.window;
-    const { synchronizeAlibabaAuctionStatus } = await import(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js"));
+    const { synchronizeAlibabaAuctionStatus } = await import(pathToFileURL(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js")).href);
     const result = await synchronizeAlibabaAuctionStatus("finished");
     assert.equal(result.ok, true);
     assert.equal(result.label, "已结束");
@@ -583,7 +584,7 @@ test("Alibaba status sync is idempotent across consecutive finished calls", asyn
   try {
     globalThis.document = fixture.document;
     globalThis.window = fixture.window;
-    const { synchronizeAlibabaAuctionStatus } = await import(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js"));
+    const { synchronizeAlibabaAuctionStatus } = await import(pathToFileURL(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js")).href);
     const first = await synchronizeAlibabaAuctionStatus("finished");
     const finishedEventsAfterFirstCall = fixture.events.finished.length;
     const second = await synchronizeAlibabaAuctionStatus("finished");
@@ -613,7 +614,7 @@ test("current-page opening retries status synchronization once after a slow page
   let executeCount = 0;
   try {
     globalThis.window = { setTimeout, clearTimeout };
-    const { synchronizeAlibabaAuctionStatusOnTab } = await import(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js"));
+    const { synchronizeAlibabaAuctionStatusOnTab } = await import(pathToFileURL(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js")).href);
     const chromeRef = {
       scripting: {
         async executeScript() {
@@ -633,7 +634,7 @@ test("current-page opening retries status synchronization once after a slow page
 });
 
 test("result generation progress switches phase at 99 percent without mentioning coordinates when map is disabled", async () => {
-  const { hasDirectCoordinates, resultGenerationProgress } = await import(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js"));
+  const { hasDirectCoordinates, resultGenerationProgress } = await import(pathToFileURL(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js")).href);
   const results = [{ longitude: 120.1, latitude: 30.2 }, { address: "杭州市测试路 1 号" }];
   assert.equal(hasDirectCoordinates(results[0]), true);
   assert.equal(hasDirectCoordinates(results[1]), false);
@@ -650,7 +651,7 @@ test("result generation progress switches phase at 99 percent without mentioning
 });
 
 test("parameter snapshots distinguish applied values from later edits", async () => {
-  const { normalizeConfig, parameterSnapshotMatches } = await import(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js"));
+  const { normalizeConfig, parameterSnapshotMatches } = await import(pathToFileURL(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js")).href);
   const applied = normalizeConfig({
     provinceCode: "330000",
     cityCode: "330100",
@@ -671,7 +672,7 @@ test("parameter snapshots distinguish applied values from later edits", async ()
 });
 
 test("source category and request validation stay deterministic", async () => {
-  const { buildSourceUrl, directCandidateInScope, directExtractBuildingAreaFromText, directExtractFloorFieldsFromText, directPageBeforeRequestedRange, isAlibabaListPage, listPageMatchesRequest, normalizeConfig, statusFilterMatchesRequest, statusFilterLabels, usableDistricts } = await import(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js"));
+  const { buildSourceUrl, directCandidateInScope, directExtractBuildingAreaFromText, directExtractFloorFieldsFromText, directPageBeforeRequestedRange, isAlibabaListPage, listPageMatchesRequest, normalizeConfig, statusFilterMatchesRequest, statusFilterLabels, usableDistricts } = await import(pathToFileURL(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js")).href);
   for (const [propertyType, category] of [
     ["residential", "50025969"],
     ["commercial", "200782003"],
@@ -738,9 +739,13 @@ test("OpenCLI child process receives Node paths even with a minimal GUI PATH", (
     process.env.PATH = "/usr/bin:/bin";
     const environment = helper.commandEnvironment("/Users/test/.npm-global/bin/opencli");
     const entries = environment.PATH.split(path.delimiter);
-    assert.ok(entries.includes("/usr/local/bin"));
-    assert.ok(entries.includes("/opt/homebrew/bin"));
-    assert.ok(entries.includes("/Users/test/.npm-global/bin"));
+    if (process.platform === "win32") {
+      assert.ok(entries.includes(path.dirname(process.execPath)));
+    } else {
+      assert.ok(entries.includes("/usr/local/bin"));
+      assert.ok(entries.includes("/opt/homebrew/bin"));
+    }
+    assert.ok(entries.includes(path.dirname("/Users/test/.npm-global/bin/opencli")));
   } finally {
     if (previousPath === undefined) delete process.env.PATH;
     else process.env.PATH = previousPath;
@@ -874,7 +879,7 @@ test("floor and area extraction handles replayed table and OCR variants", () => 
 });
 
 test("extension-side direct extraction covers residential and commercial variants", async () => {
-  const { directExtractBuildingAreaFromText, directExtractFloorFieldsFromText } = await import(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js"));
+  const { directExtractBuildingAreaFromText, directExtractFloorFieldsFromText } = await import(pathToFileURL(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js")).href);
   for (const [source, expected] of [
     ["建筑面积约为：89.53平方米", 89.53],
     ["总建筑面积=1,234.56㎡", 1234.56],
@@ -905,7 +910,7 @@ test("extension-side direct extraction covers residential and commercial variant
 });
 
 test("extension-side detail parser does not infer a floor from a room number", async () => {
-  const moduleSource = await import(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js"));
+  const moduleSource = await import(pathToFileURL(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js")).href);
   const parsed = moduleSource.directParseDetail({
     title: "凯旋门公寓2幢2单元1602室不动产",
     location: "浙江省 杭州市 上城区",
@@ -924,7 +929,7 @@ test("extension-side detail parser does not infer a floor from a room number", a
 });
 
 test("extension-side detail parser prioritizes attachment evidence over page noise", async () => {
-  const moduleSource = await import(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js"));
+  const moduleSource = await import(pathToFileURL(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js")).href);
   const parsed = moduleSource.directParseDetail({
     title: "附件证据覆盖页面噪声",
     pageText: "建筑面积：详见评估报告。楼层：2 /总。",
@@ -959,7 +964,7 @@ test("floor evidence rejects OCR totals below the reported floor", async () => {
   }, { propertyType: "residential", status: "finished", province: "浙江省", city: "杭州市" });
   assert.equal(nativeParsed.floor, "7");
   assert.equal(nativeParsed.totalFloors, 42);
-  const extensionModule = await import(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js"));
+  const extensionModule = await import(pathToFileURL(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js")).href);
   const extensionParsed = extensionModule.directParseDetail({
     title: "可见楼层成对字段",
     pageText: "建筑面积 163.15平方米\n所在楼层 19层，共30层",
@@ -980,7 +985,7 @@ test("floor evidence rejects OCR totals below the reported floor", async () => {
 
 test("real Alibaba residential and commercial samples keep area and floor fields separate", async () => {
   const samples = JSON.parse(fs.readFileSync(path.join(repoRoot, "tests/fixtures/alibaba-auction-detail-fields.json"), "utf8"));
-  const { directExtractBuildingAreaFromText, directExtractFloorFieldsFromText } = await import(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js"));
+  const { directExtractBuildingAreaFromText, directExtractFloorFieldsFromText } = await import(pathToFileURL(path.join(repoRoot, "extension/src/modules/alibaba-auction/module.js")).href);
   const comparableTotal = (value) => String(value || "").replace(/[层楼]/g, "");
   assert.equal(samples.filter((sample) => sample.sourceType === "evaluation-report-attachment").length, 3);
   for (const sample of samples) {

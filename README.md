@@ -4,7 +4,7 @@
 
 “明细表导出与整理”复用旧的“导出明细表”入口：可在导出后按顺序恢复公式、设置明细表格式，也可选择本机工作簿手动整理。自动模式直接提交新导出的文件；手动模式支持覆盖、同目录副本和新目录输出。每个文件先在临时副本中完成全部步骤并校验，失败不会替换原文件。
 
-实际运行文件应安装到本机目录，不要直接从云盘、企业微信缓存、微信缓存或临时下载目录运行。
+完整包默认直接使用用户准备长期保留的解压目录：浏览器手动加载其中的 extension，生成运行组件放在 workbench-runtime；不强制部署到 C 盘 AppData 或用户隐藏目录。请先完整解压，保留所选目录，不要在 ZIP 预览或会自动清理的临时目录中运行。
 
 > **开源说明**：本仓库仅保留源码、公开说明与架构决策。内部项目记忆、业务接口资料和测试证据不随仓库公开；`feedback-service` 反馈模块依赖私有 Cloudflare 服务，开源版默认不提供该服务，如需自建请参考该目录内 README。
 
@@ -50,10 +50,10 @@ node scripts/install-local-runtime.mjs
 
 安装脚本会：
 
-- 复制 Chrome 扩展、本地助手和 Connector 到本机运行目录；
+- 默认保留当前目录的 extension，生成运行组件放在旁边的 workbench-runtime；
 - 同步打印格式脚本并验证本机 Python、`openpyxl` 和 `et_xmlfile`；
 - 注册 Chrome Native Messaging Host；
-- 在 macOS Keychain（不可用时为 `~/.tianyuan-workbench/` 的受限本机运行态）注册 Codex 本机实例身份；
+- 在 macOS Keychain（不可用时为当前受管运行目录）注册 Codex 本机实例身份；
 - 输出 Chrome 需要加载的 `extensionPath`；
 - 不写入 MCP token、Cookie、Authorization、密码或验证码。
 
@@ -61,6 +61,10 @@ node scripts/install-local-runtime.mjs
 
 - `交给Agent自动配置.md`
 - `docs/INSTALL_FOR_AGENT.md`
+
+## 天源 CLI
+
+完整包和轻量包都不包含或自动安装 CLI。CLI 缺失时显示中文安装指引，不阻断核心安装；仅 CLI 相关导出需要用户通过天源官方渠道单独安装/修复，重启浏览器后检查并自行授权。新测试构建为 2026102702，仍待实机验收，不属于已批准分发版本。
 
 ## 浏览器加载
 
@@ -76,11 +80,11 @@ node scripts/install-local-runtime.mjs
 
 版本更新模块通过 Gitee 国内镜像 `zer0_y/tianyuan-browser-workbench-releases` 的 `master` 分支清单及轻量包作为主通道，失败或过期时继续核对公开发行仓库 `zer0-lyz/tianyuan-browser-workbench-releases` 的 GitHub Release/API；也可通过 `TIANYUAN_GITEE_MANIFEST_URL` 临时覆盖镜像清单，不使用 MCP token。`0.13.0` 起可在侧栏点击“更新全部组件”，自动下载对应平台完整包、校验 SHA-256，并同步扩展、Native Helper、Bridge、Connector、`~/plugins/` 与 Codex 插件缓存；完成后自动重新加载扩展。
 
-Windows 打包发布的固定交接入口为仓库根目录 `WINDOWS_CODEX_HANDOFF.md`。macOS 主线只推送源码；Windows 专机 Codex 按该说明配置完整包和轻量包、执行真实首次安装与升级验收、生成 `update-manifest.json` 和 Release 专属 `WINDOWS_CODEX_HANDOFF.md`，再上传 GitHub Release。每次正式 Release 必须同时上传该交接文件；验收必须覆盖 Node.js、Python 全部业务依赖、Native Host、Native Messaging、Connector、Codex 插件缓存、CLI 与更新模块，不能把“扩展已复制或已加载”作为安装完成。
+Windows 打包发布的固定交接入口为仓库根目录 `WINDOWS_CODEX_HANDOFF.md`。macOS 主线只推送源码；Windows 专机 Codex 按该说明配置完整包和轻量包、执行真实首次安装与升级验收、生成 `update-manifest.json` 和 Release 专属 `WINDOWS_CODEX_HANDOFF.md`，再上传 GitHub Release。每次正式 Release 必须同时上传该交接文件；验收必须覆盖 Node.js、Python 全部业务依赖、Native Host、Native Messaging、Connector、Codex 插件缓存与更新模块，并单独报告可选 CLI 的状态，不能把“扩展已复制或已加载”作为安装完成。
 
 `0.14.25` 的 2026-09-18 Windows 修复构建补齐了完整包和轻量包缺失的 `native-helper/codex_catalog.js` 与 `native-helper/anjuke-property.js`。Windows 打包现改为同步完整的受版本控制 `native-helper` 目录，并在下载测试阶段校验这些必需文件，避免安装中途出现 `MODULE_NOT_FOUND`。
 
-`0.14.9` 起支持轻量更新包和国内静态镜像清单。首次安装仍使用完整安装包；后续更新可只下载扩展、Native Helper、Connector、skills 和安装脚本，复用本机已安装 Node、Python/openpyxl 和天源 CLI。Gitee raw 包与 GitHub Release 资产必须使用相同文件名、相同字节、相同文件大小和 SHA-256；清单或下载失败时自动回退 GitHub Release/API，下载仍受 HTTPS 域名白名单、文件大小和 SHA-256 校验保护。
+`0.14.9` 起支持轻量更新包和国内静态镜像清单。首次安装仍使用完整安装包；后续更新可只下载扩展、Native Helper、Connector、skills 和安装脚本，复用本机已安装 Node 和 Python/openpyxl；天源 CLI 为可选外部依赖。Gitee raw 包与 GitHub Release 资产必须使用相同文件名、相同字节、相同文件大小和 SHA-256；清单或下载失败时自动回退 GitHub Release/API，下载仍受 HTTPS 域名白名单、文件大小和 SHA-256 校验保护。
 
 `0.14.1` 起可先点击“测试更新模块”：它会下载当前平台完整包，验证 GitHub 下载、SHA-256、解压和安装包文件完整性，但不会安装、改变版本或重启，测试文件完成后自动删除。完整包约 100–130 MB。
 

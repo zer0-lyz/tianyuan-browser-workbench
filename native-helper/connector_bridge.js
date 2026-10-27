@@ -9,7 +9,23 @@ const path = require("node:path");
 const { createPlatformAdapter } = require("./platform/index.js");
 const { filterRetainedCatalog, readCodexCatalog } = require("./codex_catalog.js");
 
-const platformAdapter = createPlatformAdapter();
+const RUNTIME_CONFIG_PATH = process.env.TIANYUAN_RUNTIME_CONFIG_PATH
+  || path.join(__dirname, "runtime-config.json");
+
+function readRuntimeConfig(configPath = RUNTIME_CONFIG_PATH) {
+  try {
+    const value = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    return value && typeof value === "object" ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+const runtimeConfig = readRuntimeConfig();
+const platformAdapter = createPlatformAdapter({
+  runtimeConfig,
+  runtimeConfigPath: RUNTIME_CONFIG_PATH,
+});
 
 const PROTOCOL_VERSION = "connector-agent-binding-v3";
 const BUILD_ID = "2026-07-24-browser-contract-v2-capability-matrix";
@@ -81,13 +97,22 @@ function json(res, status, payload, origin = "") { const body = JSON.stringify({
 function fail(res, cause, origin = "") { json(res, cause?.status || 500, { ok: false, reason: cause?.code || cause?.message || String(cause) }, origin); }
 function body(req, limit = 1024 * 1024) { return new Promise((resolve, reject) => { let text = ""; req.setEncoding("utf8"); req.on("data", (chunk) => { text += chunk; if (Buffer.byteLength(text, "utf8") > limit) { req.destroy(); reject(error("CONNECTOR_REQUEST_TOO_LARGE", 413)); } }); req.on("end", () => { if (!text.trim()) return resolve({}); try { resolve(JSON.parse(text)); } catch { reject(error("CONNECTOR_INVALID_JSON")); } }); req.on("error", reject); }); }
 
-function resolveCredential(reference) {
-  return platformAdapter.resolveCredentialReference(reference);
+function resolveCredential(reference, adapter = platformAdapter) {
+  return adapter.resolveCredentialReference(reference);
 }
 
 function createBridge(options = {}) {
-  const home = os.homedir();
-  const runtimeRoot = platformAdapter.runtimeRoot;
+  const home = options.homeDir || os.homedir();
+  const bridgePlatformAdapter = options.platformAdapter || (options.runtimeConfig
+    ? createPlatformAdapter({
+        platform: options.platform,
+        homeDir: home,
+        env: options.env,
+        runtimeConfig: options.runtimeConfig,
+        runtimeConfigPath: options.runtimeConfigPath || RUNTIME_CONFIG_PATH,
+      })
+    : platformAdapter);
+  const runtimeRoot = bridgePlatformAdapter.runtimeRoot;
   const bindingsPath = options.bindingsPath || process.env.TIANYUAN_CONNECTOR_BINDINGS_PATH || path.join(runtimeRoot, "native-helper", "connector-bindings.json");
   const sourcesPath = options.sourcesPath || process.env.TIANYUAN_CONNECTOR_AGENT_SOURCES_PATH || path.join(runtimeRoot, "native-helper", "agent-sources.json");
   const configDir = options.configDir || process.env.TIANYUAN_CONNECTOR_AGENT_CONFIG_DIR || path.join(runtimeRoot, "agent-sources");
@@ -162,7 +187,7 @@ function createBridge(options = {}) {
     const providerId = limited(req.headers["x-tianyuan-agent-provider"], 80); const installationId = limited(req.headers["x-tianyuan-agent-installation"], 160); const credential = String(req.headers["x-tianyuan-agent-credential"] || "");
     if (!providerId && !installationId && !credential) { if (!required) return null; throw error("AGENT_IDENTITY_REQUIRED", 401); }
     const source = sourceFor(providerId, installationId); if (!source) throw error("AGENT_NOT_REGISTERED", 403);
-    const expected = resolveCredential(source.credentialRef); if (!expected) throw error("AGENT_CREDENTIAL_UNAVAILABLE", 503);
+    const expected = resolveCredential(source.credentialRef, bridgePlatformAdapter); if (!expected) throw error("AGENT_CREDENTIAL_UNAVAILABLE", 503);
     if (!equal(expected, credential)) throw error("AGENT_AUTH_INVALID", 403);
     source.lastSeenAt = now(); source.updatedAt = source.lastSeenAt; saveSources();
     return { agentId: source.agentId, providerId: source.providerId, installationId: source.installationId, displayName: source.displayName };
@@ -342,7 +367,7 @@ function createBridge(options = {}) {
     const secret = randomBytes(32).toString("base64url");
     const credentialPath = path.join(path.dirname(sourcesPath), "agent-credentials.json");
     const key = `${providerId}-${installationId}`;
-    return platformAdapter.createCredentialReference({
+    return bridgePlatformAdapter.createCredentialReference({
       service,
       account,
       fallbackPath: credentialPath,

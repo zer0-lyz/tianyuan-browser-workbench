@@ -3,6 +3,7 @@ import { EventBus } from "../core/event-bus.js";
 import { FeatureFlagService } from "../core/feature-flags.js";
 import { ModuleRegistry } from "../core/module-registry.js";
 import { createModuleStorageFactory } from "../core/module-storage.js";
+import { clearDirectoryPickerStatus, isDirectoryPickerCancelled, setDirectoryPickerStatus } from "../core/directory-picker.js";
 import { updatesModule } from "../modules/updates/module.js";
 import { feedbackModule } from "../modules/feedback/module.js";
 import { landPublicityModule } from "../modules/land-publicity/module.js";
@@ -1251,25 +1252,33 @@ function handleBatchUploadFolder(files, folderPath = "") {
 
 async function chooseBatchUploadFolder() {
   if (busy) return;
+  clearDirectoryPickerStatus(elements.chooseBatchUploadFolder, document);
   setBusy(true);
   setStatus("正在打开本机文件夹选择器...", "idle");
   try {
     const selected = await sendNativeMessage({ action: "select_batch_upload_directory" }, 130000);
     if (!selected?.ok || !selected.path) {
-      if (selected?.cancelled) return;
-      throw new Error(selected?.reason || "未选择文件夹。");
+      if (isDirectoryPickerCancelled(selected)) return;
+      const feedback = setDirectoryPickerStatus(elements.chooseBatchUploadFolder, selected, { subject: "批量上传文件夹" });
+      setStatus(feedback?.message || "无法完成文件夹选择，请重新选择。", "error");
+      return;
     }
     const listed = await sendNativeMessage({
       action: "list_batch_upload_directory",
       path: selected.path,
     }, 30000);
-    if (!listed?.ok) throw new Error(listed?.reason || "无法读取所选文件夹。");
+    if (!listed?.ok) {
+      const feedback = setDirectoryPickerStatus(elements.chooseBatchUploadFolder, listed, { subject: "批量上传文件夹" });
+      setStatus(feedback?.message || "无法读取所选文件夹，请重新选择。", "error");
+      return;
+    }
     handleBatchUploadFolder(listed.files || [], listed.path || selected.path);
     const suffix = listed.truncated ? "，已限制为前 200 个文件" : "";
     setStatus(`已读取 ${batchUploadState.files.length} 个文件${suffix}`, "ok");
   } catch (error) {
+    const feedback = setDirectoryPickerStatus(elements.chooseBatchUploadFolder, error, { subject: "批量上传文件夹" });
     batchUploadFeedback(elements.batchUploadMappingFeedback, error.message || String(error), "error");
-    setStatus(`文件夹读取失败：${error.message || String(error)}`, "error");
+    setStatus(feedback?.message || "无法读取所选文件夹，请重新选择。", "error");
   } finally {
     setBusy(false);
   }
@@ -3177,7 +3186,8 @@ async function fetchNativeHelperJson(path) {
 
   if (!message) throw new Error("NATIVE_HELPER_UNSUPPORTED_PATH");
   if (runtimeMcpToken) message.mcpToken = runtimeMcpToken;
-  const payload = await sendNativeMessage(message);
+  const healthProbe = message?.action === "health" && message?.probe === true;
+  const payload = await sendNativeMessage(message, healthProbe ? 50_000 : 12_000);
   if (!payload?.ok) {
     const error = new Error(payload?.reason || "NATIVE_HELPER_ERROR");
     error.payload = payload || null;
@@ -3273,10 +3283,15 @@ async function pollCliAuthorization(sessionId) {
       await checkConnections({ probe: true });
       return true;
     }
+    if (status?.state === "unavailable" || ["TYCPV_NOT_FOUND", "TYCPV_VERSION_FAILED", "TYCPV_EXECUTION_BLOCKED", "TYCPV_TIMEOUT"].includes(status?.reason)) {
+      setConnection(elements.cliStatus, "未安装/不可用", "warn");
+      updateCliStatusMessage(status.message || "天源 CLI 未安装或无法运行。请从天源官方渠道单独安装或修复后重新检查；无需先做登录授权。", "warn");
+      return false;
+    }
     if (status?.state === "failed" || status?.ok === false) {
       const reason = status.reason || "CLI_LOGIN_FAILED";
       setConnection(elements.cliStatus, "授权失败", "error");
-      updateCliStatusMessage(`CLI 授权失败：${reason}。可手动执行：tycpv login`, "error");
+      updateCliStatusMessage(status.message || `CLI 授权失败：${reason}。请检查天源 CLI 授权流程。`, "error");
       return false;
     }
     setConnection(elements.cliStatus, "等待授权", "warn");
@@ -3311,10 +3326,14 @@ async function authorizeCli() {
     };
     elements.json.textContent = JSON.stringify(latestPayload, null, 2);
     if (!result?.ok) {
-      setConnection(elements.cliStatus, "授权失败", "error");
+      const unavailable = result?.state === "unavailable"
+        || ["TYCPV_NOT_FOUND", "TYCPV_VERSION_FAILED", "TYCPV_EXECUTION_BLOCKED", "TYCPV_TIMEOUT"].includes(result?.reason);
+      setConnection(elements.cliStatus, unavailable ? "未安装/不可用" : "授权失败", unavailable ? "warn" : "error");
       updateCliStatusMessage(
-        `CLI 授权失败：${result?.reason || "CLI_LOGIN_FAILED"}。可手动执行：tycpv login`,
-        "error",
+        result?.message || (unavailable
+          ? "天源 CLI 未安装或无法运行。请从天源官方渠道单独安装或修复后重新检查；无需先做登录授权。"
+          : `CLI 授权失败：${result?.reason || "CLI_LOGIN_FAILED"}。请检查天源 CLI 授权流程。`),
+        unavailable ? "warn" : "error",
       );
       return;
     }
@@ -3369,6 +3388,7 @@ function exportUi(exportType) {
       route: "export-detail",
       label: "资产基础法明细表",
       outputPath: elements.detailOutputPath,
+      chooseOutputDirectory: elements.chooseDetailOutputPath,
       progressBar: elements.detailProgressBar,
       progressText: elements.detailProgressText,
       progressPercent: elements.detailProgressPercent,
@@ -3378,6 +3398,7 @@ function exportUi(exportType) {
     route: "export-declare",
     label: "资产基础法申报表",
     outputPath: elements.declareOutputPath,
+    chooseOutputDirectory: elements.chooseDeclareOutputPath,
     progressBar: elements.declareProgressBar,
     progressText: elements.declareProgressText,
     progressPercent: elements.declareProgressPercent,
@@ -3395,27 +3416,37 @@ function setExportProgress(exportType, percent, text) {
 async function chooseExportDirectory(exportType) {
   if (busy) return;
   const ui = exportUi(exportType);
+  clearDirectoryPickerStatus(ui.chooseOutputDirectory, document);
   setBusy(true);
   setStatus("正在打开文件夹选择器...", "idle");
   try {
     const directoryName = exportType === "asset_declare_table" ? "申报表导出" : "明细表导出";
     const result = await sendNativeMessage({ action: "select_export_directory", directoryName }, 130000);
     if (!result?.ok) {
-      if (result?.cancelled) {
+      if (isDirectoryPickerCancelled(result)) {
         setStatus("已取消选择目录", "warn");
         return;
       }
-      throw new Error(result?.reason || "DIRECTORY_SELECTION_FAILED");
+      const feedback = setDirectoryPickerStatus(ui.chooseOutputDirectory, result, { subject: "导出存放目录" });
+      setStatus(feedback?.message || "无法完成导出目录选择。请重新选择。", "error");
+      return;
     }
-    ui.outputPath.value = result.outputDirectory || result.path || result.paths?.[0] || "";
+    const selectedPath = result.outputDirectory || result.path || result.paths?.[0] || "";
+    if (!selectedPath) {
+      const feedback = setDirectoryPickerStatus(ui.chooseOutputDirectory, { reason: result.reason || "OUTPUT_DIRECTORY_SELECTION_FAILED" }, { subject: "导出存放目录" });
+      setStatus(feedback?.message || "未取得可用的导出目录，请重新选择。", "error");
+      return;
+    }
+    ui.outputPath.value = selectedPath;
     latestPayload = {
       ...result,
       collectedAt: new Date().toISOString(),
     };
     elements.json.textContent = JSON.stringify(latestPayload, null, 2);
-    setStatus(`已选择导出目录：${result.path}`, "ok");
+    setStatus(`已选择导出目录：${selectedPath}`, "ok");
   } catch (error) {
-    setStatus(`选择目录失败：${error?.message || String(error)}`, "error");
+    const feedback = setDirectoryPickerStatus(ui.chooseOutputDirectory, error, { subject: "导出存放目录" });
+    setStatus(feedback?.message || "无法完成导出目录选择。请重新选择。", "error");
   } finally {
     setBusy(false);
   }
@@ -3454,7 +3485,9 @@ async function runCliExport(exportType) {
   try {
     const health = await checkConnections({ probe: true });
     if (!health?.cli?.ok || health?.cli?.authenticated !== true) {
-      throw new Error("CLI 未完成授权或授权已失效，请先在连接配置页重新授权。");
+      throw new Error(health?.cli?.ok
+        ? "天源 CLI 尚未授权或授权已过期，请在连接配置页完成 CLI 授权后重试。"
+        : (health?.cli?.message || "天源 CLI 未安装或无法运行。请从天源官方渠道单独安装或修复后重新检查。"));
     }
     const context = await refreshContext({ allowBusy: true }) || latestContext;
     const projectId = String(context?.route?.projectId || "").trim();
@@ -3520,6 +3553,9 @@ function printFormatUi(formatType) {
       route: "format-detail",
       label: "明细表打印格式",
       inputSummary: elements.detailPrintInputSummary,
+      chooseFiles: elements.chooseDetailPrintFiles,
+      chooseFolder: elements.chooseDetailPrintFolder,
+      chooseOutputDirectory: elements.chooseDetailPrintOutputPath,
       outputMode: elements.detailPrintOutputMode,
       outputDirectoryWrap: elements.detailPrintOutputDirectoryWrap,
       outputPath: elements.detailPrintOutputPath,
@@ -3533,6 +3569,9 @@ function printFormatUi(formatType) {
       route: "link-restore",
       label: "明细表公式恢复",
       inputSummary: elements.linkRestoreInputSummary,
+      chooseFiles: elements.chooseLinkRestoreFiles,
+      chooseFolder: elements.chooseLinkRestoreFolder,
+      chooseOutputDirectory: elements.chooseLinkRestoreOutputPath,
       outputMode: elements.linkRestoreOutputMode,
       outputDirectoryWrap: elements.linkRestoreOutputDirectoryWrap,
       outputPath: elements.linkRestoreOutputPath,
@@ -3545,6 +3584,9 @@ function printFormatUi(formatType) {
     route: "format-declaration",
     label: "申报表打印格式",
     inputSummary: elements.declarationPrintInputSummary,
+    chooseFiles: elements.chooseDeclarationPrintFiles,
+    chooseFolder: elements.chooseDeclarationPrintFolder,
+    chooseOutputDirectory: elements.chooseDeclarationPrintOutputPath,
     outputMode: elements.declarationPrintOutputMode,
     outputDirectoryWrap: elements.declarationPrintOutputDirectoryWrap,
     outputPath: elements.declarationPrintOutputPath,
@@ -3578,6 +3620,9 @@ function renderPrintInputSummary(formatType) {
 
 async function choosePrintInputs(formatType, sourceKind) {
   if (busy) return;
+  const pickerUi = printFormatUi(formatType);
+  const pickerButton = sourceKind === "files" ? pickerUi.chooseFiles : pickerUi.chooseFolder;
+  clearDirectoryPickerStatus(pickerButton, document);
   setBusy(true);
   setStatus(sourceKind === "files" ? "正在选择 Excel 文件..." : "正在选择文件夹...", "idle");
   try {
@@ -3586,11 +3631,13 @@ async function choosePrintInputs(formatType, sourceKind) {
       : "select_print_workbook_directory";
     const result = await sendNativeMessage({ action }, 130000);
     if (!result?.ok) {
-      if (result?.cancelled) {
+      if (isDirectoryPickerCancelled(result)) {
         setStatus("已取消选择", "warn");
         return;
       }
-      throw new Error(result?.reason || "PRINT_INPUT_SELECTION_FAILED");
+      const feedback = setDirectoryPickerStatus(pickerButton, result, { subject: sourceKind === "files" ? "输入文件" : "输入文件夹" });
+      setStatus(feedback?.message || "无法完成选择，请重新选择。", "error");
+      return;
     }
     printTaskStates[formatType].inputPaths = Array.isArray(result.paths) ? result.paths : [];
     renderPrintInputSummary(formatType);
@@ -3607,7 +3654,8 @@ async function choosePrintInputs(formatType, sourceKind) {
       "ok",
     );
   } catch (error) {
-    setStatus(`选择失败：${error?.message || String(error)}`, "error");
+    const feedback = setDirectoryPickerStatus(pickerButton, error, { subject: sourceKind === "files" ? "输入文件" : "输入文件夹" });
+    setStatus(feedback?.message || "无法完成选择，请重新选择。", "error");
   } finally {
     setBusy(false);
   }
@@ -3616,6 +3664,7 @@ async function choosePrintInputs(formatType, sourceKind) {
 async function choosePrintOutputDirectory(formatType) {
   if (busy) return;
   const ui = printFormatUi(formatType);
+  clearDirectoryPickerStatus(ui.chooseOutputDirectory, document);
   setBusy(true);
   setStatus("正在选择打印版存放位置...", "idle");
   try {
@@ -3624,16 +3673,25 @@ async function choosePrintOutputDirectory(formatType) {
       : (formatType === "link" ? "明细表公式恢复" : "明细表打印格式");
     const result = await sendNativeMessage({ action: "select_print_output_directory", directoryName }, 130000);
     if (!result?.ok) {
-      if (result?.cancelled) {
+      if (isDirectoryPickerCancelled(result)) {
         setStatus("已取消选择目录", "warn");
         return;
       }
-      throw new Error(result?.reason || "PRINT_OUTPUT_SELECTION_FAILED");
+      const feedback = setDirectoryPickerStatus(ui.chooseOutputDirectory, result, { subject: "处理后文件存放目录" });
+      setStatus(feedback?.message || "无法完成目录选择。请重新选择。", "error");
+      return;
     }
-    ui.outputPath.value = result.outputDirectory || result.path || result.paths?.[0] || "";
+    const selectedPath = result.outputDirectory || result.path || result.paths?.[0] || "";
+    if (!selectedPath) {
+      const feedback = setDirectoryPickerStatus(ui.chooseOutputDirectory, { reason: result.reason || "PRINT_OUTPUT_SELECTION_FAILED" }, { subject: "处理后文件存放目录" });
+      setStatus(feedback?.message || "未取得可用的存放目录，请重新选择。", "error");
+      return;
+    }
+    ui.outputPath.value = selectedPath;
     setStatus(`已选择存放位置：${ui.outputPath.value}`, "ok");
   } catch (error) {
-    setStatus(`选择目录失败：${error?.message || String(error)}`, "error");
+    const feedback = setDirectoryPickerStatus(ui.chooseOutputDirectory, error, { subject: "处理后文件存放目录" });
+    setStatus(feedback?.message || "无法完成目录选择。请重新选择。", "error");
   } finally {
     setBusy(false);
   }
@@ -5112,7 +5170,9 @@ async function performConnectionCheck({ probe = false } = {}) {
   elements.connectionMessage.textContent = "正在连接 helper...";
 
   try {
-    const health = await fetchHelperJson(`/health?probe=${probe ? "1" : "0"}`);
+    const health = probe
+      ? await fetchNativeHelperJson("/health?probe=1")
+      : await fetchHelperJson("/health?probe=0");
     setConnection(elements.helperStatus, health.transport === "native_messaging" ? "已启动" : "已连接", "ok");
     elements.connectionMessage.textContent = health.transport === "native_messaging"
       ? (probe ? "Native Messaging 已拉起，正在验证连接" : "本地助手已连接，等待主动验证")
@@ -5131,7 +5191,21 @@ async function performConnectionCheck({ probe = false } = {}) {
       setConnection(elements.mcpStatus, runtimeMcpToken ? "token 无效" : "未配置 token", "warn");
     }
 
-    if ((health.cli?.ok && health.cli?.authenticated === true)
+    const cliUnavailable = !health.cli?.ok
+      && ["TYCPV_NOT_FOUND", "TYCPV_VERSION_FAILED", "TYCPV_EXECUTION_BLOCKED", "TYCPV_TIMEOUT"].includes(health.cli?.reason);
+    elements.cliStatus.title = cliUnavailable ? String(health.cli?.message || "") : "";
+    if (cliUnavailable) {
+      const cliUnavailableLabel = health.cli?.reason === "TYCPV_NOT_FOUND"
+        ? "未检测到"
+        : (health.cli?.reason === "TYCPV_TIMEOUT"
+          ? "检查超时"
+          : (health.cli?.reason === "TYCPV_EXECUTION_BLOCKED" ? "启动受阻" : "启动失败"));
+      setConnection(elements.cliStatus, cliUnavailableLabel, "warn");
+      updateCliStatusMessage(
+        health.cli?.message || "天源 CLI 未安装或无法运行。请从天源官方渠道单独安装或修复后重新检查；无需先做登录授权。CLI 只影响 CLI 相关导出。",
+        "warn",
+      );
+    } else if ((health.cli?.ok && health.cli?.authenticated === true)
       || (!probe && health.cli?.authenticated === true && cliProbeVerified)) {
       setConnection(elements.cliStatus, health.cli.version || "可用", "ok");
     } else if (health.cli?.ok && health.cli?.authenticated === false) {
@@ -6386,6 +6460,9 @@ async function bootstrapApplication() {
       copyText: (text) => navigator.clipboard.writeText(text),
       sendNativeMessage,
       streamNativeMessage,
+      setDirectoryPickerStatus: (button, payload, options) => setDirectoryPickerStatus(button, payload, { documentRef: document, ...options }),
+      clearDirectoryPickerStatus: (button) => clearDirectoryPickerStatus(button, document),
+      isDirectoryPickerCancelled,
       setConnection,
       setStatus,
     });

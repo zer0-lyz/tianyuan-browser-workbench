@@ -1,3 +1,5 @@
+现行安装约定（2026-10-26，优先于下文历史路径示例）：完整包默认加载用户长期保留的解压目录/extension，运行态放在同根 workbench-runtime；不强制复制到隐藏目录。CLI 为可选外部依赖，完整/轻量包均不捆绑或自动安装，缺失时中文提示用户单独安装；核心安装成功与 CLI 状态分别判定。旧隐藏路径仅用于兼容既有安装更新。Windows/Mac 当前安装操作分别以 release/windows-x64 和 release/macos-arm64 中的最新安装说明为准。
+
 # Tianyuan Browser Workbench Agent Install
 
 This project uses a local runtime directory. The repository is the source and documentation store; Chrome and the native helper should run from local user directories.

@@ -21,6 +21,17 @@ const processLauncher = (() => {
     }
   }
 })();
+const directoryPicker = (() => {
+  try {
+    return require("./directory-picker.js");
+  } catch (cause) {
+    try {
+      return createRequire(path.join(path.dirname(process.execPath), "native_host.js"))("./directory-picker.js");
+    } catch {
+      throw cause;
+    }
+  }
+})();
 const connectorBridge = (() => {
   try {
     return require("./connector_bridge.js");
@@ -98,7 +109,18 @@ const anjukeProperty = (() => {
     }
   }
 })();
-const platformAdapter = (() => {
+const cliRuntime = (() => {
+  try {
+    return require("./cli-runtime.js");
+  } catch (cause) {
+    try {
+      return createRequire(path.join(path.dirname(process.execPath), "native_host.js"))("./cli-runtime.js");
+    } catch {
+      throw cause;
+    }
+  }
+})();
+const platformAdapterModule = (() => {
   try {
     return require("./platform/index.js");
   } catch (cause) {
@@ -108,7 +130,7 @@ const platformAdapter = (() => {
       throw cause;
     }
   }
-})().createPlatformAdapter();
+})();
 
 process.stdout.on("error", (error) => {
   if (error?.code === "EPIPE") {
@@ -123,7 +145,7 @@ const CONNECTOR_PLATFORM_URL = process.env.TIANYUAN_CONNECTOR_PLATFORM_URL || "h
 const CODEX_GLOBAL_STATE_PATH = process.env.TIANYUAN_CODEX_GLOBAL_STATE_PATH
   || path.join(os.homedir(), ".codex", ".codex-global-state.json");
 const CONNECTOR_BINDINGS_PATH = process.env.TIANYUAN_CONNECTOR_BINDINGS_PATH
-  || path.join(os.homedir(), ".tianyuan-workbench", "native-helper", "connector-bindings.json");
+  || path.join(processLauncher.runtimeDirectory(), "connector-bindings.json");
 const CONNECTOR_ACTION_TTL_MS = 5 * 60 * 1000;
 const CONNECTOR_ACTION_RESULT_TTL_MS = 15 * 60 * 1000;
 const CONNECTOR_MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
@@ -135,7 +157,6 @@ const CONNECTOR_ALLOWED_EXTENSION_ORIGINS = new Set([
   "chrome-extension://lkflndcnklpeaejohaacoaolnmhgigoc",
   "chrome-extension://fdbllnmaaklkcmoacoapbibiggnndkfpa",
 ]);
-const IS_WINDOWS = platformAdapter.isWindows;
 const RUNTIME_CONFIG_PATH = process.env.TIANYUAN_RUNTIME_CONFIG_PATH
   || path.join(processLauncher.runtimeDirectory(), "runtime-config.json");
 const CLI_LOGIN_STATUS_PATH = path.join(processLauncher.runtimeDirectory(), "cli-login-status.json");
@@ -155,6 +176,11 @@ function loadRuntimeConfig() {
 }
 
 const runtimeConfig = loadRuntimeConfig();
+const platformAdapter = platformAdapterModule.createPlatformAdapter({
+  runtimeConfig,
+  runtimeConfigPath: RUNTIME_CONFIG_PATH,
+});
+const IS_WINDOWS = platformAdapter.isWindows;
 const MAP_CONFIG_PATH = process.env.TIANYUAN_MAP_CONFIG_PATH
   || path.join(path.dirname(processLauncher.runtimeDirectory()), "map-config.json");
 
@@ -228,29 +254,34 @@ const fileArchive = fileArchiveFactory.createFileArchiveService({
   selfLaunchSpec: (args) => processLauncher.selfLaunchSpec(args),
 });
 
-function firstExistingPath(values, fallback) {
-  for (const value of values) {
-    if (value && fs.existsSync(value)) return value;
-  }
-  return fallback;
+let lastSuccessfulCliBin = "";
+
+function resolveCliCandidates() {
+  return cliRuntime.resolveExecutableCandidates({
+    env: process.env,
+    configuredBin: runtimeConfig.tycpvBin,
+    candidates: [
+      ...cliRuntime.discoverWindowsCliCandidates({ env: process.env, platform: process.platform }),
+      ...platformAdapter.cliCandidates,
+    ],
+    fallback: platformAdapter.cliFallback,
+    platform: process.platform,
+  });
 }
 
-const CLI_BIN = process.env.TYCPV_BIN
-  || runtimeConfig.tycpvBin
-  || firstExistingPath(platformAdapter.cliCandidates, platformAdapter.cliFallback);
-
 function directCliExportEnginePaths() {
+  const cliBin = lastSuccessfulCliBin || resolveCliCandidates()[0] || "";
   const candidates = [
     process.env.TYCPV_APP_ROOT,
     runtimeConfig.tycpvAppRoot,
     process.platform === "darwin" ? "/Library/Application Support/tycpv/app" : "",
-    CLI_BIN ? path.join(path.dirname(CLI_BIN), "app") : "",
-    CLI_BIN ? path.join(path.dirname(CLI_BIN), "..", "app") : "",
+    cliBin ? path.join(path.dirname(cliBin), "app") : "",
+    cliBin ? path.join(path.dirname(cliBin), "..", "app") : "",
   ].filter(Boolean);
 
-  if (CLI_BIN && fs.existsSync(CLI_BIN)) {
+  if (cliBin && fs.existsSync(cliBin)) {
     try {
-      const launcher = fs.readFileSync(CLI_BIN, "utf8").slice(0, 16 * 1024);
+      const launcher = fs.readFileSync(cliBin, "utf8").slice(0, 16 * 1024);
       const installRoot = launcher.match(/INSTALL_ROOT\s*=\s*["']([^"']+)["']/i)?.[1];
       if (installRoot) candidates.unshift(path.join(installRoot, "app"));
     } catch {
@@ -270,6 +301,7 @@ function directCliExportEnginePaths() {
 }
 
 let directCliExportEnginePromise = null;
+let directCliExportEnginePath = "";
 
 async function loadDirectCliExportEngine() {
   const paths = directCliExportEnginePaths();
@@ -278,7 +310,8 @@ async function loadDirectCliExportEngine() {
     error.code = "TYCPV_EXPORT_ENGINE_NOT_FOUND";
     throw error;
   }
-  if (!directCliExportEnginePromise) {
+  if (!directCliExportEnginePromise || directCliExportEnginePath !== paths.exporterPath) {
+    directCliExportEnginePath = paths.exporterPath;
     directCliExportEnginePromise = import(pathToFileURL(paths.exporterPath).href)
       .then((module) => ({ ...paths, Exporter: module.default }));
   }
@@ -1604,40 +1637,55 @@ function readCliPackageVersion(candidate) {
   return "";
 }
 
-function checkCli() {
-  return new Promise((resolve) => {
-    const auth = readCliAuthState();
-    // Windows tycpv 0.1.0 may keep a Node process alive during --version.
-    // --help is a read-only probe; package.json supplies the version when available.
-    const probeArgs = IS_WINDOWS ? ["--help"] : ["--version"];
-    const launch = processLauncher.commandLaunchSpec(CLI_BIN, probeArgs);
-    execFile(launch.command, launch.args, {
-      timeout: 5000,
-      env: launch.env,
-      windowsHide: true,
-    }, (error, stdout, stderr) => {
-      if (error) {
-        resolve({
-          ok: false,
-          reason: error.code === "ENOENT" ? "TYCPV_NOT_FOUND" : "TYCPV_VERSION_FAILED",
-          authenticated: auth.authenticated,
-          authExpiresAt: auth.expiresAt,
-        });
-        return;
-      }
-      resolve({
-        ok: true,
-        version: IS_WINDOWS
-          ? (readCliPackageVersion(CLI_BIN) || "可用（--help 探测通过）")
-          : String(stdout || stderr || "").trim().split(/\r?\n/)[0] || "可用",
-        authenticated: auth.authenticated,
-        authExpiresAt: auth.expiresAt,
-      });
-    });
+async function checkCli() {
+  const candidates = resolveCliCandidates();
+  if (!candidates.length) {
+    const reason = "TYCPV_NOT_FOUND";
+    return {
+      ok: false, required: false, optional: true, reason, authenticated: false, authExpiresAt: null,
+      message: cliRuntime.cliUnavailableMessage(reason),
+    };
+  }
+
+  const probeArgs = IS_WINDOWS ? ["--help"] : ["--version"];
+  const probe = await cliRuntime.probeExecutableCandidates({
+    candidates, args: probeArgs, commandLaunchSpec: processLauncher.commandLaunchSpec, execFile,
+    timeoutMs: IS_WINDOWS ? 15_000 : 5_000,
+    maxDurationMs: IS_WINDOWS ? 30_000 : 5_000,
   });
+  if (!probe.ok) {
+    const reason = probe.reason || "TYCPV_VERSION_FAILED";
+    return {
+      ok: false, required: false, optional: true, reason, authenticated: false, authExpiresAt: null,
+      message: cliRuntime.cliUnavailableMessage(reason),
+    };
+  }
+
+  lastSuccessfulCliBin = probe.candidate;
+  const auth = readCliAuthState();
+  return {
+    ok: true, required: false, optional: true,
+    version: IS_WINDOWS
+      ? (readCliPackageVersion(probe.candidate) || "可用（--help 探测通过）")
+      : String(probe.stdout || probe.stderr || "").trim().split(/\r?\n/)[0] || "可用",
+    authenticated: auth.authenticated, authExpiresAt: auth.expiresAt,
+  };
 }
 
 async function getCliLoginStatus(sessionId = "") {
+  const cli = await checkCli();
+  if (!cli.ok) {
+    return {
+      ok: false,
+      action: "cli_login_status",
+      state: "unavailable",
+      reason: cli.reason,
+      required: false,
+      authenticated: false,
+      message: cli.message,
+      security: { credentialsReturned: false },
+    };
+  }
   const status = readCliLoginStatus();
   if (sessionId && status?.sessionId && status.sessionId !== sessionId) {
     return { ok: false, reason: "CLI_LOGIN_SESSION_NOT_FOUND" };
@@ -1667,7 +1715,20 @@ async function getCliLoginStatus(sessionId = "") {
   return { ok: status.state !== "failed", ...status, authenticated: false };
 }
 
-function startCliLogin() {
+async function startCliLogin() {
+  const cli = await checkCli();
+  if (!cli.ok) {
+    return {
+      ok: false,
+      action: "cli_login",
+      state: "unavailable",
+      reason: cli.reason,
+      required: false,
+      authenticated: false,
+      message: cli.message,
+      security: { credentialsReturned: false },
+    };
+  }
   const auth = readCliAuthState();
   if (auth.authenticated) {
     return Promise.resolve({
@@ -1699,18 +1760,9 @@ function startCliLogin() {
     });
   }
 
-  if (!CLI_BIN || (!fs.existsSync(CLI_BIN) && /[\\/]/.test(CLI_BIN))) {
-    return Promise.resolve({
-      ok: false,
-      action: "cli_login",
-      reason: "TYCPV_NOT_FOUND",
-      manualCommand: "tycpv login",
-      security: { credentialsReturned: false },
-    });
-  }
-
+  const cliBin = lastSuccessfulCliBin;
   const sessionId = randomUUID();
-  const launch = processLauncher.commandLaunchSpec(CLI_BIN, ["login"]);
+  const launch = processLauncher.commandLaunchSpec(cliBin, ["login"]);
   let spawnCommand = launch.command;
   let spawnArgs = launch.args;
   let spawnOptions = { detached: true, stdio: ["ignore", "pipe", "pipe"], env: launch.env, windowsHide: true };
@@ -1861,45 +1913,15 @@ async function chooseManagedOutputDirectory(prompt, directoryName, action, failu
   const rawParentPath = selectedDirectoryPath(result);
   if (!result?.ok || !rawParentPath) {
     return {
-      ...result,
+      ...directoryPicker.directorySelectionFailure(result, { action, failureReason }),
       action,
-      path: "",
-      paths: [],
       security: { credentialsReturned: false },
     };
   }
-  try {
-    const parentPath = validateExportDirectory(rawParentPath);
-    const folderName = String(directoryName || "").trim();
-    if (!folderName || folderName === "." || folderName === ".." || path.basename(folderName) !== folderName) {
-      throw new Error("EXPORT_DIRECTORY_NAME_INVALID");
-    }
-    const outputPath = path.basename(parentPath) === folderName ? parentPath : path.join(parentPath, folderName);
-    const alreadyExists = fs.existsSync(outputPath);
-    fs.mkdirSync(outputPath, { recursive: true, mode: 0o700 });
-    const selectedPath = fs.realpathSync(outputPath);
-    return {
-      ...result,
-      ok: true,
-      action,
-      path: selectedPath,
-      paths: [selectedPath],
-      outputDirectory: selectedPath,
-      parentPath,
-      directoryName: folderName,
-      createdDirectory: !alreadyExists,
-      security: { credentialsReturned: false },
-    };
-  } catch {
-    return {
-      ok: false,
-      action,
-      path: "",
-      paths: [],
-      reason: failureReason,
-      security: { credentialsReturned: false },
-    };
-  }
+  return {
+    ...result,
+    ...directoryPicker.prepareManagedOutputDirectory(rawParentPath, directoryName, { action, failureReason }),
+  };
 }
 
 async function chooseExportDirectory(message = {}) {
@@ -3300,7 +3322,7 @@ function validateExportDirectory(value) {
   if (!raw || raw.includes("\0") || !path.isAbsolute(raw)) {
     throw new Error("EXPORT_DIRECTORY_INVALID");
   }
-  const resolved = fs.realpathSync(raw);
+  const resolved = directoryPicker.realpathNative(fs, raw);
   const stat = fs.statSync(resolved);
   if (!stat.isDirectory()) throw new Error("EXPORT_DIRECTORY_NOT_DIRECTORY");
   return resolved;
@@ -3518,10 +3540,40 @@ async function runDirectCliExport(message, emit) {
   }
 }
 
-function runCliExport(message, emit) {
+async function runCliExport(message, emit) {
   const preferCli = message?.preferCli === true;
+  const cli = await checkCli();
+  const directEngineAvailable = !preferCli && Boolean(getToken()) && Boolean(directCliExportEnginePaths());
+  if (!cli.ok) {
+    const payload = {
+      ok: false,
+      event: "complete",
+      phase: "failed",
+      percent: 0,
+      reason: cli.reason,
+      userMessage: cli.message,
+      exportType: message?.exportType || null,
+      security: { credentialsReturned: false, tokenUsed: false },
+    };
+    emit(payload);
+    return payload;
+  }
+  if (!directEngineAvailable && cli.authenticated !== true) {
+    const payload = {
+      ok: false,
+      event: "complete",
+      phase: "failed",
+      percent: 0,
+      reason: "TYCPV_AUTH_REQUIRED",
+      userMessage: "天源 CLI 已安装并可运行，但尚未授权或授权已过期。请在连接配置页完成 CLI 授权后重试导出。",
+      exportType: message?.exportType || null,
+      security: { credentialsReturned: false, tokenUsed: false },
+    };
+    emit(payload);
+    return payload;
+  }
   if (!preferCli && getToken() && directCliExportEnginePaths()) {
-    return runDirectCliExport(message, emit).catch((error) => ({
+    return await runDirectCliExport(message, emit).catch((error) => ({
       ...(() => {
         const failure = cliExportFailure([{ text: error?.message || String(error) }]);
         return { reason: failure.reason, userMessage: failure.userMessage };
@@ -3581,7 +3633,7 @@ function runCliExport(message, emit) {
       outDir,
     });
 
-    const launch = processLauncher.commandLaunchSpec(CLI_BIN, args);
+    const launch = processLauncher.commandLaunchSpec(lastSuccessfulCliBin, args);
     const child = spawn(launch.command, launch.args, {
       cwd: outDir,
       env: launch.env,
@@ -4339,15 +4391,30 @@ async function health({ probe = false } = {}) {
     }
   }
 
-  const auth = probe ? null : readCliAuthState();
+  const availableCliCandidates = probe ? [] : resolveCliCandidates();
+  const auth = probe || !availableCliCandidates.length
+    ? null
+    : readCliAuthState();
   const cli = probe
     ? await checkCli()
-    : {
-        ok: false,
-        reason: "CLI_NOT_PROBED",
-        authenticated: auth.authenticated,
-        authExpiresAt: auth.expiresAt,
-      };
+    : (availableCliCandidates.length
+      ? {
+          ok: false,
+          required: false,
+          optional: true,
+          reason: "CLI_NOT_PROBED",
+          authenticated: auth.authenticated,
+          authExpiresAt: auth.expiresAt,
+        }
+      : {
+          ok: false,
+          required: false,
+          optional: true,
+          reason: "TYCPV_NOT_FOUND",
+          authenticated: false,
+          authExpiresAt: null,
+          message: cliRuntime.cliUnavailableMessage("TYCPV_NOT_FOUND"),
+        });
 
   return {
     ok: true,

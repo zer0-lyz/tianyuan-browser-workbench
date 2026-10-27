@@ -282,23 +282,30 @@ export const landPublicityModule = {
     }
 
     async function chooseOutputDirectory() {
+      context.clearDirectoryPickerStatus(elements.chooseLandPublicityOutput);
       try {
         const result = await context.sendNativeMessage({ action: "select_land_publicity_output_directory" }, 130000);
         const selected = result?.outputDirectory || result?.path || result?.paths?.[0] || "";
         if (!result?.ok || !selected) {
-          if (!result?.cancelled) setMessage(elements.landPublicityResultMessage, result?.reason || "未选择输出目录", "warn");
+          if (context.isDirectoryPickerCancelled(result)) return;
+          const feedback = context.setDirectoryPickerStatus(elements.chooseLandPublicityOutput, result, { subject: "浙江土地成交公示输出目录" });
+          setMessage(elements.landPublicityResultMessage, feedback?.message || "无法完成目录选择，请重新选择。", "error");
+          context.setStatus(feedback?.message || "无法完成目录选择，请重新选择。", "error");
           return;
         }
         config.outputDirectory = selected;
         if (!config.historyDirectory) config.historyDirectory = selected;
         elements.landPublicityOutputDirectory.value = selected;
         await context.storage.save(config);
+        context.clearDirectoryPickerStatus(elements.chooseLandPublicityOutput);
         const folderMessage = result.directoryName
           ? `${result.createdDirectory === false ? "已选择" : "已创建并选择"}专用子文件夹：${result.directoryName}`
           : "输出目录已选择";
         setMessage(elements.landPublicityResultMessage, `${folderMessage}，请检查参数后开始抓取`, "ok");
       } catch (error) {
-        setMessage(elements.landPublicityResultMessage, `选择目录失败：${error?.message || String(error)}`, "error");
+        const feedback = context.setDirectoryPickerStatus(elements.chooseLandPublicityOutput, error, { subject: "浙江土地成交公示输出目录" });
+        setMessage(elements.landPublicityResultMessage, feedback?.message || "无法完成目录选择，请重新选择。", "error");
+        context.setStatus(feedback?.message || "无法完成目录选择，请重新选择。", "error");
       }
     }
 
@@ -309,11 +316,15 @@ export const landPublicityModule = {
     }
 
     async function chooseHistoryDirectory() {
+      context.clearDirectoryPickerStatus(elements.chooseLandPublicityHistoryDirectory);
       try {
         const result = await context.sendNativeMessage({ action: "select_land_publicity_history_directory" }, 130000);
         const selected = result?.path || result?.paths?.[0] || "";
         if (!result?.ok || !selected) {
-          if (!result?.cancelled) setMessage(elements.landPublicityResultMessage, result?.reason || "未选择历史数据目录", "warn");
+          if (context.isDirectoryPickerCancelled(result)) return;
+          const feedback = context.setDirectoryPickerStatus(elements.chooseLandPublicityHistoryDirectory, result, { subject: "土地历史数据目录" });
+          setMessage(elements.landPublicityResultMessage, feedback?.message || "无法完成目录选择，请重新选择。", "error");
+          context.setStatus(feedback?.message || "无法完成目录选择，请重新选择。", "error");
           return;
         }
         config.historyDirectory = selected;
@@ -322,9 +333,12 @@ export const landPublicityModule = {
         historyCanRefresh = false;
         renderConfig();
         await context.storage.save(config);
+        context.clearDirectoryPickerStatus(elements.chooseLandPublicityHistoryDirectory);
         await loadHistoryCatalog();
       } catch (error) {
-        setMessage(elements.landPublicityResultMessage, `选择历史目录失败：${error?.message || String(error)}`, "error");
+        const feedback = context.setDirectoryPickerStatus(elements.chooseLandPublicityHistoryDirectory, error, { subject: "土地历史数据目录" });
+        setMessage(elements.landPublicityResultMessage, feedback?.message || "无法完成目录选择，请重新选择。", "error");
+        context.setStatus(feedback?.message || "无法完成目录选择，请重新选择。", "error");
       }
     }
 

@@ -102,9 +102,23 @@ test("file archive output selection creates one managed subdirectory", async () 
   });
   const first = await service.selectOutputDirectory();
   assert.equal(first.ok, true);
-  assert.equal(first.path, path.join(fs.realpathSync(parent), "微信文件归档"));
+  assert.equal(first.path, fs.realpathSync.native(path.join(fs.realpathSync.native(parent), "微信文件归档")));
   assert.equal(first.createdDirectory, true);
   const second = await service.selectOutputDirectory();
   assert.equal(second.path, first.path);
   assert.equal(second.createdDirectory, false);
+});
+
+test("file archive treats an empty successful picker result as failure", async () => {
+  const service = createFileArchiveService({
+    runtimeDirectory: path.join(os.tmpdir(), "tianyuan-file-archive-empty-picker-test"),
+    platformAdapter: { platform: "darwin", chooseDirectory: async () => ({ ok: true, paths: [] }) },
+  });
+  const result = await service.selectOutputDirectory();
+  assert.equal(result.ok, false);
+  assert.equal(result.cancelled, false);
+  assert.equal(result.errorCode, "EMPTY_RESULT");
+  assert.equal(result.stage, "picker_result");
+  assert.equal(result.outputDirectory, "");
+  assert.match(result.userMessage, /没有返回文件夹/);
 });

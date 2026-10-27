@@ -2467,11 +2467,15 @@ export const alibabaAuctionModule = {
     }
 
     async function chooseOutputDirectory() {
+      context.clearDirectoryPickerStatus(elements.chooseAlibabaAuctionOutput);
       try {
         const result = await context.sendNativeMessage({ action: "select_alibaba_auction_output_directory" }, 130000);
         const selected = result?.outputDirectory || result?.path || result?.paths?.[0] || "";
         if (!result?.ok || !selected) {
-          if (!result?.cancelled) setMessage(elements.alibabaAuctionParameterMessage, result?.reason || "未选择输出目录", "warn");
+          if (context.isDirectoryPickerCancelled(result)) return;
+          const feedback = context.setDirectoryPickerStatus(elements.chooseAlibabaAuctionOutput, result, { subject: "阿里司法拍卖输出目录" });
+          setMessage(elements.alibabaAuctionParameterMessage, feedback?.message || "无法完成目录选择，请重新选择。", "error");
+          context.setStatus(feedback?.message || "无法完成目录选择，请重新选择。", "error");
           return;
         }
         config.outputDirectory = selected;
@@ -2479,13 +2483,16 @@ export const alibabaAuctionModule = {
         elements.alibabaAuctionOutputDirectory.value = selected;
         renderConfig();
         await context.storage.save(storageState());
+        context.clearDirectoryPickerStatus(elements.chooseAlibabaAuctionOutput);
         const folderMessage = result.directoryName
           ? `${result.createdDirectory === false ? "已选择" : "已创建并选择"}专用子文件夹：${result.directoryName}`
           : "输出目录已选择";
         const parameterMessage = parametersApplied() ? "" : "参数有改动，需重新应用。";
         setMessage(elements.alibabaAuctionParameterMessage, `${folderMessage}，结果页、Excel 和地图会保存到这里。${parameterMessage}`, parametersApplied() ? "ok" : "warn");
       } catch (error) {
-        setMessage(elements.alibabaAuctionParameterMessage, `选择目录失败：${error?.message || String(error)}`, "error");
+        const feedback = context.setDirectoryPickerStatus(elements.chooseAlibabaAuctionOutput, error, { subject: "阿里司法拍卖输出目录" });
+        setMessage(elements.alibabaAuctionParameterMessage, feedback?.message || "无法完成目录选择，请重新选择。", "error");
+        context.setStatus(feedback?.message || "无法完成目录选择，请重新选择。", "error");
       }
     }
 
@@ -2496,11 +2503,15 @@ export const alibabaAuctionModule = {
     }
 
     async function chooseHistoryDirectory() {
+      context.clearDirectoryPickerStatus(elements.chooseAlibabaAuctionHistoryDirectory);
       try {
         const result = await context.sendNativeMessage({ action: "select_alibaba_auction_history_directory" }, 130000);
         const selected = result?.path || result?.paths?.[0] || "";
         if (!result?.ok || !selected) {
-          if (!result?.cancelled) setMessage(elements.alibabaAuctionResultMessage, result?.reason || "未选择历史数据目录", "warn");
+          if (context.isDirectoryPickerCancelled(result)) return;
+          const feedback = context.setDirectoryPickerStatus(elements.chooseAlibabaAuctionHistoryDirectory, result, { subject: "阿里司法拍卖历史数据目录" });
+          setMessage(elements.alibabaAuctionResultMessage, feedback?.message || "无法完成目录选择，请重新选择。", "error");
+          context.setStatus(feedback?.message || "无法完成目录选择，请重新选择。", "error");
           return;
         }
         config.historyDirectory = selected;
@@ -2509,9 +2520,12 @@ export const alibabaAuctionModule = {
         historyCanRefresh = false;
         renderConfig();
         await context.storage.save(storageState());
+        context.clearDirectoryPickerStatus(elements.chooseAlibabaAuctionHistoryDirectory);
         await loadHistoryCatalog();
       } catch (error) {
-        setMessage(elements.alibabaAuctionResultMessage, `选择历史目录失败：${error?.message || String(error)}`, "error");
+        const feedback = context.setDirectoryPickerStatus(elements.chooseAlibabaAuctionHistoryDirectory, error, { subject: "阿里司法拍卖历史数据目录" });
+        setMessage(elements.alibabaAuctionResultMessage, feedback?.message || "无法完成目录选择，请重新选择。", "error");
+        context.setStatus(feedback?.message || "无法完成目录选择，请重新选择。", "error");
       }
     }
 

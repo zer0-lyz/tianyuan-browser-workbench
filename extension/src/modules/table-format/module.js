@@ -148,7 +148,7 @@ export const tableFormatModule = {
       try {
         const result = await context.sendNativeMessage({ action: "select_table_format_word_files" }, 130000);
         if (!result?.ok) {
-          if (result?.cancelled) {
+          if (context.isDirectoryPickerCancelled(result)) {
             context.setStatus("已取消选择 Word 文档", "warn");
             return;
           }
@@ -167,6 +167,7 @@ export const tableFormatModule = {
 
     async function chooseOutputDirectory() {
       if (running) return;
+      context.clearDirectoryPickerStatus(elements.chooseTableFormatOutput);
       try {
         const result = await context.sendNativeMessage({ action: "select_table_format_output_directory" }, 130000);
         if (!result?.ok) {
@@ -174,16 +175,27 @@ export const tableFormatModule = {
             context.setStatus("已取消选择目标文件夹", "warn");
             return;
           }
-          throw new Error(result?.reason || "TABLE_FORMAT_OUTPUT_SELECTION_FAILED");
+          const feedback = context.setDirectoryPickerStatus(elements.chooseTableFormatOutput, result, { subject: "Word 表格处理输出目录" });
+          setMessage(elements.tableFormatResultMessage, feedback?.message || "无法完成目录选择，请重新选择。", "error");
+          context.setStatus(feedback?.message || "无法完成目录选择，请重新选择。", "error");
+          return;
         }
-        config.outputDirectory = String(result.outputDirectory || result.path || result.paths?.[0] || "");
+        const selected = String(result.outputDirectory || result.path || result.paths?.[0] || "");
+        if (!selected) {
+          const feedback = context.setDirectoryPickerStatus(elements.chooseTableFormatOutput, { reason: result.reason || "TABLE_FORMAT_OUTPUT_SELECTION_FAILED" }, { subject: "Word 表格处理输出目录" });
+          setMessage(elements.tableFormatResultMessage, feedback?.message || "未取得可用的输出目录，请重新选择。", "error");
+          return;
+        }
+        config.outputDirectory = selected;
         elements.tableFormatOutputDirectory.value = config.outputDirectory;
         await context.storage.save(config);
+        context.clearDirectoryPickerStatus(elements.chooseTableFormatOutput);
         setMessage(elements.tableFormatResultMessage, `已选择并创建专用子文件夹：${result.directoryName || "表格格式设置"}。`, "ok");
         context.setStatus(`已选择目标文件夹：${config.outputDirectory}`, "ok");
       } catch (error) {
-        setMessage(elements.tableFormatResultMessage, `选择目标文件夹失败：${error?.message || String(error)}`, "error");
-        context.setStatus(`选择目标文件夹失败：${error?.message || String(error)}`, "error");
+        const feedback = context.setDirectoryPickerStatus(elements.chooseTableFormatOutput, error, { subject: "Word 表格处理输出目录" });
+        setMessage(elements.tableFormatResultMessage, feedback?.message || "无法完成目录选择，请重新选择。", "error");
+        context.setStatus(feedback?.message || "无法完成目录选择，请重新选择。", "error");
       }
     }
 

@@ -2,9 +2,11 @@
 
 本文件是 Windows 专机 Codex 的固定入口。macOS 主线负责开发并推送源码；Windows 专机负责制作、验证和上传 Windows 安装包，不得把“浏览器扩展已复制”当作安装成功。
 
+当前正式版：0.14.33 / build 2026102703。候选 0.14.32 / build 2026102702 的 Windows 实机验收由用户反馈通过；报告文件尚未归档。macOS 包已完成交叉组包和静态完整性检查，macOS 实机运行未覆盖。CLI 为可选外部依赖，完整包和轻量包均不包含 CLI 安装器；新装默认从可见解压目录加载 extension，生成运行态为 workbench-runtime。
+
 ## 开始前
 
-1. 更新 `https://github.com/zer0-lyz/tianyuan-browser-workbench.git` 的 `main` 分支。
+1. 使用 `release/v0.14.33` 分支及本次发布的固定源码提交，不得从主工作区的未提交文件构建。
 2. 检查工作树；如有未提交修改先停止并报告，不得使用 `reset --hard`、`git clean` 或整树覆盖。
 3. 读取 `extension/version.json`，固定 `productVersion`、`buildNumber` 和当前 `HEAD`。
 4. 阅读 `release/windows-x64/交给Agent安装.md`、`release/windows-x64/安装使用说明.md` 和 `release/build_windows_x64_release.sh` 的完整文件清单。
@@ -12,7 +14,7 @@
 ## Windows 包必须包含
 
 - Extension、完整 Native Helper、skills、plugins 和安装脚本；
-- Node.js、便携 Python、离线 wheels、`native_host.exe` 和天源 CLI 安装器；
+- Node.js、便携 Python、离线 wheels、`native_host.exe`；CLI 安装器禁止进入完整包或轻量包；
 - `openpyxl>=3.1.5`、`et_xmlfile`、`lxml`、`python-docx`、`typing_extensions`；
 - Native Messaging、Connector Bridge、Connector 插件及 Codex 插件缓存安装链路；
 - `VERSION.txt`、包内 `SHA256SUMS` 和与源码一致的 `runtimeBuildId`。
@@ -21,8 +23,8 @@ ZIP 内层根目录固定为 `TianyuanWorkbench`，暂存目录使用 `%TEMP%\TW
 
 ## 真机验收
 
-1. 使用完整包执行 `install-agent.cmd`，读取 `%LOCALAPPDATA%\TianyuanWorkbench\安装检查结果.json`。
-2. 逐项确认 Extension、Native Helper、Native Messaging、Connector、Python 依赖和 CLI；不能只确认扩展目录存在。
+1. 使用完整包执行 `install-agent.cmd`，读取所选可见安装根的 `安装检查结果.json`。
+2. 逐项确认 Extension、Native Helper、Native Messaging、Connector、Python 依赖，并单独报告可选 CLI 状态；不能只确认扩展目录存在。
 3. 确认桌面“天源工作台-浏览器扩展”入口可定位真实扩展目录。
 4. 分别测试首次安装、上一 build 升级、插件内“测试更新模块”和“更新全部组件”。
 5. 凭据只允许用户本人输入，不得读取、记录或输出 MCP token、Cookie、Authorization、密码或验证码。
