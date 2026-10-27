@@ -175,7 +175,7 @@ async function run() {
   assert.equal(missingCatalog.ok, false);
   assert.equal(
     missingCatalog.reason,
-    "UPDATE_PACKAGE_FILE_MISSING:native-helper/codex_catalog.js",
+    `UPDATE_PACKAGE_FILE_MISSING:${path.join("native-helper", "codex_catalog.js")}`,
   );
 
   launched = false;
