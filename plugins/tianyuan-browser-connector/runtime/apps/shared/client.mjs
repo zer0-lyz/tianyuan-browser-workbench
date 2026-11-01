@@ -5,6 +5,20 @@ import { fileURLToPath } from "node:url";
 
 const bridgeUrl = (process.env.TIANYUAN_CONNECTOR_BRIDGE_URL || "http://127.0.0.1:40415").replace(/\/$/, "");
 
+// 报告动作族共享 schema：绑定参数与 report_inspect 完全一致。
+// reportDetailId（页面 detailId 查询参数）为可选明细身份：提供时页面适配器会与 URL 实际值比对，不一致即拒绝。
+const reportIdentitySchema = {
+  type: "object",
+  properties: { projectId: { type: "string" }, companyId: { type: "string" }, reportType: { type: "string" }, mode: { type: "string", enum: ["add", "edit"] }, reportDetailId: { type: "string", pattern: "^[A-Za-z0-9_-]{1,100}$" } },
+  required: ["projectId", "companyId", "reportType", "mode"], additionalProperties: false,
+};
+const reportNodeRefSchema = {
+  type: "object",
+  properties: { nodePathKey: { type: "string", pattern: "^(?:0|[1-9][0-9]*)(?:/(?:0|[1-9][0-9]*))*$", maxLength: 200 }, label: { type: "string", minLength: 1, maxLength: 240 }, candidateId: { type: "string", pattern: "^[A-Za-z0-9:_-]{1,200}$" } },
+  required: ["nodePathKey", "label"], additionalProperties: false,
+};
+const reportWriteNodeRefSchema = { ...reportNodeRefSchema, required: ["nodePathKey", "label", "candidateId"] };
+
 export const tools = [
   {
     name: "tianyuan.connection_status",
@@ -57,6 +71,237 @@ export const tools = [
       properties: {},
       additionalProperties: false
     }
+  },
+  {
+    name: "tianyuan.report_inspect",
+    description: "只读探查已绑定的报告页面；节点身份和树完整性未经验证时明确返回部分结果，不修改报告。写入类动作默认被 Bridge 门禁关闭，需要运行环境显式开启；本工具只读、不受门禁限制。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string" }, bindingId: { type: "string" }, projectId: { type: "string" }, threadId: { type: "string" },
+        tabId: { type: "integer", minimum: 0 },
+        offset: { type: "integer", minimum: 0, maximum: 5000, default: 0 },
+        limit: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+        reportIdentity: {
+          type: "object",
+          properties: { projectId: { type: "string" }, companyId: { type: "string" }, reportType: { type: "string" }, mode: { type: "string", enum: ["add", "edit"] }, reportDetailId: { type: "string", pattern: "^[A-Za-z0-9_-]{1,100}$" } },
+          required: ["projectId", "companyId", "reportType", "mode"], additionalProperties: false,
+        },
+      },
+      required: ["sessionId", "bindingId", "projectId", "threadId", "tabId", "reportIdentity"], additionalProperties: false,
+    },
+  },
+  {
+    name: "tianyuan.report_capabilities",
+    description: "只读返回当前报告页实时能力、settingsWritableFields 和当前绑定的作用域写门禁状态。设置写入目前仅支持‘是否编号=是’；writeEnabled 仅表示门禁和当前绑定范围匹配，不代表其他编辑操作已实现或验收。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string" }, bindingId: { type: "string" }, projectId: { type: "string" }, threadId: { type: "string" },
+        tabId: { type: "integer", minimum: 0 },
+        reportIdentity: {
+          type: "object",
+          properties: { projectId: { type: "string" }, companyId: { type: "string" }, reportType: { type: "string" }, mode: { type: "string", enum: ["add", "edit"] }, reportDetailId: { type: "string", pattern: "^[A-Za-z0-9_-]{1,100}$" } },
+          required: ["projectId", "companyId", "reportType", "mode"], additionalProperties: false,
+        },
+      },
+      required: ["sessionId", "bindingId", "projectId", "threadId", "tabId", "reportIdentity"], additionalProperties: false,
+    },
+  },
+  {
+    name: "tianyuan.report_navigate",
+    description: "仅做节点树导航和进入编辑态：展开/折叠、选中、逐层定位、搜索/清空都不修改节点结构；enter_edit_mode 只切换编辑态并验证状态。节点新增、复制、移动、删除及属性修改必须另走 report_preview→report_execute，受 Bridge 写门禁和报告作用域约束；nodeRef 须匹配路径与标题。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string" }, bindingId: { type: "string" }, projectId: { type: "string" }, threadId: { type: "string" },
+        tabId: { type: "integer", minimum: 0 },
+        op: { type: "string", enum: ["expand", "select", "reveal", "expand_all", "collapse_all", "search", "clear_search", "enter_edit_mode"] },
+        nodeRef: reportNodeRefSchema,
+        keyword: { type: "string", minLength: 1, maxLength: 120 },
+        timeoutMs: { type: "integer", minimum: 200, maximum: 30000 },
+        reportIdentity: reportIdentitySchema,
+      },
+      required: ["sessionId", "bindingId", "projectId", "threadId", "tabId", "reportIdentity", "op"], additionalProperties: false,
+    },
+  },
+  {
+    name: "tianyuan.report_node_read",
+    description: "只读读取已绑定报告页面指定大纲节点：节点状态、白名单属性对话框字段（include 含 settings）与关联编辑器框架、正文预览和内容哈希（include 含 editor）。verifySaved 用于刷新后核验；设置写入须先经 report_execute 的单字段是否编号=是弹窗确认，再以 report_reload 和同节点 settings_open 后的 verifySaved settings 回读核验。旧版孤立保存恢复仍须按原流程执行。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string" }, bindingId: { type: "string" }, projectId: { type: "string" }, threadId: { type: "string" },
+        tabId: { type: "integer", minimum: 0 },
+        nodeRef: reportNodeRefSchema,
+        include: { type: "array", items: { type: "string", enum: ["settings", "editor", "structure"] }, maxItems: 4 },
+        verifySaved: { type: "boolean", description: "刷新后核验已保存内容或属性；属性核验需 include 含 settings，且目标必须与待核实记录一致。" },
+        recoverPendingActionId: { type: "string", pattern: "^action_[A-Za-z0-9_-]{1,100}$" },
+        reportIdentity: reportIdentitySchema,
+      },
+      required: ["sessionId", "bindingId", "projectId", "threadId", "tabId", "reportIdentity", "nodeRef"], additionalProperties: false,
+    },
+  },
+  {
+    name: "tianyuan.report_preview",
+    description: "只读预演真实报告修改。节点树编辑包括新增子节点/同级节点、复制、移动、删除；设置写入目前仅支持‘是否编号=是’，其他属性值会以 REPORT_SETTINGS_FIELD_UNSUPPORTED 拒绝。展开、折叠、选中、搜索不是结构编辑。每个目标须提供页面返回且当前唯一的 candidateId；该候选值尚未证明跨刷新稳定。返回差异、风险、联动范围、planHash 与内容快照；不写入页面。执行必须再调用 report_execute 并使用结构专用确认；Bridge 写门禁默认关闭。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string" }, bindingId: { type: "string" }, projectId: { type: "string" }, threadId: { type: "string" },
+        tabId: { type: "integer", minimum: 0 },
+        ops: {
+          type: "array", minItems: 1, maxItems: 50,
+          items: {
+            type: "object",
+            oneOf: [
+              {
+                properties: { kind: { const: "settings_open" }, nodeRef: reportWriteNodeRefSchema },
+                required: ["kind", "nodeRef"], additionalProperties: false,
+              },
+              {
+                properties: {
+                  kind: { const: "settings_write" }, nodeRef: reportWriteNodeRefSchema,
+                  fields: { type: "array", minItems: 1, maxItems: 1, items: { type: "object", properties: { label: { const: "是否编号" }, value: { const: "是" } }, required: ["label", "value"], additionalProperties: false } },
+                },
+                required: ["kind", "nodeRef", "fields"], additionalProperties: false,
+              },
+              {
+                properties: {
+                  kind: { const: "editor_text" }, nodeRef: reportWriteNodeRefSchema,
+                  mode: { type: "string", enum: ["replace_first", "replace_all", "append", "set"] },
+                  find: { type: "string", maxLength: 20000 },
+                  replace: { type: "string", maxLength: 20000 },
+                },
+                required: ["kind", "nodeRef", "mode", "replace"], additionalProperties: false,
+              },
+              {
+                properties: { kind: { const: "editor_command" }, nodeRef: reportWriteNodeRefSchema, find: { type: "string", minLength: 1, maxLength: 20000 }, command: { type: "string", enum: ["bold", "italic", "underline", "strikethrough", "subscript", "superscript", "font_increase", "font_decrease", "align_left", "align_center", "align_right", "align_justify", "indent", "outdent"] } },
+                required: ["kind", "nodeRef", "command"], additionalProperties: false,
+              },
+              {
+                properties: { kind: { const: "editor_command" }, nodeRef: reportWriteNodeRefSchema, find: { type: "string", minLength: 1, maxLength: 20000 }, command: { const: "font_color" }, color: { type: "string", pattern: "^#[0-9a-fA-F]{6}$" } },
+                required: ["kind", "nodeRef", "command", "color"], additionalProperties: false,
+              },
+              {
+                properties: {
+                  kind: { const: "structure_add" }, nodeRef: reportWriteNodeRefSchema,
+                  position: { type: "string", enum: ["child", "after", "before"] },
+                  title: { type: "string", minLength: 1, maxLength: 240 },
+                },
+                required: ["kind", "nodeRef", "position", "title"], additionalProperties: false,
+              },
+              {
+                properties: { kind: { const: "structure_add_child" }, nodeRef: reportWriteNodeRefSchema, title: { type: "string", minLength: 1, maxLength: 240 } },
+                required: ["kind", "nodeRef", "title"], additionalProperties: false,
+              },
+              {
+                properties: { kind: { const: "structure_add_sibling" }, nodeRef: reportWriteNodeRefSchema, title: { type: "string", minLength: 1, maxLength: 240 } },
+                required: ["kind", "nodeRef", "title"], additionalProperties: false,
+              },
+              {
+                properties: { kind: { const: "structure_copy" }, nodeRef: reportWriteNodeRefSchema, title: { type: "string", maxLength: 240 } },
+                required: ["kind", "nodeRef"], additionalProperties: false,
+              },
+              {
+                properties: { kind: { const: "structure_move" }, nodeRef: reportWriteNodeRefSchema, direction: { type: "string", enum: ["up", "down"] } },
+                required: ["kind", "nodeRef", "direction"], additionalProperties: false,
+              },
+              {
+                properties: { kind: { const: "structure_delete" }, nodeRef: reportWriteNodeRefSchema, opConfirm: { type: "boolean" } },
+                required: ["kind", "nodeRef"], additionalProperties: false,
+              },
+            ],
+          },
+        },
+        reportIdentity: reportIdentitySchema,
+      },
+      required: ["sessionId", "bindingId", "projectId", "threadId", "tabId", "reportIdentity", "ops"], additionalProperties: false,
+    },
+  },
+  {
+    name: "tianyuan.report_execute",
+    description: "在 Bridge 写门禁开启后执行已预演的报告修改；确认文本须与预演返回的 confirmationRequired 逐字一致。结构修改须单独预演并使用\"确认执行报告结构修改\"，其他修改使用\"确认执行报告修改\"。单字段是否编号=是会在回显校验后仅确认一次并返回 pendingVerify；刷新核验前不得宣称已保存。必须先取得 planHash；结果不明时禁止盲目重试。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string" }, bindingId: { type: "string" }, projectId: { type: "string" }, threadId: { type: "string" },
+        tabId: { type: "integer", minimum: 0 },
+        planHash: { type: "string", minLength: 1, maxLength: 128 },
+        confirmText: { type: "string", enum: ["确认执行报告修改", "确认执行报告结构修改"] },
+        reportIdentity: reportIdentitySchema,
+      },
+      required: ["sessionId", "bindingId", "projectId", "threadId", "tabId", "reportIdentity", "planHash", "confirmText"], additionalProperties: false,
+    },
+  },
+  {
+    name: "tianyuan.report_save",
+    description: "在 Bridge 写门禁开启（TIANYUAN_REPORT_WRITE_GATE_OPEN=1，门禁关闭时返回 REPORT_WRITE_GATE_CLOSED；写入默认被 Bridge 门禁关闭，需要运行环境显式开启）且确认文本精确匹配（\"确认保存报告\"）后，点击报告页真实保存按钮一次（绝不重试），并以保存提示或网络证据回读验证（saved/pendingVerify）。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string" }, bindingId: { type: "string" }, projectId: { type: "string" }, threadId: { type: "string" },
+        tabId: { type: "integer", minimum: 0 },
+        confirmText: { type: "string", const: "确认保存报告" },
+        reportIdentity: reportIdentitySchema,
+      },
+      required: ["sessionId", "bindingId", "projectId", "threadId", "tabId", "reportIdentity", "confirmText"], additionalProperties: false,
+    },
+  },
+  {
+    name: "tianyuan.report_editor",
+    description: "受控操作报告节点编辑框：open 开启，save 和 close 受安全门禁保护；直接 command 返回 REPORT_PREVIEW_REQUIRED。基本文字格式须先通过 report_preview 的 editor_command 预演并用 report_execute 执行。保存与实机写入尚未验证，结果不明不得重试。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string" }, bindingId: { type: "string" }, projectId: { type: "string" }, threadId: { type: "string" },
+        tabId: { type: "integer", minimum: 0 },
+        op: { type: "string", enum: ["open", "command", "save", "close"] },
+        nodeRef: reportNodeRefSchema,
+        command: { type: "string", enum: ["bold", "italic", "underline", "strikethrough", "font_increase", "font_decrease", "font_color", "align_center", "align_left", "align_right", "align_justify", "indent", "outdent", "table", "image", "formula", "field", "reference", "list_ordered", "list_unordered", "undo", "redo", "subscript", "superscript"] },
+        timeoutMs: { type: "integer", minimum: 200, maximum: 30000 },
+        discardConfirmed: { type: "boolean", default: false },
+        confirmText: { type: "string" },
+        legacyRecovery: {
+          type: "object", additionalProperties: false,
+          properties: {
+            actionId: { type: "string" }, appendedText: { type: "string", minLength: 1, maxLength: 20000 },
+            originalSnapshot: { type: "object", additionalProperties: false, properties: { snapshotId: { type: "string" }, sha256: { type: "string" }, bytes: { type: "integer" } }, required: ["snapshotId", "sha256", "bytes"] },
+            currentSnapshot: { type: "object", additionalProperties: false, properties: { snapshotId: { type: "string" }, sha256: { type: "string" }, bytes: { type: "integer" } }, required: ["snapshotId", "sha256", "bytes"] },
+          },
+          required: ["actionId", "appendedText", "originalSnapshot", "currentSnapshot"],
+        },
+        reportIdentity: reportIdentitySchema,
+      },
+      required: ["sessionId", "bindingId", "projectId", "threadId", "tabId", "reportIdentity", "op"], additionalProperties: false,
+    },
+  },
+  {
+    name: "tianyuan.report_reload",
+    description: "仅对已提交节点保存且等待回读的报告刷新一次；调用前必须确认报告没有其他需保留的未保存内容。刷新请求不证明保存成功，随后须以 verifySaved 回读核验。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string" }, bindingId: { type: "string" }, projectId: { type: "string" }, threadId: { type: "string" },
+        tabId: { type: "integer", minimum: 0 }, reportIdentity: reportIdentitySchema, nodeRef: reportWriteNodeRefSchema,
+        confirmText: { type: "string", const: "确认刷新并核验已保存报告" },
+      },
+      required: ["sessionId", "bindingId", "projectId", "threadId", "tabId", "reportIdentity", "nodeRef", "confirmText"], additionalProperties: false,
+    },
+  },
+  {
+    name: "tianyuan.report_readback",
+    description: "只读回读已绑定报告页面的最新内容哈希与节点内容哈希/正文预览（可用 nodeRefs 过滤），用于执行或保存后的校验；不修改页面，不宣称持久化成功。写入默认被 Bridge 门禁关闭，需要运行环境显式开启；本工具只读、不受门禁限制。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string" }, bindingId: { type: "string" }, projectId: { type: "string" }, threadId: { type: "string" },
+        tabId: { type: "integer", minimum: 0 },
+        nodeRefs: { type: "array", maxItems: 200, items: reportNodeRefSchema },
+        reportIdentity: reportIdentitySchema,
+      },
+      required: ["sessionId", "bindingId", "projectId", "threadId", "tabId", "reportIdentity"], additionalProperties: false,
+    },
   },
   {
     name: "tianyuan.edit_block_preview",
@@ -615,7 +860,7 @@ async function waitForAction(sessionId, actionId, input, timeoutMs) {
   const query = actionAuthQuery(input);
   while (Date.now() < deadline) {
     const payload = await request(`/api/sessions/${encodeURIComponent(sessionId)}/actions/${encodeURIComponent(actionId)}?${query}`);
-    if (["completed", "failed", "cancelled"].includes(payload.action?.status)) return payload.action;
+    if (["completed", "failed", "cancelled", "pendingVerify"].includes(payload.action?.status)) return payload.action;
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   throw Object.assign(new Error("等待天源浏览器页面执行超时。请确认工作台侧栏保持打开。"), { code: "TIANYUAN_BROWSER_ACTION_TIMEOUT" });
@@ -623,7 +868,10 @@ async function waitForAction(sessionId, actionId, input, timeoutMs) {
 
 async function runBrowserAction(name, input) {
   const sessionsPayload = await request("/api/sessions");
-  requireBoundSession(sessionsPayload.sessions || [], input);
+  const session = requireBoundSession(sessionsPayload.sessions || [], input);
+  if (name.startsWith("tianyuan.report_") && !session.context?.reportAuthoring?.inspectAvailable) {
+    throw Object.assign(new Error("当前扩展未提供报告只读探查能力。"), { code: "REPORT_ADAPTER_NOT_AVAILABLE" });
+  }
   const action = {
     "tianyuan.preview_batch_save": "preview_batch_save",
     "tianyuan.execute_batch_save": "batch_save_asset_draft",
@@ -646,17 +894,40 @@ async function runBrowserAction(name, input) {
     "tianyuan.table_preview": "table_preview",
     "tianyuan.table_execute": "table_execute",
     "tianyuan.table_readback": "table_readback",
-  }[name];
+    "tianyuan.report_inspect": "report_inspect",
+    "tianyuan.report_navigate": "report_navigate",
+    "tianyuan.report_node_read": "report_node_read",
+    "tianyuan.report_preview": "report_preview",
+    "tianyuan.report_execute": "report_execute",
+    "tianyuan.report_save": "report_save",
+    "tianyuan.report_readback": "report_readback",
+    "tianyuan.report_reload": "report_reload",
+  }[name]
+  // report_editor 是单一工具带 op 参数，映射为页面适配器的四个生命周期动作
+  ?? (name === "tianyuan.report_editor" && ["open", "command", "save", "close"].includes(String(input?.op))
+    ? `report_editor_${input.op}`
+    : undefined);
   const submitted = await request(`/api/sessions/${encodeURIComponent(input.sessionId)}/actions`, {
     method: "POST",
     body: JSON.stringify({ ...input, action }),
   });
-  const result = await waitForAction(
-    input.sessionId,
-    submitted.action.actionId,
-    input,
-    ["upload_audit_attachment", "batch_upload_audit_attachments", "clear_audit_test_rows", "set_audit_check_result", "batch_set_audit_check_results", "batch_save_asset_draft", "batch_exit_edit"].includes(action) ? 300000 : (["edit_block_execute", "edit_block_format_execute", "table_execute"].includes(action) ? 90000 : 30000),
-  );
+  let result;
+  try {
+    result = await waitForAction(
+      input.sessionId,
+      submitted.action.actionId,
+      input,
+      ["upload_audit_attachment", "batch_upload_audit_attachments", "clear_audit_test_rows", "set_audit_check_result", "batch_set_audit_check_results", "batch_save_asset_draft", "batch_exit_edit"].includes(action) ? 300000 : (["edit_block_execute", "edit_block_format_execute", "table_execute", "report_execute", "report_save", "report_editor_command", "report_editor_save"].includes(action) ? 90000 : 30000),
+    );
+  } catch (error) {
+    if (!action?.startsWith("report_")) throw error;
+    try {
+      const stopped = await request(`/api/sessions/${encodeURIComponent(input.sessionId)}/actions/${encodeURIComponent(submitted.action.actionId)}/cancel`, { method: "POST", body: JSON.stringify({ projectId: input.projectId, threadId: input.threadId, workspaceId: input.workspaceId, conversationId: input.conversationId }) });
+      result = stopped.action;
+    } catch {
+      result = { actionId: submitted.action.actionId, type: action, status: "pendingVerify", result: { ok: false, status: "pendingVerify", reason: "REPORT_ACTION_OUTCOME_UNKNOWN", security: { credentialsReturned: false } } };
+    }
+  }
   return {
     ok: result.status === "completed" && result.result?.ok === true,
     action: result,
@@ -667,6 +938,12 @@ async function runBrowserAction(name, input) {
 function sessionSummary(session, includeContext = false, input = {}) {
   const page = session.binding || {};
   const binding = bindingFor(session, input);
+  const reportContext = session.context?.reportAuthoring || {};
+  const reportV2Available = reportContext.inspectAvailable && reportContext.adapterVersion === "report-authoring-v2";
+  const scopedWriteEnabled = Boolean(reportV2Available && binding?.reportWriteGate?.open && binding?.reportWriteGate?.scopeMatches);
+  const reportOperations = reportContext.inspectAvailable ? ["inspect"] : [];
+  if (reportV2Available) reportOperations.push("node_read", "preview", "readback");
+  if (scopedWriteEnabled) reportOperations.push("editor_open", "execute", "editor_save", "editor_close", "reload");
   const summary = {
     sessionId: session.sessionId,
     status: session.status,
@@ -692,7 +969,18 @@ function sessionSummary(session, includeContext = false, input = {}) {
       scope: binding.scope || "conversation",
       accessMode: binding.accessMode || "read",
     } : null,
-    capabilities: session.capabilities || {},
+    capabilities: {
+      ...(session.capabilities || {}),
+      reportAuthoring: {
+        supported: Boolean(reportContext.inspectAvailable),
+        level: scopedWriteEnabled ? "confirm" : "read",
+        adapterVersion: reportContext.adapterVersion || null,
+        supportedOperations: reportOperations,
+        pageCapabilities: reportContext.v2 || null,
+        livePageVerified: false,
+        writeEnabled: scopedWriteEnabled,
+      },
+    },
   };
   if (session.codexBinding) summary.codexBinding = binding?.providerId === "codex" ? codexCompatibility(binding) : session.codexBinding;
   if (includeContext) summary.context = session.context || {};
@@ -759,6 +1047,25 @@ export async function executeTool(name, input = {}) {
     const payload = await request("/api/protocol");
     return { ok: true, protocolVersion: payload.protocolVersion, adapter: payload.adapter, capabilities: payload.capabilities, safety: payload.safety };
   }
+  if (name === "tianyuan.report_capabilities") {
+    const payload = await request("/api/sessions");
+    const session = requireBoundSession(payload.sessions || [], input);
+    const report = session.context?.reportAuthoring || {};
+    const selectedBinding = bindingFor(session, input);
+    if (!report.inspectAvailable) {
+      throw Object.assign(new Error("当前扩展未提供报告编辑能力。"), { code: "REPORT_ADAPTER_NOT_AVAILABLE" });
+    }
+    return {
+      ok: true,
+      adapterVersion: report.adapterVersion || null,
+      source: "page-adapter-status",
+      capabilities: report.v2 || null,
+      writeEnabled: Boolean(selectedBinding?.reportWriteGate?.open && selectedBinding?.reportWriteGate?.scopeMatches),
+      writeGate: "写入以及可能触发页面状态变化的导航、编辑器开启和关闭需要 Bridge 写门禁开启；丢弃未保存内容不支持。",
+      note: "能力矩阵来自页面适配器对当前报告页的真实检测（随扩展心跳刷新）：工具存在不代表页面支持，以本工具实时返回为准；livePageVerified=false 表示节点身份仍未与服务器端核对。",
+      security: { readOnly: true, writesPerformed: false, credentialsReturned: false },
+    };
+  }
   if ([
     "tianyuan.preview_batch_save",
     "tianyuan.execute_batch_save",
@@ -781,6 +1088,15 @@ export async function executeTool(name, input = {}) {
     "tianyuan.table_preview",
     "tianyuan.table_execute",
     "tianyuan.table_readback",
+    "tianyuan.report_inspect",
+    "tianyuan.report_navigate",
+    "tianyuan.report_node_read",
+    "tianyuan.report_preview",
+    "tianyuan.report_execute",
+    "tianyuan.report_save",
+    "tianyuan.report_readback",
+    "tianyuan.report_editor",
+    "tianyuan.report_reload",
   ].includes(name)) return runBrowserAction(name, input);
   throw Object.assign(new Error(`Unknown tool: ${name}`), { code: "UNKNOWN_TOOL" });
 }

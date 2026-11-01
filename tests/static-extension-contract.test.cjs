@@ -220,6 +220,8 @@ assert.equal(sidepanel.includes("async function performConnectionCheck({ probe =
 assert.equal(sidepanel.includes("lightweight: !probe"), true);
 assert.equal(sidepanel.includes("timeoutMs: lightweight ? 2000 : 8000"), true);
 assert.equal(sidepanel.includes("async function restoreConnectorSession(timeoutMs = 8000)"), true);
+assert.equal(sidepanel.includes("async function recoverConnectorSession(sessionId, timeoutMs)"), true);
+assert.equal(sidepanel.includes("await recoverConnectorSession(previousSessionId, timeoutMs)"), true);
 assert.equal(sidepanel.includes("await Promise.all(["), true);
 assert.equal(sidepanel.includes("void refreshAll({ probe: true }).catch"), true);
 assert.equal(sidepanel.includes("function scheduleAutomaticConnectionProbe()"), true);

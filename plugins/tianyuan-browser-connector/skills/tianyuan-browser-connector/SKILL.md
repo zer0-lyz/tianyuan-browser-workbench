@@ -28,14 +28,25 @@ description: Connect Codex to the exact Tianyuan browser session bound to the cu
 - 经明确确认的单文件上传、分类、底稿保存和回读。
 - 经明确确认的测试资料索引清理、底稿保存和回读。
 - 已解析财务报表的 valuation-mcp 预检、用户确认后导入和回读校验。
-- 受控编辑块格式预演、执行和回读；`highlightColor` 支持文本高亮颜色 `#RRGGBB`，以及 `transparent`/`none` 取消高亮。
-- 表格插入支持使用 `tianyuan.get_context` 返回的 `selection.mode=caret`、`selection.caretReference` 和 `editingBlock.caretReference` 在段首、段中、段尾或段落之间定位；必须先预演，再以 `确认执行表格操作` 执行并回读。
+- 报告页报告动作族（`report_inspect`/`report_capabilities`/`report_navigate`/`report_node_read`/`report_preview`/`report_execute`/`report_save`/`report_editor`/`report_readback`）：仅在当前绑定会话确实报告 `reportAuthoring.supported` 时可用；写入动作受 Bridge 写门禁约束，默认关闭（`REPORT_WRITE_GATE_CLOSED`）。
+- 编辑块和表格 MCP 工具定义仍保留，但能否执行取决于当前扩展及 Bridge；不得仅凭工具存在认定报告页支持写入。
 
 当前版本不提供：
 
 - 任意浏览器点击；
 - 任意 JavaScript；
 - 任意字段写入或任意附件接口调用。
+- 报告写入的实机验收：写入路径（预演→执行→保存→回读）代码已实现并经隔离 fixture 测试，但尚未通过真实页面验收；实机使用需运行环境显式开启写门禁并逐项确认。
+
+## 报告编辑页受控操作
+
+先调用 `tianyuan.connection_status`，确认唯一绑定的会话及 `reportAuthoring.supported`。使用同一 `sessionId`、`bindingId`、工作区 `projectId`、`threadId`、`tabId`，并从会话上下文的 `route` 取得报告业务 `projectId`、`companyId`、`reportType` 和 `reportMode`（`detailId` 可选），作为 `reportIdentity` 调用报告动作族。工作区 `projectId` 与报告业务 `projectId` 不能混用；不要复用过期的 session、binding 或 tabId。
+
+节点定位使用 `nodeRef`（`nodePathKey` + `label`；提供候选 ID 时另行核对唯一性）。`report_navigate` 的展开、折叠、选中和搜索只改变视图，不算节点树编辑；真实节点新增、复制、移动和删除必须先经 `report_preview`，再用 `report_execute`（planHash + 精确确认文本）。节点属性写入当前仅支持 `是否编号=是`，须受控打开属性弹窗、执行单次确认，再经 `report_reload` 与同节点 `settings_open` 后的 `report_node_read(verifySaved=true, include=["settings"])` 回读；其他设置字段明确拒绝，不得将弹窗回显称为保存。结构修改单独使用"确认执行报告结构修改"；删除另需操作级确认。保存结果不明时按 `pendingVerify` 处理，不得盲目重试。编辑框工具栏命令以 `report_editor` 白名单为准。完整能力以当前页面的实时检测和实机持久化验收为准，不因工具或 fixture 存在而宣称已支持。探查与动作不返回 Cookie、Token、Authorization、密码或验证码。
+
+节点编辑保存后，先确认刷新不会丢失范围外未保存内容，再刷新目标报告并重新确认绑定；使用 `report_node_read` 传入相同节点、`include: ["editor"]` 和 `verifySaved: true`。只有刷新后的只读模型、身份与待核实记录一致时才返回 `savedVerification.verified` 并归档；任何错误均保留待核实记录，不重试保存。当前真实页面已验证测试节点的正文及四种基础格式，其他能力仍以页面实时能力与独立验收为准。
+
+在用户确认范围外没有需要保留的未保存内容后，可调用 `report_reload` 传同一节点及 `confirmText: "确认刷新并核验已保存报告"`；该操作仅允许对一次已提交保存的待核实记录请求一次刷新。刷新请求成功不是保存成功，仍必须重新确认绑定并调用 `report_node_read` 的 `verifySaved` 回读。
 
 ## 批量保存与退出编辑
 

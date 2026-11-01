@@ -564,11 +564,9 @@ test("land publicity auto-opens HTML and clears filters without clearing output 
   context.scope.dispose();
 });
 
-test("installers include the land publicity skill", () => {
+test("shared local runtime installer includes the land publicity skill", () => {
   const installer = fs.readFileSync(path.join(repoRoot, "scripts/install-local-runtime.mjs"), "utf8");
-  const nativeInstaller = fs.readFileSync(path.join(repoRoot, "native-helper/install_native_host.sh"), "utf8");
   assert.match(installer, /"zj-land-publicity"/);
-  assert.match(nativeInstaller, /zj-land-publicity\/land_publicity_runner\.py/);
   const nativeHost = fs.readFileSync(path.join(repoRoot, "native-helper/native_host.js"), "utf8");
   assert.match(nativeHost, /message\?\.action === "run_land_publicity"/);
   assert.match(nativeHost, /message\?\.action === "list_land_publicity_regions"/);
@@ -579,7 +577,7 @@ test("installers include the land publicity skill", () => {
   assert.match(nativeHost, /endDate: String\(request\.endDate/);
   assert.match(nativeHost, /chooseLandPublicityOutputDirectory/);
   assert.match(nativeHost, /chooseManagedOutputDirectory/);
-  assert.match(nativeHost, /directoryName: folderName/);
+  assert.match(nativeHost, /"选择浙江土地成交公示上级目录",\s*"浙江土地成交公示"/);
   assert.match(nativeHost, /"浙江土地成交公示"/);
   assert.match(fs.readFileSync(path.join(repoRoot, "extension/src/modules/land-publicity/module.js"), "utf8"), /result\?\.outputDirectory \|\| result\?\.path/);
   assert.match(nativeHost, /LAND_OUTPUT_OUTSIDE_DIRECTORY/);

@@ -294,7 +294,7 @@ python_can_create_venv() {
 }
 
 python_has_print_dependencies() {
-  "$1" -c 'import docx, et_xmlfile, lxml, openpyxl, typing_extensions' >/dev/null 2>&1
+  "$1" -c 'import requests, urllib3, certifi, charset_normalizer, idna, docx, et_xmlfile, lxml, openpyxl, typing_extensions' >/dev/null 2>&1
 }
 
 python_lxml_wheel_available() {
@@ -595,7 +595,12 @@ else
     "et_xmlfile==2.0.0" \
     "python-docx==1.2.0" \
     "lxml==6.1.0" \
-    "typing_extensions==4.16.0" || fail "离线安装打印格式依赖失败。"
+    "typing_extensions==4.16.0" \
+    "requests==2.32.5" \
+    "urllib3==2.6.3" \
+    "certifi==2026.10.23" \
+    "charset-normalizer==3.5.2" \
+    "idna==3.20" || fail "离线安装打印格式依赖失败。"
   xattr -dr com.apple.quarantine "$VENV_DIR" 2>/dev/null || true
 fi
 
@@ -625,7 +630,7 @@ process.stdout.write(JSON.parse(input).extensionPath || "");
 [[ -d "$EXTENSION_PATH" ]] || fail "安装完成后未找到浏览器扩展目录。"
 
 echo "6/6 完成环境检查..."
-"$VENV_DIR/bin/python3" -c "import docx, et_xmlfile, lxml, openpyxl, typing_extensions; print('openpyxl', openpyxl.__version__)" \
+"$VENV_DIR/bin/python3" -c "import requests, urllib3, certifi, charset_normalizer, idna, docx, et_xmlfile, lxml, openpyxl, typing_extensions; print('openpyxl', openpyxl.__version__)" \
   || fail "表格设置依赖检查失败。"
 export TIANYUAN_PYTHON_DEPENDENCIES_OK=1
 [[ -f "$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.tianyuan.workbench.helper.json" ]] \

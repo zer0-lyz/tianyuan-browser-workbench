@@ -67,6 +67,23 @@ python3 -m pip download \
   "et_xmlfile==2.0.0" \
   "python-docx==1.2.0" \
   "typing_extensions==4.16.0"
+python3 -m pip download \
+  --quiet \
+  --disable-pip-version-check \
+  --timeout "$PIP_DOWNLOAD_TIMEOUT" \
+  --retries "$PIP_DOWNLOAD_RETRIES" \
+  --only-binary=:all: \
+  --platform any \
+  --implementation py \
+  --abi none \
+  --python-version 39 \
+  --no-deps \
+  --dest "$WHEEL_CACHE" \
+  "requests==2.32.5" \
+  "urllib3==2.6.3" \
+  "certifi==2026.10.23" \
+  "charset-normalizer==3.5.2" \
+  "idna==3.20"
 for PYTHON_TARGET in $MACOS_PYTHON_TARGETS; do
   python3 -m pip download \
     --quiet \
@@ -103,7 +120,7 @@ cp "$ROOT_DIR/scripts/install-local-runtime.mjs" "$STAGE/scripts/install-local-r
 cp "$ROOT_DIR/scripts/runtime-fingerprint.mjs" "$STAGE/scripts/runtime-fingerprint.mjs"
 cp "$ROOT_DIR/scripts/print-runtime-build-id.mjs" "$STAGE/scripts/print-runtime-build-id.mjs"
 cp "$PYTHON_PKG" "$STAGE/runtime/python-3.14.6-macos11.pkg"
-cp "$WHEEL_CACHE"/openpyxl-3.1.5-*.whl "$WHEEL_CACHE"/et_xmlfile-2.0.0-*.whl "$WHEEL_CACHE"/python_docx-1.2.0-*.whl "$WHEEL_CACHE"/typing_extensions-*.whl "$WHEEL_CACHE"/lxml-6.1.0-*-macosx_*.whl "$STAGE/runtime/python-wheels/"
+cp "$WHEEL_CACHE"/openpyxl-3.1.5-*.whl "$WHEEL_CACHE"/et_xmlfile-2.0.0-*.whl "$WHEEL_CACHE"/python_docx-1.2.0-*.whl "$WHEEL_CACHE"/typing_extensions-*.whl "$WHEEL_CACHE"/requests-2.32.5-py3-none-any.whl "$WHEEL_CACHE"/urllib3-2.6.3-py3-none-any.whl "$WHEEL_CACHE"/certifi-2026.10.23-py3-none-any.whl "$WHEEL_CACHE"/charset_normalizer-3.5.2-py3-none-any.whl "$WHEEL_CACHE"/idna-3.20-py3-none-any.whl "$WHEEL_CACHE"/lxml-6.1.0-*-macosx_*.whl "$STAGE/runtime/python-wheels/"
 cp "$ROOT_DIR/release/macos-arm64/安装.command" "$STAGE/安装.command"
 cp "$ROOT_DIR/release/macos-arm64/卸载.command" "$STAGE/卸载.command"
 cp "$ROOT_DIR/release/macos-arm64/安装使用说明.md" "$STAGE/安装使用说明.md"

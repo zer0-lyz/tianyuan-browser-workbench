@@ -4,6 +4,8 @@ import { FeatureFlagService } from "../core/feature-flags.js";
 import { ModuleRegistry } from "../core/module-registry.js";
 import { createModuleStorageFactory } from "../core/module-storage.js";
 import { clearDirectoryPickerStatus, isDirectoryPickerCancelled, setDirectoryPickerStatus } from "../core/directory-picker.js";
+import { connectorRecoveryBindingMatches, connectorRecoveryPageMatches, connectorRecoverySessionId, createConnectorRecoveryDescriptor } from "../core/connector-session-recovery.mjs";
+import { shouldReloadExtensionForRuntime } from "../core/runtime-reload.mjs";
 import { updatesModule } from "../modules/updates/module.js";
 import { feedbackModule } from "../modules/feedback/module.js";
 import { landPublicityModule } from "../modules/land-publicity/module.js";
@@ -15,15 +17,21 @@ import { depreciationCapexModule } from "../modules/depreciation-capex-forecast/
 import { tableFormatModule } from "../modules/table-format/module.js";
 import { detailTableWorkflowModule } from "../modules/detail-table-workflow/module.js";
 import { declarationTableWorkflowModule } from "../modules/declaration-table-workflow/module.js";
+import { sanitizeReportFailure } from "./report-result.mjs";
 
 const REQUEST_TYPE = "TIANYUAN_WORKBENCH_GET_CONTEXT_V2";
 const ACTION_REQUEST_TYPE = "TIANYUAN_WORKBENCH_RUN_ACTION_V2";
+const REPORT_ACTION_TYPES = ["report_inspect", "report_navigate", "report_node_read", "report_preview", "report_execute", "report_save", "report_readback", "report_editor_open", "report_editor_command", "report_editor_save", "report_editor_close", "report_reload"];
+const REPORT_WRITE_ACTION_TYPES = ["report_execute", "report_save", "report_editor_command", "report_editor_save"];
 const HELPER_BASE_URL = "http://127.0.0.1:8765";
 const CONNECTOR_BASE_URL = "http://127.0.0.1:40415";
 const EXPECTED_CONNECTOR_PROTOCOL_VERSION = "connector-agent-binding-v3";
 const LOCAL_SCRIPT_PROVIDER_ID = "tianyuan-local-script";
 const NATIVE_HOST_NAME = "com.tianyuan.workbench.helper";
 const STORAGE_CONNECTOR_SESSION_KEY = "tianyuanWorkbenchConnectorSessionId";
+const STORAGE_CONNECTOR_RECOVERY_KEY = "tianyuanWorkbenchConnectorSessionRecovery";
+const STORAGE_ACTIVE_RUNTIME_BUILD_KEY = "tianyuanWorkbenchActiveRuntimeBuildId";
+const STORAGE_RUNTIME_RELOAD_ATTEMPT_KEY = "tianyuanWorkbenchRuntimeReloadAttemptBuildId";
 const STORAGE_MCP_TOKEN_KEY = "tianyuanWorkbenchMcpToken";
 const STORAGE_LAST_BATCH_RESULT_KEY = "tianyuanWorkbenchLastBatchResult";
 const STORAGE_LAST_EXPORT_RESULT_KEY = "tianyuanWorkbenchLastExportResult";
@@ -4757,8 +4765,48 @@ async function ensureCurrentPageConnectorSession() {
   connectorSessionId = result.session.sessionId;
   await storageSet({ [STORAGE_CONNECTOR_SESSION_KEY]: connectorSessionId });
   renderConnectorSession(result.session);
+  await persistConnectorRecovery(result.session);
   setConnection(elements.connectorStatus, "已绑定", "ok");
   return result.session;
+}
+
+async function persistConnectorRecovery(session) {
+  const descriptor = createConnectorRecoveryDescriptor(session);
+  if (descriptor) await storageSet({ [STORAGE_CONNECTOR_RECOVERY_KEY]: descriptor });
+}
+
+async function recoverConnectorSession(sessionId, timeoutMs) {
+  const recovery = await storageGet(STORAGE_CONNECTOR_RECOVERY_KEY);
+  if (!recovery || recovery.sessionId !== sessionId || !recovery.page || !recovery.codexBinding) return null;
+  const tab = await getActiveTab();
+  if (!tab || tab.id !== recovery.page.tabId || !tab.url?.startsWith("https://excel.zhrdc.net/ty/")) return null;
+  const context = await sendToTab(tab, { type: REQUEST_TYPE }, timeoutMs).catch(() => null);
+  if (!context?.ok) return null;
+  const page = connectorBindingFrom(tab, context);
+  if (!connectorRecoveryPageMatches(recovery.page, page)) return null;
+  const result = await connectorFetch("/api/sessions/register", {
+    method: "POST",
+    timeoutMs,
+    body: JSON.stringify({
+      sessionId,
+      binding: page,
+      client: { name: "tianyuan-browser-workbench", version: chrome.runtime.getManifest().version, extensionId: chrome.runtime.id },
+      context,
+    }),
+  });
+  const session = result.session;
+  if (!connectorRecoveryPageMatches(recovery.page, session?.binding)) return null;
+  if (!connectorRecoveryBindingMatches(recovery.codexBinding, session?.codexBinding)) {
+    renderConnectorSession(session);
+    return session;
+  }
+  connectorSessionId = sessionId;
+  connectorSession = session;
+  await storageSet({ [STORAGE_CONNECTOR_SESSION_KEY]: sessionId });
+  renderConnectorSession(session);
+  setConnection(elements.connectorStatus, "已绑定", "ok");
+  await persistConnectorRecovery(session);
+  return session;
 }
 
 async function saveConnectorCodexBinding() {
@@ -4779,6 +4827,7 @@ async function saveConnectorCodexBinding() {
     });
     connectorBindingFormDirty = false;
     renderConnectorSession(result.session);
+    await persistConnectorRecovery(result.session);
     setConnectorBindingFeedback(payload.scope === "project"
       ? `已绑定整个 ${providerLabel} 项目`
       : `已绑定指定 ${providerLabel} 对话`, "ok");
@@ -4792,6 +4841,7 @@ async function saveConnectorCodexBinding() {
         });
         connectorBindingFormDirty = false;
         renderConnectorSession(result.session);
+        await persistConnectorRecovery(result.session);
         setConnectorBindingFeedback(`控制权已切换给 ${providerLabel}，旧控制者队列已取消`, "ok");
         return;
       } catch (retryError) {
@@ -4816,6 +4866,7 @@ async function clearConnectorCodexBinding() {
     const result = await connectorFetch(`/api/sessions/${encodeURIComponent(connectorSessionId)}/binding`, { method: "DELETE" });
     connectorBindingFormDirty = false;
     renderConnectorSession(result.session);
+    await storageRemove(STORAGE_CONNECTOR_RECOVERY_KEY);
     const providerLabel = agentBindingProviderLabel();
     setConnectorBindingFeedback(`已解除 ${providerLabel} 绑定，当前页面不会接受 ${providerLabel} 操作`, "ok");
     setStatus(`${providerLabel} 绑定已解除`, "warn");
@@ -4835,6 +4886,10 @@ async function loadConnectorSessionId() {
 
 async function restoreConnectorSession(timeoutMs = 8000) {
   await loadConnectorSessionId();
+  if (!connectorSessionId) {
+    const recovery = await storageGet(STORAGE_CONNECTOR_RECOVERY_KEY);
+    connectorSessionId = connectorRecoverySessionId(connectorSessionId, recovery);
+  }
   if (!connectorSessionId) return;
   try {
     const sessionResult = await connectorFetch(
@@ -4842,8 +4897,16 @@ async function restoreConnectorSession(timeoutMs = 8000) {
       { timeoutMs },
     );
     renderConnectorSession(sessionResult.session);
+    await persistConnectorRecovery(sessionResult.session);
   } catch (error) {
     if (error.status === 404) {
+      const previousSessionId = connectorSessionId;
+      try {
+        const recovered = await recoverConnectorSession(previousSessionId, timeoutMs);
+        if (recovered) return;
+      } catch {
+        // A stale tab or changed page must remain unbound until an explicit bind.
+      }
       connectorSessionId = "";
       connectorSession = null;
       await storageRemove(STORAGE_CONNECTOR_SESSION_KEY);
@@ -4854,19 +4917,51 @@ async function restoreConnectorSession(timeoutMs = 8000) {
   }
 }
 
+async function reloadExtensionForRuntimeMismatch(protocol) {
+  const compatibility = protocol?.runtimeCompatibility;
+  if (!compatibility?.runtimeBuildId) return false;
+  let diskContract;
+  try {
+    const response = await fetch(chrome.runtime.getURL("runtime-compat.json"), { cache: "no-store" });
+    diskContract = response.ok ? await response.json() : null;
+  } catch {
+    return false;
+  }
+  const [activeRuntimeBuildId, attemptedRuntimeBuildId] = await Promise.all([
+    storageGet(STORAGE_ACTIVE_RUNTIME_BUILD_KEY),
+    storageGet(STORAGE_RUNTIME_RELOAD_ATTEMPT_KEY),
+  ]);
+  if (!shouldReloadExtensionForRuntime({
+    runtimeContract: diskContract,
+    protocol,
+    activeRuntimeBuildId,
+    attemptedRuntimeBuildId,
+  })) return false;
+  await storageSet({ [STORAGE_RUNTIME_RELOAD_ATTEMPT_KEY]: diskContract.runtimeBuildId });
+  setConnection(elements.connectorStatus, "正在自动应用更新", "idle");
+  elements.connectionStatusSummaryText.textContent = "已检测到已安装组件更新，正在重新加载扩展";
+  window.setTimeout(() => chrome.runtime.reload(), 150);
+  return true;
+}
+
 async function checkConnectorConnection({ silent = false, lightweight = false } = {}) {
   if (!silent) setConnection(elements.connectorStatus, "检查中", "idle");
+  let observedProtocol = null;
   try {
     const [health, protocol] = await Promise.all([
       connectorFetch("/health", { timeoutMs: lightweight ? 2000 : 8000 }),
       connectorFetch("/api/protocol", { timeoutMs: lightweight ? 2000 : 8000 }),
     ]);
+    observedProtocol = protocol;
     if (protocol.protocolVersion !== EXPECTED_CONNECTOR_PROTOCOL_VERSION) {
       throw new Error("CONNECTOR_RUNTIME_VERSION_MISMATCH");
     }
     const runtimeContract = await extensionRuntimeContractPromise;
     if (!runtimeContract?.runtimeBuildId) {
       throw new Error("EXTENSION_RUNTIME_CONTRACT_MISSING");
+    }
+    if (await reloadExtensionForRuntimeMismatch(protocol)) {
+      return { ok: false, mismatch: true, reasonCode: "EXTENSION_RUNTIME_RELOAD_STARTED" };
     }
     if (protocol.runtimeCompatibility?.extensionVersion
       && protocol.runtimeCompatibility.extensionVersion !== extensionRuntimeVersion) {
@@ -4875,6 +4970,7 @@ async function checkConnectorConnection({ silent = false, lightweight = false } 
     if (protocol.runtimeCompatibility?.runtimeBuildId !== runtimeContract.runtimeBuildId) {
       throw new Error("EXTENSION_RUNTIME_BUILD_MISMATCH");
     }
+    await storageSet({ [STORAGE_ACTIVE_RUNTIME_BUILD_KEY]: runtimeContract.runtimeBuildId });
     connectorProtocol = protocol;
     setConnection(elements.connectorStatus, health.sessionCount ? "已绑定" : "已启动", "ok");
     renderConnectorCapabilities(protocol.capabilities || {});
@@ -4888,6 +4984,9 @@ async function checkConnectorConnection({ silent = false, lightweight = false } 
     await restoreConnectorSession();
     return { ok: true, health, protocol, session: connectorSession };
   } catch (error) {
+    if (await reloadExtensionForRuntimeMismatch(observedProtocol).catch(() => false)) {
+      return { ok: false, mismatch: true, reasonCode: "EXTENSION_RUNTIME_RELOAD_STARTED" };
+    }
     const mismatch = [
       "CONNECTOR_RUNTIME_VERSION_MISMATCH",
       "EXTENSION_RUNTIME_VERSION_MISMATCH",
@@ -4957,6 +5056,7 @@ function connectorBindingFrom(tab, context) {
   let pageType = "tianyuan-page";
   if (route.isAssetDraftRoute) pageType = "asset-draft";
   if (route.isEquityListRoute) pageType = "equity-list";
+  if (route.isNewReportRoute) pageType = "new-report";
   let safeUrl = "";
   try {
     const url = new URL(tab?.url || "");
@@ -5121,23 +5221,67 @@ async function processConnectorActionQueue() {
       scan_audit_index_check_rows: "查证资料索引批量扫描",
       batch_set_audit_check_results: "查证核对情况批量填写",
       inspect_page_structure: "页面结构探查",
+      report_inspect: "报告页面只读探查",
+      report_navigate: "报告大纲导航",
+      report_node_read: "报告节点内容读取",
+      report_preview: "报告修改预演",
+      report_execute: "报告修改执行",
+      report_save: "报告保存",
+      report_readback: "报告回读校验",
+      report_editor_open: "报告编辑框开启",
+      report_editor_command: "报告编辑框工具栏命令",
+      report_editor_save: "报告编辑框保存",
+      report_editor_close: "报告编辑框关闭",
+      report_reload: "报告保存回读刷新",
     };
     setConnectorBindingFeedback(
       `${binding.displayName || binding.providerId || "当前 Agent"} 已下达${actionLabels[claimedAction.type] || "天源页面任务"}，正在通过当前天源页面执行...`,
       "idle",
     );
     setStatus(`正在执行${binding.displayName || binding.providerId || "当前 Agent"}天源页面任务...`, "idle");
-    if (claimedAction.type === "inspect_page_structure") {
-      const inspectTab = await connectorBoundTab();
-      const inspectResult = await sendToTab(inspectTab, { type: ACTION_REQUEST_TYPE, payload: claimedAction.payload || {} });
-      await reportConnectorActionResult(claimedAction.actionId, inspectResult);
+    if (REPORT_ACTION_TYPES.includes(claimedAction.type)) {
+      const reportTab = await connectorBoundTab();
+      const target = claimedAction.target || {};
+      const identity = target.reportIdentity || {};
+      let currentUrl;
+      try { currentUrl = new URL(reportTab.url || ""); } catch {}
+      const match = currentUrl?.protocol === "https:" && currentUrl?.hostname === "excel.zhrdc.net"
+        ? currentUrl.pathname.match(/^\/ty\/operation\/([^/]+)\/([^/]+)\/new-report\/([^/]+)\/(add|edit)\/?$/)
+        : null;
+      let reportResult;
+      if (currentControlBinding()?.bindingId !== claimedAction.bindingId) {
+        reportResult = { ok: false, reason: "AGENT_CONTROL_REVOKED", security: { readOnly: !REPORT_WRITE_ACTION_TYPES.includes(claimedAction.type), writesPerformed: false, credentialsReturned: false } };
+      } else if (reportTab.id !== target.tabId || !match || match[1] !== identity.projectId || match[2] !== identity.companyId || match[3] !== identity.reportType || match[4] !== identity.mode || (identity.reportDetailId && currentUrl.searchParams.get("detailId") !== identity.reportDetailId)) {
+        reportResult = { ok: false, reason: "REPORT_TARGET_MISMATCH", security: { readOnly: true, writesPerformed: false, credentialsReturned: false } };
+      } else if (claimedAction.type === "report_reload") {
+        if (claimedAction.payload?.confirmText !== "确认刷新并核验已保存报告") {
+          reportResult = { ok: false, reason: "REPORT_CONFIRM_TEXT_INVALID", security: { readOnly: true, writesPerformed: false, credentialsReturned: false } };
+        } else {
+          try {
+            await chrome.tabs.reload(reportTab.id);
+            reportResult = { ok: true, action: "report_reload", reloadRequested: true, security: { readOnly: true, writesPerformed: false, credentialsReturned: false } };
+          } catch {
+            reportResult = { ok: false, status: "pendingVerify", reason: "REPORT_RELOAD_OUTCOME_UNKNOWN", security: { readOnly: true, writesPerformed: false, credentialsReturned: false } };
+          }
+        }
+      } else {
+        const reportPayload = { ...(claimedAction.payload || {}) };
+        if (REPORT_WRITE_ACTION_TYPES.includes(claimedAction.type) && typeof reportPayload.confirmText === "string" && reportPayload.confirmText) {
+          reportPayload.writeAuthorized = true;
+        }
+        reportResult = await sendToTab(reportTab, { type: ACTION_REQUEST_TYPE, payload: reportPayload });
+      }
+      if (!reportResult?.ok) {
+        reportResult = sanitizeReportFailure(reportResult, claimedAction.type);
+      }
+      await reportConnectorActionResult(claimedAction.actionId, reportResult);
       setConnectorBindingFeedback(
-        inspectResult?.ok
-          ? "页面结构探查完成，结果已回传 Agent"
-          : `页面结构探查被阻断：${inspectResult?.reason || inspectResult?.message || "未知原因"}`,
-        inspectResult?.ok ? "ok" : "warn",
+        reportResult?.ok
+          ? `${actionLabels[claimedAction.type] || "报告页面任务"}完成，结果已回传 Agent`
+          : `${actionLabels[claimedAction.type] || "报告页面任务"}被阻断：${reportResult?.reason || reportResult?.message || "未知原因"}`,
+        reportResult?.ok ? "ok" : "warn",
       );
-      setStatus(inspectResult?.ok ? "页面结构探查完成" : "页面结构探查被阻断", inspectResult?.ok ? "ok" : "warn");
+      setStatus(reportResult?.ok ? `${actionLabels[claimedAction.type] || "报告页面任务"}完成` : `${actionLabels[claimedAction.type] || "报告页面任务"}被阻断`, reportResult?.ok ? "ok" : "warn");
       await checkConnectorConnection({ silent: true });
       return;
     }
