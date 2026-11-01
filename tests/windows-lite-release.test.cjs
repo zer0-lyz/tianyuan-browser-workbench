@@ -5,14 +5,25 @@ const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { test } = require("node:test");
 
 const repoRoot = path.resolve(__dirname, "..");
 const versionConfig = JSON.parse(fs.readFileSync(
   path.join(repoRoot, "extension", "version.json"),
   "utf8",
 ));
-const runtimePython = process.env.TIANYUAN_PYTHON_BIN || "python3";
-const shell = process.env.BASH || "bash";
+let runtimePython = process.env.TIANYUAN_TEST_PYTHON_BIN || process.env.TIANYUAN_PYTHON_BIN || "";
+const shell = process.env.TIANYUAN_BASH_BIN || (process.platform === "win32" ? "" : "/bin/bash");
+if (!runtimePython && process.platform !== "win32") {
+  try {
+    runtimePython = execFileSync("python", ["-c", "import sys; print(sys.executable)"], { encoding: "utf8" }).trim();
+  } catch {
+  }
+}
+
+if (!runtimePython || !shell || !fs.existsSync(shell)) {
+  test.skip("Windows lite shell-builder test requires explicit runtime paths on Windows", () => {});
+} else {
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tianyuan-lite-release-"));
 
 try {
@@ -77,4 +88,5 @@ try {
   console.log("Windows lite release tests passed.");
 } finally {
   fs.rmSync(tempRoot, { recursive: true, force: true });
+}
 }
