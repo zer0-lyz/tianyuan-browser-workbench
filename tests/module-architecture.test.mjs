@@ -16,10 +16,11 @@ import { alibabaAuctionModule } from "../extension/src/modules/alibaba-auction/m
 import { depreciationCapexModule } from "../extension/src/modules/depreciation-capex-forecast/module.js";
 import { detailTableWorkflowModule } from "../extension/src/modules/detail-table-workflow/module.js";
 import { declarationTableWorkflowModule } from "../extension/src/modules/declaration-table-workflow/module.js";
+import { alibabaLeaseModule } from "../extension/src/modules/alibaba-lease/module.js";
 
-const definitions = [...legacyFeatureModules, updatesModule, feedbackModule, fileArchiveModule, landPublicityModule, mapSettingsModule, alibabaAuctionModule, depreciationCapexModule, detailTableWorkflowModule, declarationTableWorkflowModule];
-assert.equal(definitions.length, 15);
-assert.equal(definitions.filter((item) => item.manifest.type === "feature").length, 13);
+const definitions = [...legacyFeatureModules, updatesModule, feedbackModule, fileArchiveModule, landPublicityModule, mapSettingsModule, alibabaAuctionModule, alibabaLeaseModule, depreciationCapexModule, detailTableWorkflowModule, declarationTableWorkflowModule];
+assert.equal(definitions.length, 16);
+assert.equal(definitions.filter((item) => item.manifest.type === "feature").length, 14);
 assert.equal(definitions.filter((item) => item.manifest.type === "utility").length, 2);
 assert.equal(new Set(definitions.map((item) => item.manifest.id)).size, definitions.length);
 assert.equal(new Set(definitions.map((item) => item.manifest.route)).size, definitions.length);

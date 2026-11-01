@@ -6,6 +6,17 @@ const path = require("node:path");
 
 const DEFAULT_LIST_URL = "https://hz.sydc.anjuke.com/";
 const DEFAULT_MAX_CASES = 10;
+const CAPTURE_STATUSES = ["ok", "blocked_verification", "not_case", "read_failed"];
+const MAP_ASSET_SOURCE_DIRECTORY = path.join(__dirname, "map-assets");
+
+function mapAssetsDir() {
+  try {
+    const resolved = fs.realpathSync(MAP_ASSET_SOURCE_DIRECTORY);
+    return fs.statSync(resolved).isDirectory() ? resolved : "";
+  } catch {
+    return "";
+  }
+}
 
 function security() {
   return { credentialsReturned: false };
@@ -67,6 +78,30 @@ function normalizeRequest(input = {}) {
         latitude: safeCoordinate(page?.latitude, -90, 90),
       })).filter((page) => page.url && page.text)
       : null,
+    candidateOutcomes: Array.isArray(source.candidateOutcomes)
+      ? source.candidateOutcomes.slice(0, 100).map((outcome, index) => {
+        let url = "";
+        try {
+          url = normalizeUrl(outcome?.url);
+        } catch {
+          url = "";
+        }
+        return {
+          url,
+          title: safeText(outcome?.title, 300),
+          location: safeText(outcome?.location, 300),
+          text: safeText(outcome?.text, 60000),
+          html: safeText(outcome?.html, 400000),
+          longitude: safeCoordinate(outcome?.longitude, -180, 180),
+          latitude: safeCoordinate(outcome?.latitude, -90, 90),
+          captureStatus: CAPTURE_STATUSES.includes(String(outcome?.captureStatus || "")) ? String(outcome.captureStatus) : "read_failed",
+          errorCode: safeText(outcome?.errorCode, 120),
+          sequence: index + 1,
+        };
+      }).filter((outcome) => outcome.url)
+      : null,
+    runStatus: ["complete", "partial", "stopped"].includes(String(source.runStatus || "")) ? String(source.runStatus) : "partial",
+    restoreStatus: ["restored", "restore_failed", "skipped"].includes(String(source.restoreStatus || "")) ? String(source.restoreStatus) : "skipped",
     keyword: String(source.keyword || "").trim().slice(0, 160),
     caseType,
     outputDirectory: path.resolve(outputDirectory),
@@ -85,7 +120,9 @@ function validateOutputPath(value, outputDirectory) {
   const raw = String(value || "").trim();
   if (!raw || raw.includes("\0") || !path.isAbsolute(raw)) throw new Error("ANJUKE_OUTPUT_PATH_INVALID");
   const resolved = fs.realpathSync(raw);
-  const root = path.resolve(outputDirectory);
+  // 根目录同样 realpath：用户选择的目录可能在 /tmp 等符号链接路径下，
+  // 只对文件一侧 realpath 会把合法输出误判为越界。
+  const root = fs.realpathSync(path.resolve(outputDirectory));
   const relative = path.relative(root, resolved);
   if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("ANJUKE_OUTPUT_OUTSIDE_DIRECTORY");
   const stat = fs.statSync(resolved);
@@ -103,4 +140,5 @@ module.exports = {
   validateOutputPath,
   safeError,
   security,
+  mapAssetsDir,
 };

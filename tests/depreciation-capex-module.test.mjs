@@ -61,6 +61,7 @@ const resultsPage = fs.readFileSync(path.join(moduleRoot, "results.html"), "utf8
 const detailsPage = fs.readFileSync(path.join(moduleRoot, "details.html"), "utf8");
 const moduleSource = fs.readFileSync(path.join(moduleRoot, "module.js"), "utf8");
 assert.doesNotMatch(moduleSource, /openPage\("(?:input|results|details)\.html/);
+assert.match(inputPage, /读取工作簿已有数据/);
 assert.match(inputPage, /从剪贴板读取/);
 assert.match(inputPage, /选择 \.xlsx 导入/);
 assert.match(inputPage, /保存到当前工作簿/);
@@ -71,7 +72,30 @@ assert.match(resultsPage, /导出底稿/);
 assert.match(detailsPage, /资产结果明细（年度）/);
 assert.match(detailsPage, /资产结果明细（月度）/);
 assert.match(detailsPage, /单资产详细过程/);
+const inputPageSource = fs.readFileSync(path.join(moduleRoot, "input.js"), "utf8");
+assert.match(inputPageSource, /ACTIONS\.input/);
+assert.match(inputPageSource, /renderGrid/);
+assert.match(inputPageSource, /dataset\.rowIndex/);
+assert.doesNotMatch(inputPageSource, /parseInput/);
+assert.match(inputPage, /读取工作簿已有数据/);
+assert.match(inputPage, /从剪贴板读取/);
+assert.match(inputPage, /添加行/);
+assert.match(inputPage, /asset-grid|gridWrap/);
+assert.doesNotMatch(inputPage, /<textarea/);
+assert.match(fs.readFileSync(path.join(moduleRoot, "details.js"), "utf8"), /RESULT_SHEET_NOT_FOUND/);
 assert.match(fs.readFileSync(path.join(moduleRoot, "details.js"), "utf8"), /columnCount/);
 assert.match(fs.readFileSync(path.join(moduleRoot, "details.js"), "utf8"), /pageSize/);
+
+const pageCommonSource = fs.readFileSync(path.join(moduleRoot, "page-common.js"), "utf8");
+assert.match(pageCommonSource, /input: "read_input"/);
+assert.doesNotMatch(pageCommonSource, /assets: "assets"/);
+const helperSource = fs.readFileSync(path.join(repoRoot, "native-helper", "depreciation-capex-forecast.js"), "utf8");
+assert.match(helperSource, /read_input: readExistingInput/);
+const workflowSource = fs.readFileSync(
+  path.join(repoRoot, "skills", "depreciation-capex-forecast", "scripts", "workflow.py"),
+  "utf8",
+);
+assert.match(workflowSource, /read-input/);
+assert.match(workflowSource, /def read_existing_input/);
 
 console.log("Depreciation capex module tests passed.");
