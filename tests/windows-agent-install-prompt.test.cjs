@@ -22,8 +22,8 @@ for (const requiredText of [
   "update-manifest.json",
   "SHA-256",
   "install.cmd",
-  "%LOCALAPPDATA%\\TianyuanWorkbench\\安装检查结果.txt",
-  "%LOCALAPPDATA%\\TianyuanWorkbench\\projects\\天源评估系统\\extension",
+  "<安装根目录>\\安装检查结果.txt",
+  "<安装根目录>\\extension",
   "lkflndcnklpeaejohaacoaolnmhgigoc",
   "connection_status",
   "list_capabilities",
@@ -84,9 +84,15 @@ for (const requiredGuideText of [
 assert.equal(installer.includes("天源工作台-浏览器扩展.lnk"), true);
 assert.equal(installer.includes("浏览器扩展路径.txt"), true);
 assert.equal(
-  installer.includes("import openpyxl, et_xmlfile, lxml, docx, typing_extensions"),
+  installer.includes("function Test-PythonDependencies")
+    && installer.includes("'requests','urllib3','certifi','charset_normalizer','idna','openpyxl','et_xmlfile','lxml','docx','typing_extensions'")
+    && installer.includes("$FinalDependencyProbe = Test-PythonDependencies $PythonExe"),
   true,
   "Windows installer must verify the actual Python runtime dependencies",
 );
 
 console.log("Windows Agent install prompt tests passed.");
+
+assert.match(prompt, /CLI 为可选外部依赖/);
+assert.match(userGuide, /不再强制把扩展复制到 C 盘/);
+assert.doesNotMatch(userGuide, /运行包内 Windows CLI 安装程序/);

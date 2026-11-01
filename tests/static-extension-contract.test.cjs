@@ -35,6 +35,7 @@ const manifestGenerator = fs.readFileSync(path.join(repoRoot, "scripts", "genera
 const updateChecker = fs.readFileSync(path.join(repoRoot, "native-helper", "update_checker.js"), "utf8");
 const updateInstaller = fs.readFileSync(path.join(repoRoot, "native-helper", "update_installer.js"), "utf8");
 const platformIndex = fs.readFileSync(path.join(repoRoot, "native-helper", "platform", "index.js"), "utf8");
+const directoryPicker = fs.readFileSync(path.join(repoRoot, "native-helper", "directory-picker.js"), "utf8");
 const windowsPlatform = fs.readFileSync(path.join(repoRoot, "native-helper", "platform", "windows.js"), "utf8");
 const macosPlatform = fs.readFileSync(path.join(repoRoot, "native-helper", "platform", "macos.js"), "utf8");
 const installer = fs.readFileSync(path.join(repoRoot, "scripts", "install-local-runtime.mjs"), "utf8");
@@ -88,7 +89,8 @@ assert.match(nativeHost, /chooseManagedOutputDirectory/);
 for (const directoryName of ["浙江土地成交公示", "阿里司法拍卖", "安居客物业案例", "表格格式设置"]) {
   assert.match(nativeHost, new RegExp(directoryName));
 }
-assert.match(nativeHost, /outputDirectory: selectedPath/);
+assert.match(nativeHost, /directoryPicker\.prepareManagedOutputDirectory\(rawParentPath/);
+assert.match(directoryPicker, /outputDirectory:\s*selectedPath/);
 assert.match(tableFormatModule, /result\.outputDirectory \|\| result\.path \|\| result\.paths\?\.\[0\]/);
 assert.match(detailWorkflowModule, /directoryName: "明细表导出与整理"/);
 assert.match(fs.readFileSync(path.join(extensionRoot, "src", "modules", "declaration-table-workflow", "module.js"), "utf8"), /directoryName: "申报表导出与整理"/);
@@ -218,6 +220,8 @@ assert.equal(sidepanel.includes("async function performConnectionCheck({ probe =
 assert.equal(sidepanel.includes("lightweight: !probe"), true);
 assert.equal(sidepanel.includes("timeoutMs: lightweight ? 2000 : 8000"), true);
 assert.equal(sidepanel.includes("async function restoreConnectorSession(timeoutMs = 8000)"), true);
+assert.equal(sidepanel.includes("async function recoverConnectorSession(sessionId, timeoutMs)"), true);
+assert.equal(sidepanel.includes("await recoverConnectorSession(previousSessionId, timeoutMs)"), true);
 assert.equal(sidepanel.includes("await Promise.all(["), true);
 assert.equal(sidepanel.includes("void refreshAll({ probe: true }).catch"), true);
 assert.equal(sidepanel.includes("function scheduleAutomaticConnectionProbe()"), true);
@@ -324,18 +328,13 @@ assert.equal(installer.includes('"src/modules/declaration-table-workflow/templat
 assert.equal(installer.includes('"src/modules/declaration-table-workflow/styles.css"'), true);
 assert.equal(nativeHost.includes('message?.action === "run_declaration_table_workflow"'), true);
 assert.equal(nativeHost.includes('action: "run_declaration_table_workflow"'), true);
-assert.equal(nativeInstaller.includes("update_checker.js"), true);
-assert.equal(nativeInstaller.includes("update_installer.js"), true);
-assert.equal(nativeInstaller.includes("connector_bridge.js"), true);
-assert.equal(nativeInstaller.includes("process_launcher.js"), true);
-assert.equal(nativeInstaller.includes("file-archive.js"), true);
-assert.equal(nativeInstaller.includes("file-archive-conversations.js"), true);
-assert.equal(nativeInstaller.includes("alibaba-auction.js"), true);
+assert.equal(nativeInstaller.includes("PACKAGE_INSTALLER"), true);
+assert.equal(nativeInstaller.includes('exec /bin/bash "$PACKAGE_INSTALLER" "$@"'), true);
+assert.equal(nativeInstaller.includes("rm -rf"), false);
 assert.equal(nativeHost.includes('"list_file_archive_conversations"'), true);
 assert.equal(nativeHost.includes('"select_file_archive_conversation_directory"'), true);
 assert.equal(conversationService.includes("encrypted_or_proprietary"), true);
 assert.equal(conversationService.includes("CONVERSATION_NOT_BOUND"), true);
-assert.equal(nativeInstaller.includes('cp -R "$ROOT_DIR/native-helper/platform"'), true);
 assert.equal(windowsInstaller.includes("function Install-DirectoryAtomic"), true);
 assert.equal(windowsInstaller.includes("function Stop-ExistingConnector"), true);
 assert.equal(windowsInstaller.includes("install-local-runtime.mjs"), true);
@@ -364,7 +363,7 @@ assert.equal(nativeHost.includes("const childArgs = IS_WINDOWS"), false);
 assert.equal(nativeHost.includes("shell: true"), false);
 assert.equal(processLauncher.includes("TIANYUAN_PROCESS_PAYLOAD"), true);
 assert.equal(processLauncher.includes("normalizeRuntimeConfig"), true);
-assert.equal(bridge.includes("platformAdapter.createCredentialReference"), true);
+assert.equal(bridge.includes("bridgePlatformAdapter.createCredentialReference"), true);
 assert.equal(platformIndex.includes('platform === "win32"'), true);
 assert.equal(platformIndex.includes('platform === "darwin"'), true);
 assert.equal(windowsPlatform.includes("windows-dpapi"), true);

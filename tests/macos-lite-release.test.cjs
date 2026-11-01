@@ -77,6 +77,27 @@ assert.equal(hasName("/native-helper/update_checker.js"), true);
 assert.equal(hasName("/scripts/install-local-runtime.mjs"), true);
 assert.equal(hasName("/scripts/runtime-fingerprint.mjs"), true);
 assert.equal(entries.some((entry) => entry.includes("/runtime/python-wheels/openpyxl-")), true);
+for (const wheelPrefix of [
+  "requests-2.32.5-",
+  "urllib3-2.6.3-",
+  "certifi-2026.10.23-",
+  "charset_normalizer-3.5.2-",
+  "idna-3.20-",
+]) {
+  assert.equal(
+    entries.some((entry) => entry.includes("/runtime/python-wheels/" + wheelPrefix)),
+    true,
+    "lite package must carry " + wheelPrefix,
+  );
+  assert.equal(
+    entries.filter((entry) => entry.includes("/runtime/python-wheels/" + wheelPrefix)).every((entry) => entry.endsWith("-py3-none-any.whl")),
+    true,
+    "lite package must carry only Python-3 universal wheels for " + wheelPrefix,
+  );
+}
+for (const settingsFile of ["module.js", "styles.css", "template.js"]) {
+  assert.equal(hasName("/extension/src/modules/map-settings/" + settingsFile), true);
+}
 assert.equal(entries.some((entry) => entry.endsWith("/runtime/tycpv-setup-0.1.0-macos-arm64.pkg")), false);
 assert.equal(entries.some((entry) => entry.endsWith("/runtime/python-3.14.6-macos11.pkg")), false);
 

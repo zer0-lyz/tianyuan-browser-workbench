@@ -1,10 +1,13 @@
 import {
   ACTIONS,
+  clearDirectoryPickerStatus,
   escapeHtml,
+  isDirectoryPickerCancelled,
   nativeRequest,
   normalizeTable,
   pageLink,
   renderTable,
+  setDirectoryPickerStatus,
   setMessage,
 } from "./page-common.js";
 
@@ -72,11 +75,17 @@ async function refresh() {
 
 async function exportWorkbook() {
   elements.exportWorkbook.disabled = true;
+  clearDirectoryPickerStatus(elements.exportWorkbook, document);
   try {
     const selected = await nativeRequest({ action: ACTIONS.selectOutputDirectory }, 130_000);
     const selectedDirectory = selected.outputDirectory || selected.path || selected.paths?.[0] || "";
-    if (selected.cancelled || selected.canceled || !selectedDirectory) {
+    if (isDirectoryPickerCancelled(selected)) {
       setMessage(elements.exportStatus, "已取消导出", "");
+      return;
+    }
+    if (!selectedDirectory) {
+      const feedback = setDirectoryPickerStatus(elements.exportWorkbook, { reason: selected.reason || "DEPRECIATION_OUTPUT_DIRECTORY_SELECTION_FAILED" }, { subject: "折旧摊销预测导出目录" });
+      setMessage(elements.exportStatus, feedback?.message || "无法完成目录选择，请重新选择。", "error");
       return;
     }
     const result = await nativeRequest({
@@ -86,9 +95,11 @@ async function exportWorkbook() {
     }, 120_000);
     const filePath = result.outputPath || result.path || result.file?.path || "";
     const size = result.size || result.file?.size;
+    clearDirectoryPickerStatus(elements.exportWorkbook, document);
     setMessage(elements.exportStatus, `底稿已导出${filePath ? `：${filePath}` : ""}${size ? `（${size} 字节）` : ""}`, "ok");
   } catch (error) {
-    setMessage(elements.exportStatus, error.message, "error");
+    const feedback = setDirectoryPickerStatus(elements.exportWorkbook, error, { subject: "折旧摊销预测导出目录" });
+    setMessage(elements.exportStatus, feedback?.message || "无法完成目录选择，请重新选择。", "error");
   } finally {
     elements.exportWorkbook.disabled = false;
   }

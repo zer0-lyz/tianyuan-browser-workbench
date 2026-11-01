@@ -21,11 +21,15 @@ DIST_DIR="${TIANYUAN_RELEASE_OUTPUT_DIR:-$WORKBENCH_ROOT/releases}"
 OUTPUT="$DIST_DIR/${PACKAGE_NAME}-${RELEASE_DATE}.zip"
 OUTPUT_SHA="$OUTPUT.sha256"
 CACHE_DIR="$WORKBENCH_ROOT/release-cache"
-TYCPV_SOURCE="$WORKBENCH_ROOT/dependencies/天源评估系统/tycpv-setup-0.1.0-macos-arm64.pkg"
 PYTHON_PKG="$CACHE_DIR/python-3.14.6-macos11.pkg"
 PYTHON_URL="https://www.python.org/ftp/python/3.14.6/python-3.14.6-macos11.pkg"
 PYTHON_SHA256="d3c9fff52214847e4fab03e9eaf53dd2a8e51e3534aa0b61f201b749f86bef28"
 WHEEL_CACHE="$CACHE_DIR/python-wheels"
+NODE_VERSION="22.23.4"
+NODE_ARCHIVE="$CACHE_DIR/node-v${NODE_VERSION}-darwin-arm64.tar.gz"
+NODE_URL="https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-darwin-arm64.tar.gz"
+NODE_SHA256="c9e1dbc748b33ed2d14f42445191ecaf14c56259c7a9a26d0042c49ec2b66428"
+NODE_EXTRACT_ROOT="$BUILD_ROOT/node-extract"
 MACOS_PYTHON_TARGETS="${TIANYUAN_MACOS_PYTHON_TARGETS:-39 314}"
 PIP_DOWNLOAD_TIMEOUT="${PIP_DOWNLOAD_TIMEOUT:-30}"
 PIP_DOWNLOAD_RETRIES="${PIP_DOWNLOAD_RETRIES:-2}"
@@ -35,9 +39,17 @@ RUNTIME_BUILD_ID="$(node "$ROOT_DIR/scripts/print-runtime-build-id.mjs" "$ROOT_D
 
 [[ "$(uname -s)" == "Darwin" ]] || { echo "macOS required" >&2; exit 1; }
 [[ "$(uname -m)" == "arm64" ]] || { echo "arm64 required" >&2; exit 1; }
-[[ -f "$TYCPV_SOURCE" ]] || { echo "Missing tycpv pkg: $TYCPV_SOURCE" >&2; exit 1; }
+mkdir -p "$STAGE/runtime/python-wheels" "$STAGE/runtime/node" "$STAGE/scripts" "$DIST_DIR" "$CACHE_DIR" "$WHEEL_CACHE"
 
-mkdir -p "$STAGE/runtime/python-wheels" "$STAGE/scripts" "$DIST_DIR" "$CACHE_DIR" "$WHEEL_CACHE"
+if [[ ! -f "$NODE_ARCHIVE" ]]; then
+  curl -L --fail --retry 3 --output "$NODE_ARCHIVE" "$NODE_URL"
+fi
+echo "$NODE_SHA256  $NODE_ARCHIVE" | /usr/bin/shasum -a 256 -c -
+mkdir -p "$NODE_EXTRACT_ROOT"
+/usr/bin/tar -xzf "$NODE_ARCHIVE" -C "$NODE_EXTRACT_ROOT"
+cp "$NODE_EXTRACT_ROOT/node-v${NODE_VERSION}-darwin-arm64/bin/node" "$STAGE/runtime/node/node"
+cp "$NODE_EXTRACT_ROOT/node-v${NODE_VERSION}-darwin-arm64/LICENSE" "$STAGE/runtime/node/LICENSE"
+chmod 755 "$STAGE/runtime/node/node"
 
 if [[ ! -f "$PYTHON_PKG" ]]; then
   curl -L --fail --output "$PYTHON_PKG" "$PYTHON_URL"
@@ -55,6 +67,23 @@ python3 -m pip download \
   "et_xmlfile==2.0.0" \
   "python-docx==1.2.0" \
   "typing_extensions==4.16.0"
+python3 -m pip download \
+  --quiet \
+  --disable-pip-version-check \
+  --timeout "$PIP_DOWNLOAD_TIMEOUT" \
+  --retries "$PIP_DOWNLOAD_RETRIES" \
+  --only-binary=:all: \
+  --platform any \
+  --implementation py \
+  --abi none \
+  --python-version 39 \
+  --no-deps \
+  --dest "$WHEEL_CACHE" \
+  "requests==2.32.5" \
+  "urllib3==2.6.3" \
+  "certifi==2026.10.23" \
+  "charset-normalizer==3.5.2" \
+  "idna==3.20"
 for PYTHON_TARGET in $MACOS_PYTHON_TARGETS; do
   python3 -m pip download \
     --quiet \
@@ -90,9 +119,8 @@ cp "$STAGE/native-helper/runtime-compat.json" "$STAGE/extension/runtime-compat.j
 cp "$ROOT_DIR/scripts/install-local-runtime.mjs" "$STAGE/scripts/install-local-runtime.mjs"
 cp "$ROOT_DIR/scripts/runtime-fingerprint.mjs" "$STAGE/scripts/runtime-fingerprint.mjs"
 cp "$ROOT_DIR/scripts/print-runtime-build-id.mjs" "$STAGE/scripts/print-runtime-build-id.mjs"
-cp "$TYCPV_SOURCE" "$STAGE/runtime/tycpv-setup-0.1.0-macos-arm64.pkg"
 cp "$PYTHON_PKG" "$STAGE/runtime/python-3.14.6-macos11.pkg"
-cp "$WHEEL_CACHE"/openpyxl-3.1.5-*.whl "$WHEEL_CACHE"/et_xmlfile-2.0.0-*.whl "$WHEEL_CACHE"/python_docx-1.2.0-*.whl "$WHEEL_CACHE"/typing_extensions-*.whl "$WHEEL_CACHE"/lxml-6.1.0-*-macosx_*.whl "$STAGE/runtime/python-wheels/"
+cp "$WHEEL_CACHE"/openpyxl-3.1.5-*.whl "$WHEEL_CACHE"/et_xmlfile-2.0.0-*.whl "$WHEEL_CACHE"/python_docx-1.2.0-*.whl "$WHEEL_CACHE"/typing_extensions-*.whl "$WHEEL_CACHE"/requests-2.32.5-py3-none-any.whl "$WHEEL_CACHE"/urllib3-2.6.3-py3-none-any.whl "$WHEEL_CACHE"/certifi-2026.10.23-py3-none-any.whl "$WHEEL_CACHE"/charset_normalizer-3.5.2-py3-none-any.whl "$WHEEL_CACHE"/idna-3.20-py3-none-any.whl "$WHEEL_CACHE"/lxml-6.1.0-*-macosx_*.whl "$STAGE/runtime/python-wheels/"
 cp "$ROOT_DIR/release/macos-arm64/安装.command" "$STAGE/安装.command"
 cp "$ROOT_DIR/release/macos-arm64/卸载.command" "$STAGE/卸载.command"
 cp "$ROOT_DIR/release/macos-arm64/安装使用说明.md" "$STAGE/安装使用说明.md"
@@ -113,6 +141,8 @@ git_commit=$SOURCE_COMMIT
 source_dirty=$SOURCE_DIRTY
 runtime_build_id=$RUNTIME_BUILD_ID
 extension_id=lkflndcnklpeaejohaacoaolnmhgigoc
+node_version=$NODE_VERSION
+node_sha256=$NODE_SHA256
 EOF
 
 (

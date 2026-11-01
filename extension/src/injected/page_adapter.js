@@ -1,5 +1,5 @@
 (() => {
-  const ADAPTER_VERSION = "2026-08-12-page-tree-visible-only-v32";
+  const ADAPTER_VERSION = "2026-10-31-report-tree-controls-v1";
   const ADAPTER_STATE_KEY = "__tianyuanWorkbenchPageAdapterState";
   const REQUEST_TYPE = `TIANYUAN_WORKBENCH_GET_CONTEXT:${ADAPTER_VERSION}`;
   const RESPONSE_TYPE = `TIANYUAN_WORKBENCH_CONTEXT_RESULT:${ADAPTER_VERSION}`;
@@ -47,13 +47,18 @@
   function parseRoute() {
     const operationMatch = location.pathname.match(/\/ty\/operation\/([^/]+)/);
     const draftMatch = location.pathname.match(/\/ty\/operation\/([^/]+)\/([^/]+)\/asset-based-approach\/draft/);
+    const reportMatch = location.pathname.match(/^\/ty\/operation\/([^/]+)\/([^/]+)\/new-report\/([^/]+)\/(add|edit)\/?$/);
     const params = new URLSearchParams(location.search);
     return {
       isTianyuanOperationRoute: Boolean(operationMatch),
       isEquityListRoute: /\/ty\/operation\/[^/]+\/equity\/list/.test(location.pathname),
       isAssetDraftRoute: Boolean(draftMatch),
+      isNewReportRoute: Boolean(reportMatch),
       projectId: draftMatch?.[1] || operationMatch?.[1] || null,
-      companyId: draftMatch?.[2] || null,
+      companyId: draftMatch?.[2] || reportMatch?.[2] || null,
+      reportType: reportMatch?.[3] || null,
+      reportMode: reportMatch?.[4] || null,
+      reportDetailId: reportMatch && /^[A-Za-z0-9_-]{1,100}$/.test(params.get("detailId") || "") ? params.get("detailId") : null,
       subjectCode: params.get("subjectCode"),
     };
   }
@@ -617,6 +622,7 @@
       url: location.href,
       title: document.title,
       route,
+      reportAuthoring: window.__tianyuanReportAuthoringAdapter?.status?.() || { inspectAvailable: false, writeEnabled: false },
       page: {
         hasAssetDraftText: (document.body?.innerText || "").includes("资产基础法底稿"),
         saveButton: {
@@ -3509,6 +3515,37 @@
   }
 
   async function runAction(payload) {
+    if (typeof payload?.action === "string" && payload.action.startsWith("report_")) {
+      const adapter = window.__tianyuanReportAuthoringAdapter;
+      if (!adapter || adapter.version !== "report-authoring-v2") return { ok: false, reason: "REPORT_ADAPTER_NOT_AVAILABLE" };
+      const reportHandlers = {
+        report_inspect: adapter.inspect,
+        report_navigate: adapter.navigate,
+        report_node_read: adapter.nodeRead,
+        report_preview: adapter.preview,
+        report_execute: adapter.execute,
+        report_save: adapter.save,
+        report_readback: adapter.readback,
+        // 编辑器生命周期独立动作：适配器 v2 以独立动作实现（open/command/save/close）；
+        // Bridge/MCP 白名单已覆盖（open/close 属控制类，command/save 属写类并受写门禁约束），写入语义仍由适配器内 writeAuthorized/confirmText 把关。
+        report_editor_open: adapter.editorOpen,
+        report_editor_command: adapter.editorCommand,
+        report_editor_save: adapter.editorSave,
+        report_editor_close: adapter.editorClose,
+      };
+      const handler = reportHandlers[payload.action];
+      if (typeof handler !== "function") {
+        return {
+          ok: false,
+          reason: "REPORT_ACTION_UNSUPPORTED",
+          action: payload.action,
+          collectedAt: new Date().toISOString(),
+          url: location.href,
+          security: { readOnly: true, writesPerformed: false, credentialsReturned: false },
+        };
+      }
+      return handler(payload);
+    }
     if (payload?.action === "save_asset_draft_current_subject") {
       return await saveCurrentDraft(payload);
     }

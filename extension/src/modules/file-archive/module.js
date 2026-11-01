@@ -177,19 +177,29 @@ export const fileArchiveModule = {
         elements.fileArchiveConversationMessage.dataset.kind = "warn";
         return;
       }
-      const result = await context.sendNativeMessage({
-        action: "select_file_archive_conversation_directory",
-        appType: selectedSource(),
-        conversationIds: [...selectedConversationIds],
-      }, 130000);
-      if (!result?.ok) {
-        elements.fileArchiveConversationMessage.textContent = result?.reason || "会话目录绑定失败";
-        elements.fileArchiveConversationMessage.dataset.kind = result?.cancelled ? "warn" : "error";
-        return;
+      context.clearDirectoryPickerStatus(elements.fileArchiveBindConversations);
+      try {
+        const result = await context.sendNativeMessage({
+          action: "select_file_archive_conversation_directory",
+          appType: selectedSource(),
+          conversationIds: [...selectedConversationIds],
+        }, 130000);
+        if (!result?.ok) {
+          if (context.isDirectoryPickerCancelled(result)) return;
+          const feedback = context.setDirectoryPickerStatus(elements.fileArchiveBindConversations, result, { subject: "会话归档目录" });
+          elements.fileArchiveConversationMessage.textContent = feedback?.message || "无法完成目录选择，请重新选择。";
+          elements.fileArchiveConversationMessage.dataset.kind = "error";
+          return;
+        }
+        context.clearDirectoryPickerStatus(elements.fileArchiveBindConversations);
+        elements.fileArchiveConversationMessage.textContent = `已为 ${result.bindings?.length || 0} 个会话绑定导出目录`;
+        elements.fileArchiveConversationMessage.dataset.kind = "ok";
+        await loadConversations();
+      } catch (error) {
+        const feedback = context.setDirectoryPickerStatus(elements.fileArchiveBindConversations, error, { subject: "会话归档目录" });
+        elements.fileArchiveConversationMessage.textContent = feedback?.message || "无法完成目录选择，请重新选择。";
+        elements.fileArchiveConversationMessage.dataset.kind = "error";
       }
-      elements.fileArchiveConversationMessage.textContent = `已为 ${result.bindings?.length || 0} 个会话绑定导出目录`;
-      elements.fileArchiveConversationMessage.dataset.kind = "ok";
-      await loadConversations();
     }
 
     async function inspectCurrentConversation() {
@@ -262,16 +272,27 @@ export const fileArchiveModule = {
     }
 
     async function chooseOutput() {
-      const result = await context.sendNativeMessage({ action: "select_file_archive_output_directory" }, 130000);
-      const selected = result?.outputDirectory || result?.path || result?.paths?.[0] || "";
-      if (!result?.ok || !selected) {
-        if (!result?.cancelled) setMessage(result?.reason || "未选择导出目录", "warn");
-        return;
+      context.clearDirectoryPickerStatus(elements.chooseFileArchiveOutput);
+      try {
+        const result = await context.sendNativeMessage({ action: "select_file_archive_output_directory" }, 130000);
+        const selected = result?.outputDirectory || result?.path || result?.paths?.[0] || "";
+        if (!result?.ok || !selected) {
+          if (context.isDirectoryPickerCancelled(result)) return;
+          const feedback = context.setDirectoryPickerStatus(elements.chooseFileArchiveOutput, result, { subject: "微信文件归档目录" });
+          setMessage(feedback?.message || "无法完成目录选择，请重新选择。", "error");
+          context.setStatus(feedback?.message || "无法完成目录选择，请重新选择。", "error");
+          return;
+        }
+        config.outputDirectory = selected;
+        elements.fileArchiveOutputPath.value = selected;
+        await context.storage.save(config);
+        context.clearDirectoryPickerStatus(elements.chooseFileArchiveOutput);
+        setMessage(`已选择并创建归档子文件夹：${result.directoryName || "微信文件归档"}，请检查规则后开始监听`, "ok");
+      } catch (error) {
+        const feedback = context.setDirectoryPickerStatus(elements.chooseFileArchiveOutput, error, { subject: "微信文件归档目录" });
+        setMessage(feedback?.message || "无法完成目录选择，请重新选择。", "error");
+        context.setStatus(feedback?.message || "无法完成目录选择，请重新选择。", "error");
       }
-      config.outputDirectory = selected;
-      elements.fileArchiveOutputPath.value = selected;
-      setMessage(`已选择并创建归档子文件夹：${result.directoryName || "微信文件归档"}，请检查规则后开始监听`, "ok");
-      await context.storage.save(config);
     }
 
     async function start() {

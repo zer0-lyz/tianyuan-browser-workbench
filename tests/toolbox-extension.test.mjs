@@ -116,12 +116,13 @@ test("toolbox core uses its own storage namespace", () => {
   assert.ok(!storage.includes("tianyuanWorkbench"));
 });
 
-test("native host installers whitelist the toolbox extension id", () => {
+test("the shared runtime installer whitelists the toolbox extension id", () => {
   const installer = fs.readFileSync(
     path.join(repoRoot, "native-helper/install_native_host.sh"), "utf8");
   const runtime = fs.readFileSync(path.join(repoRoot, "scripts/install-local-runtime.mjs"), "utf8");
-  assert.match(installer, new RegExp(EXPECTED_EXTENSION_ID));
-  assert.match(installer, /TOOLBOX_EXTENSION_ID/);
+  assert.match(installer, /PACKAGE_INSTALLER/);
+  assert.match(installer, /exec \/bin\/bash/);
+  assert.match(runtime, /EXTENSION_IDS/);
   assert.match(runtime, new RegExp(EXPECTED_EXTENSION_ID));
 });
 

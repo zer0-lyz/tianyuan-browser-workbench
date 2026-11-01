@@ -26,6 +26,17 @@ if [[ -n "$(git -C "$ROOT_DIR" status --porcelain)" ]]; then
   SOURCE_DIRTY=true
 fi
 
+copy_tree() {
+  local source="$1"
+  local destination="$2"
+  if [[ -x /usr/bin/ditto ]]; then
+    /usr/bin/ditto "$source" "$destination"
+  else
+    mkdir -p "$destination"
+    cp -R "$source/." "$destination/"
+  fi
+}
+
 # 运行指纹统一由 scripts/runtime-fingerprint.mjs 计算，这里只调用封装脚本。
 RUNTIME_BUILD_ID="$(node "$ROOT_DIR/scripts/print-runtime-build-id.mjs" "$ROOT_DIR")"
 
@@ -52,7 +63,7 @@ python3 -m pip download \
   --dest "$WHEEL_CACHE" \
   "lxml==6.1.0"
 
-/usr/bin/ditto "$ROOT_DIR/native-helper" "$STAGE/native-helper"
+copy_tree "$ROOT_DIR/native-helper" "$STAGE/native-helper"
 cat > "$STAGE/native-helper/runtime-compat.json" <<EOF
 {
   "version": 2,
@@ -65,10 +76,10 @@ cat > "$STAGE/native-helper/runtime-compat.json" <<EOF
 }
 EOF
 
-/usr/bin/ditto "$ROOT_DIR/extension" "$STAGE/extension"
+copy_tree "$ROOT_DIR/extension" "$STAGE/extension"
 cp "$STAGE/native-helper/runtime-compat.json" "$STAGE/extension/runtime-compat.json"
-/usr/bin/ditto "$ROOT_DIR/skills" "$STAGE/skills"
-/usr/bin/ditto "$ROOT_DIR/plugins" "$STAGE/plugins"
+copy_tree "$ROOT_DIR/skills" "$STAGE/skills"
+copy_tree "$ROOT_DIR/plugins" "$STAGE/plugins"
 cp "$ROOT_DIR/scripts/install-local-runtime.mjs" "$STAGE/scripts/install-local-runtime.mjs"
 cp "$ROOT_DIR/scripts/runtime-fingerprint.mjs" "$STAGE/scripts/runtime-fingerprint.mjs"
 cp "$ROOT_DIR/scripts/print-runtime-build-id.mjs" "$STAGE/scripts/print-runtime-build-id.mjs"

@@ -1,6 +1,7 @@
 ﻿param(
   [switch]$Agent,
-  [string]$InstallRoot = ""
+  [string]$InstallRoot = "",
+  [switch]$PreflightOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -9,44 +10,118 @@ $ErrorActionPreference = "Stop"
 $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
 $RootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$DefaultInstallRoot = Join-Path $env:LOCALAPPDATA "TianyuanWorkbench"
+$UpdateMode = $env:TIANYUAN_UPDATE_MODE -eq "1"
+$RuntimeLayout = [string]$env:TIANYUAN_RUNTIME_LAYOUT
+$RootSetupError = ""
+$EarlyVersionText = ""
+try { $EarlyVersionText = Get-Content -LiteralPath (Join-Path $RootDir "VERSION.txt") -Raw -Encoding UTF8 } catch {}
+if ($EarlyVersionText -match '(?m)^package_type=lite-update\r?$') { $UpdateMode = $true }
 if (-not $InstallRoot -and $env:TIANYUAN_INSTALL_ROOT) {
   $InstallRoot = [string]$env:TIANYUAN_INSTALL_ROOT
 }
-if (-not $InstallRoot -and -not ($Agent.IsPresent -or $env:TIANYUAN_AGENT_MODE -eq "1")) {
-  Write-Host "安装根目录（扩展、组件都将安装在此目录下；直接回车 = 默认 %LOCALAPPDATA%\TianyuanWorkbench）"
+if (-not $RuntimeLayout -and -not $UpdateMode) {
+  $RuntimeLayout = "visible-root-v1"
+}
+if (-not $InstallRoot -and $UpdateMode) {
+  $DefaultLegacyRoot = Join-Path $env:LOCALAPPDATA "TianyuanWorkbench"
+  $ConfigCandidates = @(
+    (Join-Path $DefaultLegacyRoot "workbench-runtime\native-helper\runtime-config.json"),
+    (Join-Path $DefaultLegacyRoot "native-helper\runtime-config.json")
+  ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+  $ConfiguredRoots = @()
+  foreach ($ConfigCandidate in $ConfigCandidates) {
+    try {
+      $Config = Get-Content -LiteralPath $ConfigCandidate -Raw -Encoding UTF8 | ConvertFrom-Json
+      $ConfigRoot = [string]$Config.installRoot
+      $ConfigLayout = [string]$Config.layout
+      if (-not $ConfigRoot) {
+        $HelperRoot = Split-Path -Parent $ConfigCandidate
+        if ($ConfigCandidate -match '(?i)[\\/]workbench-runtime[\\/]native-helper[\\/]runtime-config\.json$') {
+          $ConfigRoot = Split-Path -Parent (Split-Path -Parent $HelperRoot)
+          $ConfigLayout = "visible-root-v1"
+        } else {
+          $ConfigRoot = Split-Path -Parent $HelperRoot
+          $ConfigLayout = "legacy-hidden"
+        }
+      }
+      $ConfiguredRoots += [ordered]@{ root = [IO.Path]::GetFullPath($ConfigRoot); layout = $(if ($ConfigLayout) { $ConfigLayout } else { "legacy-hidden" }) }
+    }
+    catch {
+      $RootSetupError = "INSTALL_ROOT_CONFIG_INVALID: 已发现旧运行配置但无法安全读取，不会改写默认目录。"
+    }
+  }
+  $DistinctConfiguredRoots = @($ConfiguredRoots | ForEach-Object { "$($_.root)|$($_.layout)" } | Select-Object -Unique)
+  if ($DistinctConfiguredRoots.Count -eq 1) {
+    $InstallRoot = [string]$ConfiguredRoots[0].root
+    $RuntimeLayout = [string]$ConfiguredRoots[0].layout
+  } elseif ($DistinctConfiguredRoots.Count -gt 1) {
+    $RootSetupError = "INSTALL_ROOT_AMBIGUOUS: 找到多个工作台运行目录，请从当前工作台触发更新或显式指定安装目录。"
+  } elseif (-not $RootSetupError) {
+    $RootSetupError = "LITE_INSTALL_ROOT_UNKNOWN: 轻量更新无法确认当前已安装目录，请从已安装工作台触发更新或使用完整安装包。"
+  }
+}
+if (-not $InstallRoot -and -not $UpdateMode -and -not ($Agent.IsPresent -or $env:TIANYUAN_AGENT_MODE -eq "1")) {
+  Write-Host "安装根目录（默认使用当前完整安装包所在目录；扩展将保留在该目录的 extension 文件夹）"
   $InputRoot = Read-Host "安装根目录"
   $InputRoot = $InputRoot.Trim('"', ' ')
   if ($InputRoot) { $InstallRoot = $InputRoot }
 }
 if (-not $InstallRoot) {
-  $InstallRoot = $DefaultInstallRoot
+  if (-not $UpdateMode) {
+    $InstallRoot = $RootDir
+    $RuntimeLayout = "visible-root-v1"
+  }
 }
 try {
-  $InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
-  New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
-  $InstallRootProbe = Join-Path $InstallRoot ".tianyuan-write-test"
-  Set-Content -LiteralPath $InstallRootProbe -Value "ok" -Encoding ASCII
-  Remove-Item -LiteralPath $InstallRootProbe -Force
+  if ($InstallRoot) {
+    $InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
+    New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
+    $InstallRootProbe = Join-Path $InstallRoot (".tianyuan-write-test-" + [Guid]::NewGuid().ToString("N"))
+    Set-Content -LiteralPath $InstallRootProbe -Value "ok" -Encoding ASCII
+    Remove-Item -LiteralPath $InstallRootProbe -Force
+  }
 }
 catch {
-  Write-Warning "安装根目录不可用（$($_.Exception.Message)），回退默认目录：$DefaultInstallRoot"
-  $InstallRoot = $DefaultInstallRoot
+  $RootSetupError = "INSTALL_ROOT_UNAVAILABLE: 指定安装目录不可用，不会改写默认安装：$InstallRoot"
 }
-$ExtensionDir = Join-Path $InstallRoot "projects\天源评估系统\extension"
-$NativeHelperDir = Join-Path $InstallRoot "native-helper"
-$NativeHostExe = Join-Path $NativeHelperDir "native_host.exe"
-$PythonDir = Join-Path $InstallRoot "python"
-$BundledPythonExe = Join-Path $PythonDir "python.exe"
+if ($UpdateMode -and $InstallRoot -and -not $RuntimeLayout) {
+  if (Test-Path -LiteralPath (Join-Path $InstallRoot "workbench-runtime\native-helper\runtime-config.json") -PathType Leaf) {
+    $RuntimeLayout = "visible-root-v1"
+  } elseif (Test-Path -LiteralPath (Join-Path $InstallRoot "native-helper\runtime-config.json") -PathType Leaf) {
+    $RuntimeLayout = "legacy-hidden"
+  } else {
+    # A fresh directory will fail the managed-runtime precheck before deployment.
+    $RuntimeLayout = "visible-root-v1"
+  }
+}
+$IsVisibleLayout = $RuntimeLayout -eq "visible-root-v1"
 $BundledNodeExe = Join-Path $RootDir "runtime\node\node.exe"
-$ExistingManagedNodeExe = Join-Path $NativeHelperDir "node\node.exe"
+if ($InstallRoot) {
+  $RuntimeRoot = if ($IsVisibleLayout) { Join-Path $InstallRoot "workbench-runtime" } else { $InstallRoot }
+  $ExtensionDir = if ($IsVisibleLayout) { Join-Path $InstallRoot "extension" } else { Join-Path $InstallRoot "projects\天源评估系统\extension" }
+  $NativeHelperDir = Join-Path $RuntimeRoot "native-helper"
+  $NativeHostExe = Join-Path $NativeHelperDir "native_host.exe"
+  $PythonDir = Join-Path $RuntimeRoot "python"
+  $BundledPythonExe = Join-Path $PythonDir "python.exe"
+  $ExistingManagedNodeExe = Join-Path $NativeHelperDir "node\node.exe"
+  $PrintSkillsDir = Join-Path $RuntimeRoot "print-format-skills"
+  $ManifestPath = Join-Path $NativeHelperDir "com.tianyuan.workbench.helper.json"
+  $RuntimeConfigPath = Join-Path $NativeHelperDir "runtime-config.json"
+} else {
+  $RuntimeRoot = ""
+  $ExtensionDir = ""
+  $NativeHelperDir = ""
+  $NativeHostExe = ""
+  $PythonDir = ""
+  $BundledPythonExe = ""
+  $ExistingManagedNodeExe = ""
+  $PrintSkillsDir = ""
+  $ManifestPath = ""
+  $RuntimeConfigPath = ""
+}
 $PythonExe = $null
-$PrintSkillsDir = Join-Path $InstallRoot "print-format-skills"
-$ManifestPath = Join-Path $NativeHelperDir "com.tianyuan.workbench.helper.json"
-$RuntimeConfigPath = Join-Path $NativeHelperDir "runtime-config.json"
 $ChromeRegistryPath = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.tianyuan.workbench.helper"
 $EdgeRegistryPath = "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.tianyuan.workbench.helper"
-$TycpvInstaller = Join-Path $RootDir "runtime\tycpv-setup-0.1.0-win-x64.exe"
 $PythonSource = Join-Path $RootDir "runtime\python-portable"
 $WheelDir = Join-Path $RootDir "runtime\python-wheels"
 $ExtensionId = "lkflndcnklpeaejohaacoaolnmhgigoc"
@@ -58,9 +133,9 @@ $ExtensionBackupPath = $null
 $NativeHelperBackupPath = $null
 $PackageVersion = "未知"
 $PackageBuildNumber = "未知"
-$UpdateMode = $env:TIANYUAN_UPDATE_MODE -eq "1"
 $UpdateStatusPath = [string]$env:TIANYUAN_UPDATE_STATUS_PATH
 $AgentMode = $Agent.IsPresent -or $env:TIANYUAN_AGENT_MODE -eq "1"
+$PreflightOnly = $PreflightOnly.IsPresent -or $env:TIANYUAN_PREFLIGHT_ONLY -eq "1"
 $Warnings = New-Object System.Collections.Generic.List[string]
 $ManualActions = New-Object System.Collections.Generic.List[string]
 $StoppedProcessIds = New-Object System.Collections.Generic.List[int]
@@ -108,6 +183,7 @@ function Write-Step([string]$Message) {
 
 function Protect-Message([string]$Message) {
   return $Message `
+    -replace '(?i)((?:cookie|authorization|password|passwd|密码|验证码)\s*[=:]\s*)[^\r\n]+', '$1[REDACTED]' `
     -replace '(?i)(bearer\s+)[^\s"'']+', '$1[REDACTED]' `
     -replace '(?i)zhmcp_[A-Za-z0-9._-]+', '[REDACTED]' `
     -replace '(?i)(token\s*[=:]\s*)[^\s"'']+', '$1[REDACTED]'
@@ -318,9 +394,42 @@ function Test-PackageFile([string]$RelativePath) {
   if (-not (Test-Path -LiteralPath $Target)) {
     throw "安装包缺少文件：$Normalized"
   }
-  $Actual = (Get-FileHash -LiteralPath $Target -Algorithm SHA256).Hash.ToLowerInvariant()
+  # .NET hashing also works in Windows PowerShell 5.1 with a mixed PSModulePath.
+  $Stream = [IO.File]::OpenRead($Target)
+  $Sha = [Security.Cryptography.SHA256]::Create()
+  try { $Actual = ([BitConverter]::ToString($Sha.ComputeHash($Stream))).Replace("-", "").ToLowerInvariant() }
+  finally { $Sha.Dispose(); $Stream.Dispose() }
   if ($Actual -ne $Index[$Normalized]) {
     throw "文件校验失败：$Normalized"
+  }
+}
+
+function Test-RuntimeCompatibilityMetadata([string]$VersionText, $PackageVersionConfig) {
+  $ChecksumIndex = Get-PackageChecksumIndex
+  $RuntimeIdMatch = [regex]::Match($VersionText, '(?m)^runtime_build_id=([0-9a-fA-F]{64})\r?$')
+  if (-not $RuntimeIdMatch.Success) {
+    throw "运行时兼容信息不匹配：VERSION.txt 缺少 runtime_build_id。"
+  }
+  $ExpectedRuntimeBuildId = $RuntimeIdMatch.Groups[1].Value.ToLowerInvariant()
+  foreach ($RelativePath in @("extension/runtime-compat.json", "native-helper/runtime-compat.json")) {
+    if (-not $ChecksumIndex.ContainsKey($RelativePath)) {
+      throw "校验清单缺少文件：$RelativePath"
+    }
+    $Target = Join-Path $RootDir $RelativePath.Replace("/", [IO.Path]::DirectorySeparatorChar)
+    if (-not (Test-Path -LiteralPath $Target -PathType Leaf)) {
+      throw "安装包缺少运行时兼容信息：$RelativePath"
+    }
+    try {
+      $Compatibility = Get-Content -LiteralPath $Target -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+      throw "运行时兼容信息格式无效：$RelativePath"
+    }
+    if ([int]$Compatibility.version -ne 2 -or
+        [string]$Compatibility.extensionVersion -ne [string]$PackageVersionConfig.chromeVersion -or
+        [string]$Compatibility.bridgeProtocol -ne [string]$PackageVersionConfig.bridgeProtocol -or
+        [string]$Compatibility.runtimeBuildId -ne $ExpectedRuntimeBuildId) {
+      throw "运行时兼容信息与安装包不匹配：$RelativePath"
+    }
   }
 }
 
@@ -332,6 +441,9 @@ function Test-PackagePrefix([string]$Prefix) {
     throw "校验清单中没有找到：$NormalizedPrefix"
   }
   foreach ($RelativePath in $Matches) {
+    if ($RelativePath -in @("extension/runtime-compat.json", "native-helper/runtime-compat.json")) {
+      continue
+    }
     Test-PackageFile $RelativePath
   }
 }
@@ -580,7 +692,7 @@ function Get-PythonCandidates {
 
 function Find-CompatiblePython {
   foreach ($Candidate in (Get-PythonCandidates)) {
-    if (-not (Test-Path -LiteralPath $Candidate)) {
+    if (-not (Test-Path -LiteralPath $Candidate) -or $Candidate -match '(?i)\\Microsoft\\WindowsApps\\python(?:3)?\.exe$') {
       continue
     }
     # Windows PowerShell 5.1: Select-Object -First 1 stops the pipeline early and
@@ -592,9 +704,9 @@ function Find-CompatiblePython {
       continue
     }
 
-    $OpenpyxlOutput = (& $Candidate -c "import docx, et_xmlfile, lxml, openpyxl, typing_extensions; v=tuple(int(x) for x in openpyxl.__version__.split('.')[:3]); print(openpyxl.__version__); raise SystemExit(0 if v >= (3, 1, 5) else 1)" 2>$null)
-    $OpenpyxlVersion = @($OpenpyxlOutput | Select-Object -First 1)[0]
-    $HasPrintDependencies = $LASTEXITCODE -eq 0
+    $DependencyProbe = Test-PythonDependencies $Candidate
+    $HasPrintDependencies = $DependencyProbe.ok
+    $OpenpyxlVersion = $DependencyProbe.openpyxlVersion
 
     # PS 5.1 + ErrorActionPreference=Stop: native stderr under redirection becomes
     # a terminating error (e.g. "No module named pip"), so degrade to a soft
@@ -632,12 +744,53 @@ function Install-PrintDependencies([string]$Candidate) {
     "et_xmlfile==2.0.0" `
     "python-docx==1.2.0" `
     "lxml==6.1.0" `
-    "typing_extensions==4.16.0" | Out-Host
+    "typing_extensions==4.16.0" `
+    "requests" "urllib3" "certifi" "charset_normalizer" "idna" | Out-Host
   if ($LASTEXITCODE -ne 0) {
     return $false
   }
-  & $Candidate -c "import docx, et_xmlfile, lxml, openpyxl, typing_extensions; raise SystemExit(0 if tuple(int(x) for x in openpyxl.__version__.split('.')[:3]) >= (3, 1, 5) else 1)" *> $null
-  return $LASTEXITCODE -eq 0
+  return (Test-PythonDependencies $Candidate).ok
+}
+
+function Test-PythonDependencies([string]$Candidate) {
+  # Never pass native stderr through a PowerShell 5.1 pipeline: missing modules
+  # can become terminating NativeCommandError before the installer can repair.
+  $Code = @'
+import importlib,json,sys
+missing=[]
+modules=['requests','urllib3','certifi','charset_normalizer','idna','openpyxl','et_xmlfile','lxml','docx','typing_extensions']
+for name in modules:
+    try: importlib.import_module(name)
+    except Exception: missing.append(name)
+version=getattr(sys.modules.get('openpyxl'),'__version__','0')
+if tuple(int(x) for x in version.split('.')[:3]) < (3,1,5): missing.append('openpyxl>=3.1.5')
+print(json.dumps(dict(ok=not missing,missing=missing,openpyxlVersion=version)))
+'@
+  $Info = New-Object Diagnostics.ProcessStartInfo
+  $Info.FileName = $Candidate
+  $EncodedCode = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Code))
+  $Info.Arguments = '-c "import base64;exec(base64.b64decode(''' + $EncodedCode + '''))"'
+  $Info.UseShellExecute = $false
+  $Info.CreateNoWindow = $true
+  $Info.RedirectStandardOutput = $true
+  $Info.RedirectStandardError = $true
+  $Info.EnvironmentVariables["PYTHONUTF8"] = "1"
+  $Info.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8"
+  $Process = New-Object Diagnostics.Process
+  $Process.StartInfo = $Info
+  try {
+    if (-not $Process.Start()) { throw "PYTHON_PROBE_START_FAILED" }
+    $Stdout = $Process.StandardOutput.ReadToEndAsync()
+    $Stderr = $Process.StandardError.ReadToEndAsync()
+    if (-not $Process.WaitForExit(15000)) {
+      & taskkill.exe /PID $Process.Id /T /F *> $null
+      throw "PYTHON_PROBE_TIMEOUT"
+    }
+    if ($Process.ExitCode -ne 0) { throw "PYTHON_PROBE_FAILED" }
+    return ($Stdout.Result | ConvertFrom-Json)
+  } catch {
+    return [PSCustomObject]@{ ok = $false; missing = @("PYTHON_PROBE_FAILED"); openpyxlVersion = "" }
+  } finally { $Process.Dispose() }
 }
 
 function Resolve-NodeForInstall {
@@ -682,6 +835,7 @@ function Find-Browser {
 }
 
 try {
+  if ($RootSetupError) { throw $RootSetupError }
   if (-not [Environment]::Is64BitOperatingSystem) {
     throw "此安装包只支持 64 位 Windows。"
   }
@@ -700,6 +854,12 @@ try {
 
   Write-Step "1/7 校验核心文件"
   Test-PackageFile "VERSION.txt"
+  $VersionText = Get-Content -LiteralPath (Join-Path $RootDir "VERSION.txt") -Raw -Encoding UTF8
+  $IsLitePackage = $VersionText -match '(?m)^package_type=lite-update\r?$'
+  if ($IsLitePackage) { $UpdateMode = $true }
+  Test-PackageFile "extension/version.json"
+  $PackageVersionConfig = Get-Content -LiteralPath (Join-Path $RootDir "extension\version.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+  Test-RuntimeCompatibilityMetadata $VersionText $PackageVersionConfig
   Test-PackagePrefix "extension/"
   Test-PackagePrefix "native-helper/"
   Test-PackagePrefix "skills/"
@@ -708,46 +868,45 @@ try {
     Test-PackagePrefix "runtime/node/"
   }
   Test-PackageFile "scripts/install-local-runtime.mjs"
-  $PackageVersionConfig = Get-Content -LiteralPath (Join-Path $RootDir "extension\version.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+  Test-PackageFile "scripts/runtime-fingerprint.mjs"
+  Test-PackageFile "scripts/print-runtime-build-id.mjs"
   $PackageVersion = [string]$PackageVersionConfig.productVersion
   $PackageBuildNumber = [string]$PackageVersionConfig.buildNumber
+  if ($IsLitePackage) {
+    # Check the managed environment before pip, service stops, registry writes
+    # or runtime replacement. PATH cannot disguise a fresh PC.
+    foreach ($RequiredRuntime in @($ExistingManagedNodeExe, $BundledPythonExe, $NativeHostExe)) {
+      if (-not (Test-Path -LiteralPath $RequiredRuntime -PathType Leaf)) {
+        throw "LITE_REQUIRES_FULL_INSTALL: 缺少已安装的完整运行环境，请使用同版本 Windows 完整包。"
+      }
+    }
+    $LiteProbe = Test-PythonDependencies $BundledPythonExe
+    if (-not $LiteProbe.ok) { throw ("PYTHON_RUNTIME_DEPENDENCIES_INCOMPLETE: " + ($LiteProbe.missing -join ", ")) }
+  } else {
+    Test-PackageFile "native-helper/native_host.exe"
+    Test-PackagePrefix "runtime/node/"
+    Test-PackagePrefix "runtime/python-portable/"
+    Test-PackagePrefix "runtime/python-wheels/"
+    $BundleProbe = Test-PythonDependencies (Join-Path $PythonSource "python.exe")
+    if (-not $BundleProbe.ok) { throw ("PYTHON_RUNTIME_DEPENDENCIES_INCOMPLETE: " + ($BundleProbe.missing -join ", ")) }
+  }
+  if ($PreflightOnly) {
+    [ordered]@{ status = "validated"; installed = $false; version = $PackageVersion; buildNumber = $PackageBuildNumber; packageType = $(if ($IsLitePackage) { "lite-update" } else { "full-install" }); pythonDependencies = "ok" } |
+      ConvertTo-Json | Set-Content -LiteralPath (Join-Path $InstallRoot "预检结果.json") -Encoding UTF8
+    Write-Host "安装预检通过；没有安装、停止服务或写入 Native Messaging 注册。"
+    exit 0
+  }
   Write-Host "核心文件校验通过。备用依赖将在实际使用前校验。"
 
-  Write-Step "2/7 安装或检查天源 CLI"
+  Write-Step "2/7 检查可选天源 CLI"
   $UsedBundledCli = $false
   $TycpvStatus = "可用"
   $TycpvRepairMessage = ""
   $TycpvInfo = Find-Tycpv
   if (-not $TycpvInfo) {
-    Write-Warning "未检测到可运行的天源 CLI，尝试使用包内安装程序修复；CLI 修复失败不会阻断工作台其他组件更新。"
-    try {
-      Test-PackageFile "runtime/tycpv-setup-0.1.0-win-x64.exe"
-      if (-not (Test-Path -LiteralPath $TycpvInstaller)) {
-        throw "缺少 Windows 版天源 CLI 安装程序。"
-      }
-      $Process = Start-Process -FilePath $TycpvInstaller -ArgumentList @(
-        "/VERYSILENT",
-        "/SUPPRESSMSGBOXES",
-        "/NORESTART",
-        "/SP-"
-      ) -Wait -PassThru
-      if ($Process.ExitCode -notin @(0, 3010)) {
-        throw "天源 CLI 安装失败，退出码：$($Process.ExitCode)"
-      }
-      $UsedBundledCli = $true
-      $TycpvInfo = Find-Tycpv
-      if (-not $TycpvInfo) {
-        throw "安装程序执行后仍未找到可运行的 tycpv.exe 或 tycpv.cmd。"
-      }
-    }
-    catch {
-      $TycpvRepairMessage = Protect-Message $_.Exception.Message
-    }
-    if (-not $TycpvRepairMessage -and $TycpvProbeFailure) {
-      $TycpvRepairMessage = Protect-Message $TycpvProbeFailure
-    }
+    $TycpvRepairMessage = "天源 CLI 未安装或无法运行。请从天源官方渠道单独安装或修复后重新检查；无需先做登录授权。CLI 只影响 CLI 相关导出。"
   } else {
-    Write-Host "检测到可运行的天源 CLI，跳过安装。"
+    Write-Host "检测到可运行的天源 CLI；该可选组件由用户单独维护。"
   }
   if ($TycpvInfo) {
     $TycpvExe = [string]$TycpvInfo.Path
@@ -756,16 +915,20 @@ try {
   } else {
     $TycpvExe = $null
     $TycpvVersion = "不可用"
-    $TycpvStatus = "待修复（未阻断工作台组件安装）"
-    $Warnings.Add("天源 CLI 未通过 --help 探测；工作台组件继续安装，CLI 导出能力需后续修复。")
-    Write-Warning "天源 CLI 当前不可用：$TycpvRepairMessage"
-    Write-Warning "将继续更新浏览器扩展、Native Helper、Connector 和打印组件；仅 CLI 导出功能暂不可用。"
+    $TycpvStatus = "未安装/不可用（可选组件）"
+    $Warnings.Add("天源 CLI 当前不可用；CLI 相关导出暂不可用，工作台其他核心组件继续安装。")
+    Write-Warning $TycpvRepairMessage
   }
 
   Write-Step "3/7 检查已有 Python"
   $UsedBundledPython = $false
   $InstalledPrintDependencies = $false
   $PythonInfo = Find-CompatiblePython
+  # Complete Windows installs must not depend on the extracted ZIP, a PATH
+  # interpreter or a user-wide pip library disappearing later.
+  if ($PythonInfo -and -not ([IO.Path]::GetFullPath($PythonInfo.Path).Equals([IO.Path]::GetFullPath($BundledPythonExe), [StringComparison]::OrdinalIgnoreCase))) {
+    $PythonInfo = $null
+  }
   if ($PythonInfo) {
     $PythonExe = $PythonInfo.Path
     Write-Host "检测到 Python $($PythonInfo.Version)：$PythonExe"
@@ -806,10 +969,8 @@ try {
     Write-Host "已启用工作台便携 Python。"
   }
 
-  & $PythonExe -c "import sys, docx, lxml, openpyxl, et_xmlfile, typing_extensions; print('Python', sys.version.split()[0], '| openpyxl', openpyxl.__version__)"
-  if ($LASTEXITCODE -ne 0) {
-    throw "最终 Python 环境或表格设置依赖无法运行。"
-  }
+  $FinalDependencyProbe = Test-PythonDependencies $PythonExe
+  if (-not $FinalDependencyProbe.ok) { throw ("PYTHON_RUNTIME_DEPENDENCIES_INCOMPLETE: " + ($FinalDependencyProbe.missing -join ", ")) }
 
   Write-UpdateStatus "stopping_services" 76 "正在停止工作台服务"
   Stop-ExistingConnector
@@ -826,9 +987,11 @@ try {
     Remove-Item Env:TYCPV_BIN -ErrorAction SilentlyContinue
   }
   $env:TIANYUAN_UPDATE_DEFER_COMPLETE = "1"
-  $env:TIANYUAN_PROJECT_RUNTIME_ROOT = Join-Path $InstallRoot "projects\天源评估系统"
-  $env:TIANYUAN_NATIVE_RUNTIME_ROOT = Join-Path $InstallRoot "native-helper"
-  $env:TIANYUAN_PRINT_SKILLS_ROOT = Join-Path $InstallRoot "print-format-skills"
+  $env:TIANYUAN_INSTALL_ROOT = $InstallRoot
+  $env:TIANYUAN_RUNTIME_LAYOUT = $RuntimeLayout
+  $env:TIANYUAN_PROJECT_RUNTIME_ROOT = $(if ($IsVisibleLayout) { $InstallRoot } else { Join-Path $InstallRoot "projects\天源评估系统" })
+  $env:TIANYUAN_NATIVE_RUNTIME_ROOT = $NativeHelperDir
+  $env:TIANYUAN_PRINT_SKILLS_ROOT = $PrintSkillsDir
   $InstallJson = (& $NodeForInstall (Join-Path $RootDir "scripts\install-local-runtime.mjs") 2>&1 | Out-String).Trim()
   if ($LASTEXITCODE -ne 0) {
     try {
@@ -898,21 +1061,19 @@ try {
   Write-Step "7/7 执行环境检查"
   $ExtensionContract = $InstallResult.runtimeCompatibility
   $OpenpyxlVersion = (& $PythonExe -c "import openpyxl; print(openpyxl.__version__)").Trim()
-  $PythonDependencyStatus = (& $PythonExe -c "import openpyxl, et_xmlfile, lxml, docx, typing_extensions; print('ok')").Trim()
-  if ($PythonDependencyStatus -ne "ok") {
+  $PythonDependencyStatus = (Test-PythonDependencies $PythonExe).ok
+  if (-not $PythonDependencyStatus) {
     throw "PYTHON_RUNTIME_DEPENDENCIES_INCOMPLETE"
   }
   $SelfTestJson = $InstallResult.selfTest | ConvertTo-Json -Depth 8 -Compress
   $ConnectorJson = $InstallResult.connector | ConvertTo-Json -Depth 8 -Compress
 
-  $InstallMode = if (-not $TycpvExe) {
-    "工作台组件安装完成（天源 CLI 待修复）"
-  } elseif (-not $UsedBundledCli -and -not $UsedBundledPython -and -not $InstalledPrintDependencies) {
-    "快速安装（复用已有 CLI、Python 和打印依赖）"
-  } elseif (-not $UsedBundledCli -and -not $UsedBundledPython) {
-    "快速安装（复用已有 CLI 和 Python，补充打印依赖）"
+  $InstallMode = if ($UsedBundledPython) {
+    "完整安装（使用包内 Python 运行时）"
+  } elseif ($InstalledPrintDependencies) {
+    "快速安装（复用已有 Python，补充打印依赖）"
   } else {
-    "完整安装（使用包内缺失依赖）"
+    "快速安装（复用已有 Python 和打印依赖）"
   }
   $ElapsedSeconds = [Math]::Round(((Get-Date) - $StartedAt).TotalSeconds, 1)
   $ReportPath = Join-Path $InstallRoot "安装检查结果.txt"
@@ -920,16 +1081,34 @@ try {
   $ChromeNativeMessagingOk = [bool]((Get-ItemProperty -Path $ChromeRegistryPath -Name "(default)" -ErrorAction SilentlyContinue).'(default)' -eq $ManifestPath)
   $EdgeNativeMessagingOk = [bool]((Get-ItemProperty -Path $EdgeRegistryPath -Name "(default)" -ErrorAction SilentlyContinue).'(default)' -eq $ManifestPath)
   if ($BrowserExe) {
-    $ManualActions.Add("通过桌面“天源工作台-浏览器扩展”入口，在 Chrome 或 Edge 扩展管理页加载：$ExtensionDir")
+    $ManualActions.Add("通过桌面「天源工作台-浏览器扩展」入口，在 Chrome 或 Edge 扩展管理页加载：$ExtensionDir")
   }
   $ManualActions.Add("由用户本人在工作台面板输入 MCP token（不发送给 Agent）")
-  $ManualActions.Add("由用户本人完成天源 CLI 授权（如面板显示需要授权）")
+  if ($TycpvExe) {
+    $ManualActions.Add("由用户本人完成天源 CLI 授权（如面板显示需要授权）")
+  } else {
+    $ManualActions.Add("CLI 为可选组件；如需 CLI 相关导出，请从天源官方渠道单独安装或修复 CLI，再重新检查")
+  }
   $ConnectorHealth = if ($InstallResult.connector.connector) { $InstallResult.connector.connector } else { [ordered]@{} }
   $ConnectorOk = [bool]($InstallResult.connector.ok -and $ConnectorHealth.ok)
-  $InstallModeCode = if ($UpdateMode) { "upgrade" } elseif ($UsedBundledCli -or $UsedBundledPython) { "full" } else { "quick" }
+  $InstallModeCode = if ($UpdateMode) { "upgrade" } elseif ($UsedBundledPython) { "full" } else { "quick" }
+  $AllComponentsReady = [bool]($ConnectorOk -and
+    $ChromeNativeMessagingOk -and
+    $EdgeNativeMessagingOk -and
+    (Test-Path -LiteralPath $ExtensionDir -PathType Container) -and
+    (Test-Path -LiteralPath $NativeHostExe -PathType Leaf) -and
+    (Test-Path -LiteralPath $ManagedNodeExe -PathType Leaf) -and
+    (Test-Path -LiteralPath $InstallResult.codexConnectorCachePath -PathType Container) -and
+    ($InstallResult.selfTest.ok -eq $true) -and
+    $FinalDependencyProbe.ok)
+  if (-not $AllComponentsReady) {
+    throw "REQUIRED_COMPONENT_VALIDATION_FAILED: 核心扩展、Native Host、Node、Python、Connector、浏览器注册或 Codex 插件缓存核验未通过。"
+  }
   $JsonReport = [ordered]@{
     product = "天源浏览器工作台"
     status = "success"
+    allComponentsReady = $AllComponentsReady
+    readinessScope = "required-components-only"
     installation = [ordered]@{ status = "success"; mode = $InstallModeCode }
     version = $PackageVersion
     buildNumber = $PackageBuildNumber
@@ -944,6 +1123,7 @@ try {
       connector = [string]$InstallResult.connectorPath
       codexConnectorCache = [string]$InstallResult.codexConnectorCachePath
       python = [string]$PythonExe
+      node = [string]$ManagedNodeExe
       cli = [string]$TycpvExe
       extensionShortcut = $VisibleExtensionShortcut
       extensionPathNote = $VisibleExtensionPathNote
@@ -957,7 +1137,12 @@ try {
       python = "ok"
       openpyxl = "ok"
       pythonDependencies = "ok"
+      node = if (Test-Path -LiteralPath $ManagedNodeExe) { "ok" } else { "failed" }
+      codexPluginCache = if (Test-Path -LiteralPath $InstallResult.codexConnectorCachePath) { "ok" } else { "failed" }
       cli = if ($TycpvExe) { "ok" } else { "unavailable" }
+    }
+    optionalDependencies = [ordered]@{
+      cli = [ordered]@{ required = $false; status = if ($TycpvExe) { "available" } else { "unavailable" }; path = $TycpvExe; message = $TycpvRepairMessage }
     }
     connectorHealth = [ordered]@{
       ok = $ConnectorOk
@@ -999,7 +1184,7 @@ try {
     "Codex Connector 缓存：$($InstallResult.codexConnectorCachePath)"
     "安全：安装程序未写入 MCP token、Cookie、Authorization、密码或验证码。"
   ) | Set-Content -LiteralPath $ReportPath -Encoding UTF8
-  $JsonReport | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $JsonReportPath -Encoding UTF8
+  [IO.File]::WriteAllText($JsonReportPath, ($JsonReport | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
 
   if ($ExtensionBackupPath) {
     Remove-Item -LiteralPath $ExtensionBackupPath -Recurse -Force -ErrorAction SilentlyContinue
@@ -1009,7 +1194,9 @@ try {
   }
 
   Write-Host ""
-  Write-Host "安装完成。" -ForegroundColor Green
+  if ($AllComponentsReady) { Write-Host "工作台核心组件安装完成。" -ForegroundColor Green }
+  else { Write-Warning "核心组件已安装，但存在未通过项目；请查看报告，不能视为完整安装通过。" }
+  if (-not $TycpvExe) { Write-Warning $TycpvRepairMessage }
   Write-Host "安装模式：$InstallMode"
   Write-Host "耗时：$ElapsedSeconds 秒"
   Write-Host "扩展管理页应加载以下固定本机目录："
@@ -1018,12 +1205,7 @@ try {
   Write-Host "安装检查结果：$ReportPath"
   Write-Host "机器可读安装结果：$JsonReportPath"
 
-  if ($TycpvExe) {
-    Write-UpdateStatus "complete" 100 "全部组件更新完成，浏览器扩展可重新加载"
-  } else {
-    Write-Warning "工作台组件更新完成，但天源 CLI 仍需单独修复。"
-    Write-UpdateStatus "complete" 100 "工作台组件更新完成，天源 CLI 待修复"
-  }
+  Write-UpdateStatus "complete" 100 "工作台核心组件更新完成，浏览器扩展可重新加载"
   if (-not $AgentMode) {
     Set-Clipboard -Value $ExtensionDir
     Start-Process explorer.exe -ArgumentList ('"' + $ExtensionDir + '"')
@@ -1047,9 +1229,34 @@ catch {
       try { & $NativeHostExe --start-connector *> $null } catch {}
     }
   }
-  $ReportPath = Join-Path $InstallRoot "安装检查结果.txt"
-  $JsonReportPath = Join-Path $InstallRoot "安装检查结果.json"
-  New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
+  $ReportPath = ""
+  $JsonReportPath = ""
+  try {
+    if (-not $InstallRoot) { throw "INSTALL_ROOT_UNKNOWN" }
+    New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
+    if (-not (Test-Path -LiteralPath $InstallRoot -PathType Container)) { throw "REPORT_DIRECTORY_UNAVAILABLE" }
+    $ReportPath = Join-Path $InstallRoot "安装检查结果.txt"
+    $JsonReportPath = Join-Path $InstallRoot "安装检查结果.json"
+    $ReportProbe = Join-Path $InstallRoot (".tianyuan-report-probe-" + [Guid]::NewGuid().ToString("N"))
+    [IO.File]::WriteAllText($ReportProbe, "", [Text.UTF8Encoding]::new($false))
+    Remove-Item -LiteralPath $ReportProbe
+  }
+  catch {
+    # If the selected root is unavailable, only the failure report goes to a
+    # fresh temporary directory. Never silently install over the default root.
+    $FailureReportRoot = Join-Path ([IO.Path]::GetTempPath()) ("TW-install-failure-" + [Guid]::NewGuid().ToString("N").Substring(0,8))
+    New-Item -ItemType Directory -Path $FailureReportRoot | Out-Null
+    $ReportPath = Join-Path $FailureReportRoot "安装检查结果.txt"
+    $JsonReportPath = Join-Path $FailureReportRoot "安装检查结果.json"
+  }
+  $ExtensionExists = $false
+  $NativeHostExists = $false
+  $RuntimeConfigExists = $false
+  $ManifestExists = $false
+  if ($ExtensionDir) { $ExtensionExists = Test-Path -LiteralPath $ExtensionDir }
+  if ($NativeHostExe) { $NativeHostExists = Test-Path -LiteralPath $NativeHostExe }
+  if ($RuntimeConfigPath) { $RuntimeConfigExists = Test-Path -LiteralPath $RuntimeConfigPath }
+  if ($ManifestPath) { $ManifestExists = Test-Path -LiteralPath $ManifestPath }
   @(
     "天源浏览器工作台 Windows x64"
     "安装状态：失败"
@@ -1058,10 +1265,10 @@ catch {
     "错误：$(Protect-Message $OriginalError.Exception.Message)"
     "包内产品版本：$PackageVersion"
     "包内构建编号：$PackageBuildNumber"
-    "扩展目录存在：$(Test-Path -LiteralPath $ExtensionDir)"
-    "Native Host 存在：$(Test-Path -LiteralPath $NativeHostExe)"
-    "运行配置存在：$(Test-Path -LiteralPath $RuntimeConfigPath)"
-    "Native Messaging 清单存在：$(Test-Path -LiteralPath $ManifestPath)"
+    "扩展目录存在：$ExtensionExists"
+    "Native Host 存在：$NativeHostExists"
+    "运行配置存在：$RuntimeConfigExists"
+    "Native Messaging 清单存在：$ManifestExists"
     "安全：安装失败报告不记录 MCP token、Cookie、Authorization、密码或验证码。"
   ) | Set-Content -LiteralPath $ReportPath -Encoding UTF8
   $FailureExitCode = if ($CurrentStep -like "1/7*") { 20 } elseif ($CurrentStep -like "2/7*" -or $CurrentStep -like "3/7*") { 10 } elseif ($CurrentStep -like "5/7*") { 30 } elseif ($CurrentStep -like "6/7*" -or $CurrentStep -like "7/7*") { 40 } else { 50 }
@@ -1072,9 +1279,19 @@ catch {
     platform = "Windows-x64"
     installMode = if ($UpdateMode) { "upgrade" } else { "unknown" }
     status = "failed"
+    allComponentsReady = $false
+    readinessScope = "required-components-only"
     failedStep = $CurrentStep
     error = (Protect-Message $OriginalError.Exception.Message)
     paths = [ordered]@{ installRoot = $InstallRoot; extension = $ExtensionDir; nativeHelper = $NativeHelperDir }
+    optionalDependencies = [ordered]@{
+      cli = [ordered]@{
+        required = $false
+        status = if ($TycpvExe) { "available" } elseif ($TycpvRepairMessage) { "unavailable" } else { "not_checked" }
+        path = $TycpvExe
+        message = $TycpvRepairMessage
+      }
+    }
     warnings = @($Warnings)
     manualActions = @($ManualActions)
     security = [ordered]@{ credentialsReturned = $false; tokenUsed = $false; secretsWritten = $false }

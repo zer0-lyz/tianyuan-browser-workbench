@@ -23,6 +23,10 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
+# Embedded Python ignores PYTHONPATH and the script directory in _pth mode.
+# Always load the sibling scraper shipped with this runner, not an old copy.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
