@@ -1,11 +1,21 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { test } = require("node:test");
+
+if (process.env.TIANYUAN_TEST_PYTHON_BIN) {
+  process.env.TIANYUAN_PYTHON_BIN = process.env.TIANYUAN_TEST_PYTHON_BIN;
+} else if (!process.env.TIANYUAN_PYTHON_BIN && process.platform !== "win32") {
+  try {
+    process.env.TIANYUAN_PYTHON_BIN = execFileSync("python3", ["-c", "import sys; print(sys.executable)"], { encoding: "utf8" }).trim();
+  } catch {
+  }
+}
 
 const repoRoot = path.resolve(__dirname, "..");
 const helper = require(path.join(repoRoot, "native-helper/alibaba-auction.js"));

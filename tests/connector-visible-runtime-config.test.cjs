@@ -28,6 +28,7 @@ try {
   }));
 
   const script = `
+    Object.defineProperty(process, "platform", { value: "darwin" });
     const { createBridge } = require(${JSON.stringify(path.join(stagedHelper, "connector_bridge.js"))});
     process.stdout.write(JSON.stringify(createBridge().paths));
   `;
