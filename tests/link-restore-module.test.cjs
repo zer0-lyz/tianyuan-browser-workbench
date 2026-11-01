@@ -36,10 +36,10 @@ test("native host exposes run_link_restore wiring", () => {
   assert.match(source, /_链接恢复\$\{path\.extname\(tempInput\)\}/);
 });
 
-test("installers and local runtime copy asset-link-restore skill", () => {
+test("shared local runtime installer copies asset-link-restore skill", () => {
   const installSh = fs.readFileSync(path.join(repoRoot, "native-helper/install_native_host.sh"), "utf8");
-  assert.match(installSh, /asset-link-restore\/scripts/);
-  assert.match(installSh, /restore_links\.py/);
+  assert.match(installSh, /PACKAGE_INSTALLER/);
+  assert.match(installSh, /exec \/bin\/bash/);
   const runtime = fs.readFileSync(path.join(repoRoot, "scripts/install-local-runtime.mjs"), "utf8");
   assert.match(runtime, /"asset-link-restore"/);
 });

@@ -14,7 +14,7 @@ const runtimeConfigPath = path.join(stagedHelper, "runtime-config.json");
 
 try {
   fs.mkdirSync(stagedHelper, { recursive: true });
-  for (const name of ["connector_bridge.js", "codex_catalog.js", "directory-picker.js"]) {
+  for (const name of ["connector_bridge.js", "codex_catalog.js", "directory-picker.js", "report-pending.js", "report-snapshot.js", "report-structure-pending.js"]) {
     fs.copyFileSync(path.join(repoRoot, "native-helper", name), path.join(stagedHelper, name));
   }
   for (const name of ["index.js", "common.js", "windows.js", "macos.js", "unsupported.js"]) {

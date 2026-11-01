@@ -69,6 +69,9 @@ const NATIVE_RUNTIME_BACKUP_FILES = [
   "native_host_bootstrap.js",
   "cli-runtime.js",
   "connector_bridge.js",
+  "report-pending.js",
+  "report-snapshot.js",
+  "report-structure-pending.js",
   "codex_catalog.js",
   "process_launcher.js",
   "update_checker.js",
@@ -78,7 +81,9 @@ const NATIVE_RUNTIME_BACKUP_FILES = [
   "file-archive-conversations.js",
   "depreciation-capex-forecast.js",
   "alibaba-auction.js",
+  "alibaba-lease.js",
   "anjuke-property.js",
+  "land-publicity-http.js",
   "map-assets/leaflet.js",
   "map-assets/leaflet.css",
   "map-assets/leaflet.markercluster.js",
@@ -295,6 +300,54 @@ function copyDir(src, dest, requiredRelativePaths = []) {
         `COPY_DIRECTORY_REPLACE_FAILED: ${error.message}; fallback: ${fallbackError.message}`,
       );
     }
+  }
+}
+
+function copyConnectorPlugin(src, dest) {
+  mustExist(src, "connector plugin");
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  const staging = `${dest}.staging-${process.pid}-${randomBytes(5).toString("hex")}`;
+  copyTreeSync(src, staging);
+  validateDirectoryMirror(src, staging);
+  const relativeConfig = path.join("runtime", "agent-config.json");
+  if (fs.existsSync(path.join(staging, relativeConfig))) throw new Error("CONNECTOR_SOURCE_CONFIG_CONFLICT");
+  const backups = path.join(os.homedir(), ".tianyuan-workbench", "backups");
+  fs.mkdirSync(backups, { recursive: true, mode: 0o700 });
+  const container = fs.mkdtempSync(path.join(backups, "connector-plugin-"));
+  if (!isWindows) fs.chmodSync(container, 0o700);
+  const previous = path.join(container, "previous");
+  const failed = path.join(container, "failed-new");
+  let previousMoved = false;
+  let stagedMoved = false;
+  let configMoved = false;
+  try {
+    if (fs.existsSync(dest)) {
+      fs.renameSync(dest, previous);
+      previousMoved = true;
+    }
+    fs.renameSync(staging, dest);
+    stagedMoved = true;
+    const previousConfig = path.join(previous, relativeConfig);
+    let configStat = null;
+    if (previousMoved) {
+      try { configStat = fs.lstatSync(previousConfig); } catch (error) { if (error.code !== "ENOENT") throw error; }
+    }
+    if (configStat) {
+      if (!configStat.isFile()) throw new Error("CONNECTOR_CONFIG_UNSAFE");
+      const targetConfig = path.join(dest, relativeConfig);
+      fs.mkdirSync(path.dirname(targetConfig), { recursive: true });
+      fs.renameSync(previousConfig, targetConfig);
+      configMoved = true;
+    }
+  } catch (error) {
+    try {
+      if (configMoved) fs.renameSync(path.join(dest, relativeConfig), path.join(previous, relativeConfig));
+      if (stagedMoved) fs.renameSync(dest, failed);
+      if (previousMoved) fs.renameSync(previous, dest);
+    } catch (restoreError) {
+      throw new Error(`CONNECTOR_PLUGIN_RESTORE_FAILED: ${container}; ${restoreError.code || "unknown"}`);
+    }
+    throw new Error(`CONNECTOR_PLUGIN_REPLACE_FAILED: ${error.code || error.message}`);
   }
 }
 
@@ -736,7 +789,11 @@ function main() {
       "version.json",
       "src/content/content.js",
       "src/injected/page_adapter.js",
+      "src/injected/report_adapter.js",
       "src/sidepanel/sidepanel.js",
+      "src/sidepanel/report-result.mjs",
+      "src/core/connector-session-recovery.mjs",
+      "src/core/runtime-reload.mjs",
       "src/core/event-bus.js",
       "src/core/feature-flags.js",
       "src/core/module-registry.js",
@@ -771,7 +828,7 @@ function main() {
   copyDir(
     path.join(repoRoot, "native-helper"),
     path.join(runtimeProjectRoot, "native-helper"),
-    ["native_host.js", "native_host_bootstrap.js", "cli-runtime.js", "connector_bridge.js", "codex_catalog.js", "process_launcher.js", "update_checker.js", "update_installer.js", "directory-picker.js", "file-archive.js", "file-archive-conversations.js", "depreciation-capex-forecast.js", "alibaba-auction.js", "anjuke-property.js", "update-sources.json"],
+    ["native_host.js", "native_host_bootstrap.js", "cli-runtime.js", "connector_bridge.js", "report-pending.js", "report-snapshot.js", "report-structure-pending.js", "codex_catalog.js", "process_launcher.js", "update_checker.js", "update_installer.js", "directory-picker.js", "file-archive.js", "file-archive-conversations.js", "depreciation-capex-forecast.js", "alibaba-auction.js", "alibaba-lease.js", "anjuke-property.js", "land-publicity-http.js", "update-sources.json"],
   );
   copyDir(path.join(repoRoot, "skills"), path.join(runtimeProjectRoot, "skills"), [
     "depreciation-capex-forecast/SKILL.md",
@@ -792,8 +849,8 @@ function main() {
     "anjuke-property-case-fetcher/scripts/fetch_anjuke_property_cases.py",
   ]);
   copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), path.join(runtimeProjectRoot, "plugins", "tianyuan-browser-connector"));
-  copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), userPluginRoot);
-  copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), codexPluginRoot);
+  copyConnectorPlugin(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), userPluginRoot);
+  copyConnectorPlugin(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), codexPluginRoot);
   for (const skillName of [
     "appraisal-detail-print-format",
     "appraisal-declaration-print-format",
@@ -806,10 +863,15 @@ function main() {
   }
 
   backupNativeRuntime();
+  copyFileAtomic(path.join(repoRoot, "native-helper", "land-publicity-http.js"), path.join(nativeRuntimeRoot, "land-publicity-http.js"));
+  copyFileAtomic(path.join(repoRoot, "native-helper", "alibaba-lease.js"), path.join(nativeRuntimeRoot, "alibaba-lease.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "native_host.js"), path.join(nativeRuntimeRoot, "native_host.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "native_host_bootstrap.js"), path.join(nativeRuntimeRoot, "native_host_bootstrap.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "cli-runtime.js"), path.join(nativeRuntimeRoot, "cli-runtime.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "connector_bridge.js"), path.join(nativeRuntimeRoot, "connector_bridge.js"));
+  copyFileAtomic(path.join(repoRoot, "native-helper", "report-pending.js"), path.join(nativeRuntimeRoot, "report-pending.js"));
+  copyFileAtomic(path.join(repoRoot, "native-helper", "report-snapshot.js"), path.join(nativeRuntimeRoot, "report-snapshot.js"));
+  copyFileAtomic(path.join(repoRoot, "native-helper", "report-structure-pending.js"), path.join(nativeRuntimeRoot, "report-structure-pending.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "codex_catalog.js"), path.join(nativeRuntimeRoot, "codex_catalog.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "process_launcher.js"), path.join(nativeRuntimeRoot, "process_launcher.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "update_checker.js"), path.join(nativeRuntimeRoot, "update_checker.js"));
@@ -851,7 +913,7 @@ function main() {
   }
   const runtimeCompatibility = writeRuntimeCompatibility(extensionManifest.version, runtimeBuildId);
   for (const pluginRoot of [userPluginRoot, codexPluginRoot]) {
-    writeAgentConfig(pluginRoot, codexAgentSource);
+    if (!fs.existsSync(path.join(pluginRoot, "runtime", "agent-config.json"))) writeAgentConfig(pluginRoot, codexAgentSource);
   }
 
   const nodeBin = ensureNodeRuntime();
@@ -865,6 +927,24 @@ function main() {
   const selfTestArgs = selfTestCommand === nodeBin
     ? [path.join(nativeRuntimeRoot, "native_host.js"), "--self-test"]
     : ["--self-test"];
+  const isolatedSelfTestHome = String(process.env.TIANYUAN_SELFTEST_ISOLATED_HOME || "").trim();
+  const selfTestEnv = isolatedSelfTestHome && !isWindows
+    ? {
+        HOME: isolatedSelfTestHome,
+        PATH: process.env.PATH || "/usr/bin:/bin",
+        TMPDIR: isolatedSelfTestHome,
+        TIANYUAN_PYTHON_BIN: printPython.path,
+        TIANYUAN_NATIVE_RUNTIME_ROOT: nativeRuntimeRoot,
+        TIANYUAN_PRINT_SKILLS_DIR: printSkillsRoot,
+        TIANYUAN_DEPRECIATION_SKILL_DIR: path.join(runtimeProjectRoot, "skills", "depreciation-capex-forecast"),
+        TIANYUAN_RUNTIME_CONFIG_PATH: path.join(isolatedSelfTestHome, "no-runtime-config.json"),
+        TYCPV_BIN: path.join(isolatedSelfTestHome, "no-cli"),
+      }
+    : {
+        ...process.env,
+        TIANYUAN_PYTHON_BIN: printPython.path,
+        TIANYUAN_RUNTIME_CONFIG_PATH: path.join(nativeRuntimeRoot, "runtime-config.json"),
+      };
   let selfTestOutput = "";
   try {
     if (isWindows) unblockWindowsFile(selfTestCommand);
@@ -873,11 +953,7 @@ function main() {
       selfTestArgs,
       {
         encoding: "utf8",
-        env: {
-          ...process.env,
-          TIANYUAN_PYTHON_BIN: printPython.path,
-          TIANYUAN_RUNTIME_CONFIG_PATH: path.join(nativeRuntimeRoot, "runtime-config.json"),
-        },
+        env: selfTestEnv,
         stdio: ["ignore", "pipe", "pipe"],
         timeout: 15000,
       },
