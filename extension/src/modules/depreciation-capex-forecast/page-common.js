@@ -16,7 +16,6 @@ export const ACTIONS = Object.freeze({
   annual: "read_annual",
   monthly: "read_monthly",
   process: "read_detail_process",
-  assets: "assets",
 });
 
 export const STOCK_HEADERS = [

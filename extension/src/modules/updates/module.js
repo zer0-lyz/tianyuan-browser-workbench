@@ -387,6 +387,13 @@ export const updatesModule = {
           ? `更新到 v${result.latestVersion}`
           : "重新检查";
       }
+      if (elements.checkForUpdates) {
+        const hasCachedUpdate = Boolean(
+          result?.ok && (result.updateAvailable || result.repairRequired),
+        );
+        elements.checkForUpdates.hidden = !hasCachedUpdate;
+        elements.checkForUpdates.disabled = operationBusy;
+      }
       if (elements.updateTestNote && asset?.size) {
         elements.updateTestNote.textContent = `安全自测会下载当前平台安装包（${formatBytes(asset.size)}），并验证 SHA-256、解压和文件完整性；不会安装、重启或改变当前版本，测试文件完成后自动删除。`;
       }
@@ -795,6 +802,9 @@ export const updatesModule = {
           context.navigate("home")
         );
         context.scope.on(elements.checkForUpdates, "click", () =>
+          check({ automatic: false })
+        );
+        context.scope.on(window, "tianyuan-workbench:refresh-update-module", () =>
           check({ automatic: false })
         );
         context.scope.on(elements.updatePrimaryAction, "click", () => (

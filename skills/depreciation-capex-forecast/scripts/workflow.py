@@ -720,6 +720,61 @@ def run_workflow(
     }
 
 
+INPUT_SECTIONS = {"stock": STOCK_SHEET, "added": ADDED_SHEET}
+
+
+def read_existing_input(path: str | Path, section: str | None = None) -> dict:
+    """Read back the asset rows already stored in the workbook input sheets.
+
+    Returns full row-3 headers plus header->value records with the physical
+    worksheet row index, so callers can display and update rows in place via
+    the existing `write --row-index` semantics. The workbook is only read.
+    """
+    path = _ensure_existing_workbook(path)
+    wanted = dict(INPUT_SECTIONS)
+    if section:
+        if section not in INPUT_SECTIONS:
+            raise ValueError("INPUT_SECTION_NOT_ALLOWED")
+        wanted = {section: INPUT_SECTIONS[section]}
+    sections: dict[str, dict] = {}
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    try:
+        for key, sheet_name in wanted.items():
+            if sheet_name not in workbook.sheetnames:
+                sections[key] = {"headers": [], "rows": [], "count": 0}
+                continue
+            ws = workbook[sheet_name]
+            columns, duplicates = _all_header_map(ws)
+            if duplicates:
+                raise ValueError(
+                    "TEMPLATE_INCOMPATIBLE: 表头重复，无法安全读取："
+                    + "、".join(sorted(duplicates))
+                )
+            rows: list[dict] = []
+            for row in range(4, ws.max_row + 1):
+                values = {
+                    header: _serialise_date(ws.cell(row, column).value)
+                    for header, column in columns.items()
+                }
+                if any(value not in (None, "") for value in values.values()):
+                    values["rowIndex"] = row
+                    rows.append(values)
+            sections[key] = {
+                "headers": list(columns.keys()),
+                "rows": rows,
+                "count": len(rows),
+            }
+    finally:
+        workbook.close()
+    parameters = _input_snapshot(path).get("parameters", {})
+    return {
+        "status": "ok",
+        "workbook_path": str(path),
+        "sections": sections,
+        "parameters": parameters,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="折与资 skill workflow helper")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -730,6 +785,10 @@ def main() -> int:
 
     status = subparsers.add_parser("status", help="读取工作簿当前状态")
     status.add_argument("--input", required=True, help="工作簿路径")
+
+    read_input_parser = subparsers.add_parser("read-input", help="读取工作簿中已填写的资产输入行")
+    read_input_parser.add_argument("--input", required=True, help="工作簿路径")
+    read_input_parser.add_argument("--section", choices=["stock", "added"], help="只读取指定输入区；默认读取存量与新增")
 
     preflight = subparsers.add_parser("preflight", help="校验模板兼容性和输入字段")
     preflight.add_argument("--input", required=True, help="工作簿路径")
@@ -768,6 +827,8 @@ def main() -> int:
         payload = prepare_workbook(reset=args.reset, output_path=args.output)
     elif args.command == "status":
         payload = workbook_status(args.input)
+    elif args.command == "read-input":
+        payload = read_existing_input(args.input, getattr(args, "section", None))
     elif args.command == "preflight":
         payload = preflight_workbook(args.input)
     elif args.command == "write":

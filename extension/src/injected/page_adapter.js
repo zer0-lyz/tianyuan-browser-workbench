@@ -3421,6 +3421,93 @@
     return result;
   }
 
+  function inspectWalkTreeContainer(container, containerIndex, items) {
+    const walk = (nodeElement, depth, pathTexts) => {
+      if (!nodeElement || !isVisible(nodeElement) || depth > 8 || items.length >= 400) return;
+      const content = nodeElement.querySelector?.(":scope > .el-tree-node__content");
+      const label = content?.querySelector?.(".el-tree-node__label");
+      const text = textOf(label || content || nodeElement).slice(0, 120);
+      const childContainer = nodeElement.querySelector?.(":scope > .el-tree-node__children");
+      const childNodes = childContainer
+        ? [...childContainer.children].filter((child) => child.classList?.contains("el-tree-node"))
+        : [];
+      items.push({
+        tree: containerIndex,
+        depth,
+        path: [...pathTexts, text].filter(Boolean).join(" / "),
+        text,
+        expanded: childNodes.length > 0 && nodeElement.classList.contains("is-expanded"),
+        current: Boolean(content?.classList.contains("is-current") || nodeElement.querySelector?.(":scope > .el-tree-node__content.is-current")),
+        childCount: childNodes.length,
+      });
+      for (const child of childNodes) walk(child, depth + 1, [...pathTexts, text]);
+    };
+    const rootNodes = [...container.children].filter((child) => child.classList?.contains("el-tree-node"));
+    for (const rootNode of rootNodes) walk(rootNode, 0, []);
+  }
+
+  function inspectPageStructure() {
+    const route = parseRoute();
+    const controls = [...document.querySelectorAll("button,.el-button,[role='button'],a")]
+      .filter(isVisible)
+      .map((element) => ({
+        text: textOf(element).slice(0, 80),
+        tag: element.tagName.toLowerCase(),
+        disabled: Boolean(element.disabled || element.getAttribute("aria-disabled") === "true"),
+      }))
+      .filter((item) => item.text);
+    const headings = [...document.querySelectorAll("h1,h2,h3,h4,.el-dialog__title,.el-drawer__header,.el-card__header")]
+      .filter(isVisible)
+      .map((element) => textOf(element).slice(0, 120))
+      .filter(Boolean);
+    const tabs = [...document.querySelectorAll(".el-tabs__item,.el-menu-item,.el-sub-menu__title,.el-segmented__item")]
+      .filter(isVisible)
+      .map((element) => ({
+        text: textOf(element).slice(0, 80),
+        active: element.classList.contains("is-active"),
+      }))
+      .filter((item) => item.text);
+    const editable = [...document.querySelectorAll("input,textarea,[contenteditable='true']")]
+      .filter(isVisible)
+      .map((element) => ({
+        tag: element.tagName.toLowerCase(),
+        type: String(element.getAttribute("type") || element.getAttribute("contenteditable") || ""),
+        placeholder: String(element.getAttribute("placeholder") || element.getAttribute("aria-label") || "").slice(0, 60),
+        value: String(element.value ?? element.innerText ?? "").slice(0, 60),
+      }));
+    const trees = [];
+    document.querySelectorAll(".el-tree,[role='tree']").forEach((container, index) => {
+      if (!isVisible(container) || trees.length >= 4) return;
+      const items = [];
+      inspectWalkTreeContainer(container, index, items);
+      const rect = container.getBoundingClientRect();
+      trees.push({ index, left: Math.round(rect.left), width: Math.round(rect.width), nodeCount: items.length, nodes: items });
+    });
+    const dialogs = [...document.querySelectorAll(".el-dialog,.el-drawer")]
+      .filter((element) => isDialogOpen(element))
+      .map((element) => textOf(element.querySelector(".el-dialog__title,.el-drawer__header") || element).slice(0, 80))
+      .filter(Boolean);
+    const spread = getSpreadContext();
+    return {
+      ok: true,
+      action: "inspect_page_structure",
+      collectedAt: new Date().toISOString(),
+      url: location.href,
+      title: document.title,
+      route,
+      mainFrame: window.top === window.self,
+      bodyTextSample: String(document.body?.innerText || "").replace(/\s+/g, " ").slice(0, 800),
+      headings: headings.slice(0, 30),
+      tabs: tabs.slice(0, 60),
+      buttons: controls.slice(0, 150),
+      editableFields: editable.slice(0, 80),
+      trees,
+      dialogs,
+      spread: { found: Boolean(spread.found), sheetName: spread.sheetName || "" },
+      security: { readOnlyContext: true, writesPerformed: false, credentialsCaptured: false },
+    };
+  }
+
   async function runAction(payload) {
     if (payload?.action === "save_asset_draft_current_subject") {
       return await saveCurrentDraft(payload);
@@ -3484,6 +3571,9 @@
     }
     if (payload?.action === "clear_audit_attachments") {
       return await clearAuditAttachments(payload);
+    }
+    if (payload?.action === "inspect_page_structure") {
+      return inspectPageStructure();
     }
 
     return {

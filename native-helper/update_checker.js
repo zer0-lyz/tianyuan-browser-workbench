@@ -4,6 +4,16 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const DEFAULT_REPOSITORY = "zer0-lyz/tianyuan-browser-workbench-releases";
+// 允许独立扩展（如评估工具箱）按请求指定发布仓库；严格限制 owner/name 形态，
+// 防止拼接 api.github.com 端点时被路径穿越或查询串注入。
+const REPOSITORY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*$/;
+
+function resolveRepository(input = {}) {
+  const value = String(input.repository || "").trim();
+  if (!value) return DEFAULT_REPOSITORY;
+  if (!REPOSITORY_PATTERN.test(value)) throw new Error("UPDATE_REPOSITORY_INVALID");
+  return value;
+}
 const GITHUB_API_BASE = "https://api.github.com";
 const UPDATE_MANIFEST_NAME = "update-manifest.json";
 const DEFAULT_TIMEOUT_MS = 10000;
@@ -569,7 +579,7 @@ async function enrichManifestWithApiCandidate(update, input, options = {}) {
   const packageName = String(update.asset?.name || update.asset?.fileName || "").trim();
   if (!packageName) return update;
 
-  const endpoint = `${GITHUB_API_BASE}/repos/${DEFAULT_REPOSITORY}/releases/latest`;
+  const endpoint = `${GITHUB_API_BASE}/repos/${resolveRepository(input)}/releases/latest`;
   let releaseResult;
   try {
     releaseResult = await fetchJson(endpoint, {
@@ -669,7 +679,7 @@ async function loadOptionalManifest(release, options) {
 }
 
 async function checkGithubUpdateInternal(input = {}, options = {}) {
-  const repository = DEFAULT_REPOSITORY;
+  const repository = resolveRepository(input);
   const currentVersion = String(input.currentVersion || "").trim();
   const currentBuildNumber = Number(input.currentBuildNumber || 0);
   if (!parseSemver(currentVersion)) throw new Error("CURRENT_VERSION_INVALID");

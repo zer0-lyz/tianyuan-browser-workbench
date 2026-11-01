@@ -22,6 +22,7 @@ __pycache__/
 *.pyc
 /docs/context/
 /docs/test-evidence/
+/toolbox-extension/.keys/
 /项目管理/PROJECT_MEMORY.md
 /项目管理/PROJECT_STATE.md
 /项目管理/TASK_LOG.md
