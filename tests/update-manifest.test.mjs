@@ -11,6 +11,15 @@ const versionConfig = JSON.parse(
   fs.readFileSync(path.join(repoRoot, "extension", "version.json"), "utf8"),
 );
 const version = versionConfig.productVersion;
+const extensionManifest = JSON.parse(
+  fs.readFileSync(path.join(repoRoot, "extension", "manifest.json"), "utf8"),
+);
+assert.equal(versionConfig.productVersion, "0.14.35");
+assert.equal(versionConfig.chromeVersion, "0.14.35");
+assert.equal(versionConfig.versionName, "0.14.35");
+assert.equal(versionConfig.buildNumber, 2026110101);
+assert.equal(extensionManifest.version, versionConfig.chromeVersion);
+assert.equal(extensionManifest.version_name, versionConfig.versionName);
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tianyuan-update-manifest-"));
 const staleTarget = path.join(
   tempRoot,
@@ -282,6 +291,29 @@ assert.equal(
   legacyManifest.releaseUrl,
   `https://github.com/example/releases/tag/v${version}`,
 );
+
+const macOnlyRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tianyuan-mac-only-manifest-"));
+const macOnlyName = "tianyuan-workbench-v" + version + "-macos-arm64.zip";
+fs.writeFileSync(path.join(macOnlyRoot, macOnlyName), "mac-candidate");
+fs.writeFileSync(path.join(macOnlyRoot, "tianyuan-workbench-v0.14.34-windows-x64.zip"), "old-windows-package");
+execFileSync(process.execPath, [
+  path.join(repoRoot, "scripts", "generate-update-manifest.mjs"),
+], {
+  cwd: repoRoot,
+  env: {
+    ...process.env,
+    TIANYUAN_RELEASE_OUTPUT_DIR: macOnlyRoot,
+    TIANYUAN_RELEASE_BASE_URL: "https://github.com/example/releases/download/v" + version,
+  },
+  stdio: ["ignore", "pipe", "pipe"],
+});
+const macOnlyManifest = JSON.parse(
+  fs.readFileSync(path.join(macOnlyRoot, "update-manifest.json"), "utf8"),
+);
+assert.deepEqual(Object.keys(macOnlyManifest.assets), ["macos-arm64"]);
+assert.equal(macOnlyManifest.assets["macos-arm64"].fileName, "tianyuan-workbench-v" + version + "-macos-arm64.zip");
+assert.equal(Object.hasOwn(macOnlyManifest.assets, "windows-x64"), false);
+fs.rmSync(macOnlyRoot, { recursive: true, force: true });
 
 fs.rmSync(tempRoot, { recursive: true, force: true });
 console.log("Update manifest tests passed.");

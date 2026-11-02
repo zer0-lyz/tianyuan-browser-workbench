@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { createFileArchiveConversationService } = require("./file-archive-conversations.js");
+const directoryPicker = require("./directory-picker.js");
 
 const ARCHIVE_STATE_FILE = "file-archive-state.json";
 const ARCHIVE_CONFIG_FILE = "file-archive-config.json";
@@ -569,32 +570,22 @@ function createFileArchiveService({ runtimeDirectory, platformAdapter, selfLaunc
     const result = await platformAdapter.chooseDirectory("选择微信或企业微信文件导出目录");
     const parentPath = String(result?.path || result?.paths?.[0] || "").trim();
     if (!result?.ok || !parentPath) {
-      return { ...result, action: "file_archive_output_directory_selected", path: "", security: security() };
-    }
-    try {
-      const resolvedParent = fs.realpathSync(parentPath);
-      if (!fs.statSync(resolvedParent).isDirectory()) throw new Error("FILE_ARCHIVE_OUTPUT_PARENT_NOT_DIRECTORY");
-      const outputPath = path.basename(resolvedParent) === "微信文件归档"
-        ? resolvedParent
-        : path.join(resolvedParent, "微信文件归档");
-      const alreadyExists = fs.existsSync(outputPath);
-      fs.mkdirSync(outputPath, { recursive: true, mode: 0o700 });
-      const selectedPath = fs.realpathSync(outputPath);
       return {
-        ...result,
-        ok: true,
-        action: "file_archive_output_directory_selected",
-        path: selectedPath,
-        paths: [selectedPath],
-        outputDirectory: selectedPath,
-        parentPath: resolvedParent,
-        directoryName: "微信文件归档",
-        createdDirectory: !alreadyExists,
+        ...directoryPicker.directorySelectionFailure(result, {
+          action: "file_archive_output_directory_selected",
+          failureReason: "FILE_ARCHIVE_OUTPUT_DIRECTORY_CREATE_FAILED",
+        }),
         security: security(),
       };
-    } catch {
-      return { ok: false, action: "file_archive_output_directory_selected", path: "", reason: "FILE_ARCHIVE_OUTPUT_DIRECTORY_CREATE_FAILED", security: security() };
     }
+    return {
+      ...result,
+      ...directoryPicker.prepareManagedOutputDirectory(parentPath, "微信文件归档", {
+        action: "file_archive_output_directory_selected",
+        failureReason: "FILE_ARCHIVE_OUTPUT_DIRECTORY_CREATE_FAILED",
+      }),
+      security: security(),
+    };
   }
 
   async function start(config = {}) {

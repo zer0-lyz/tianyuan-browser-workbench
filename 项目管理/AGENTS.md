@@ -45,14 +45,12 @@
 - 本地助手只能读取用户授权的文件或目录，不保存天源账号状态。
 - 若页面显示登录失效、权限不足、编辑锁不属于当前用户或保存按钮不可用，应停止并记录原因。
 
-## 本机运行依赖规则
+## 本机运行依赖规则（2026-10-26 现行）
 
-- OneDrive 项目目录只保留基础项目信息、源码、文档、决策记录和测试证据。
-- 2026-07-24 起，OneDrive 不再作为运行文件来源；浏览器扩展、Native Host、Connector、插件运行时、脚本和底层依赖均应放在本机目录。
-- 本机项目运行根目录为 `~/.tianyuan-workbench/projects/天源评估系统/`。
-- Chrome 加载未打包扩展时应选择 `~/.tianyuan-workbench/projects/天源评估系统/extension`，不要再选择 OneDrive 项目内的 `extension/`。
-- 不在 OneDrive 项目目录安装 `node_modules`、Python 虚拟环境、CLI 安装包、OCR/PDF 二进制依赖、运行日志、缓存或临时快照。
-- 插件本地运行态统一放在 `~/.tianyuan-workbench/`。
-- Native Host、HTTP helper 的运行副本、launcher 和日志放在 `~/.tianyuan-workbench/native-helper/`。
-- 大型依赖、安装包和外部工具副本放在 `~/.tianyuan-workbench/dependencies/天源评估系统/`。
-- 项目快照如需保留，放在 `~/.tianyuan-workbench/project-snapshots/天源评估系统/`，不要放在云盘项目根目录。
+- 按用户明确要求，完整包默认使用用户准备长期保留的可见解压目录；extension 手动加载，生成运行态集中在同根 workbench-runtime。用户显式指定的根生效，不静默改到 C 盘 AppData 或用户隐藏目录。
+- 旧隐藏路径仅用于已确认的既有安装更新，不是新装默认值。更新必须传递并核对当前 installRoot/layout，不能误用下载暂存目录。
+- 天源 CLI 为可选外部依赖。Windows/Mac 完整与轻量包均不捆绑、不下载、不自动安装或修复 CLI；缺失给可见中文指引，仅 CLI 相关导出不可用。核心安装成功与 optionalDependencies.cli 状态分别记录。
+- 不能让 CLI 缺失掩盖核心错误；核心失败返回非零，不发送成功完成状态。allComponentsReady 的范围为必需组件。
+- 完整安装会处理共享 Native Messaging、Connector、Codex 缓存及桌面/文档入口；不同 InstallRoot 不能构成同用户隔离。实机验收使用干净或可回滚专用设备/VM。
+- 卸载只接受当前包有匹配配置的根，或用户显式指定且核对的根；未安装包不能从注册中自动跳到其他安装。只清理目标受管运行态，用户文件、外部 CLI 与其他安装保留。
+- 不读取、记录或回传用户凭据。源代码、包校验、预检和组件自检分别留证，不代替浏览器及 GUI 实机验收。

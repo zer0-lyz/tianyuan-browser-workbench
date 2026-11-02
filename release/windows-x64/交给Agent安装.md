@@ -1,130 +1,18 @@
-# 一键交给 Agent 自动安装
+# 交给 Agent 安装与只读验收
 
-复制下面“提示词开始”到“提示词结束”的全部内容，发送给能够操作 Windows、PowerShell 和 Chrome/Edge 的 Agent。
+不要只提供说明，请实际执行已授权范围内的操作；先保护正在使用的正式环境。当前 build 2026102601 为本地测试候选，标记 NOT_APPROVED_FOR_DISTRIBUTION，不得上传或替换官方 Release。
 
-如果本文件位于已经解压的安装包中，也可以直接把本文件交给 Agent；Agent 应优先运行同目录安装包，不必重复下载。
+1. 确认 Windows x64、Chrome/Edge、完整安装包来源及 SHA-256。优先使用当前文件同目录、已经完整解压的包。公开分发仓库为 `tianyuan-browser-workbench-releases`，正式资产通常命名 `tianyuan-workbench-v*-windows-x64.zip` 并附 `.sha256` / `update-manifest.json`；测试候选按交接文件中的明确文件名选择，不拿 lite 当 full。
+2. 安装根默认采用当前解压目录。不要放进会被自动清理的 `%TEMP%\TW-install` 暂存位置；可用它做纯预检，但实际安装应在用户准备保留的目录中运行。默认浏览器路径为 `<安装根目录>\extension`，运行态为 `<安装根目录>\workbench-runtime`，不会强制部署到 C 盘 AppData。
+3. 若当前用户已有正式安装，完整安装仍会改写用户级 Native Messaging、共享 Connector、Codex 缓存和桌面/文档入口。InstallRoot 不能隔离这些影响。实机验收须使用干净 VM 或可回滚专用测试机；环境不满足就报告“未覆盖”，不擅自覆盖。
+4. 先可设置 `TIANYUAN_PREFLIGHT_ONLY=1` 并执行 `install-agent.cmd`，查看“预检结果.json”。`installed=false` 仅为预检；正式安装前清除变量。完整安装执行 `install-agent.cmd` 或 `install.cmd /Agent`，正常双击体验使用 `install.cmd`。
+5. 轻量包由 VERSION.txt 自动识别。应从当前工作台更新，或执行 `install.ps1 -Agent -InstallRoot '用户明确的现有根'`。根无法确定或 Node/Python/Native Host 等必需环境不完整就停止，使用同版本完整包。
+6. 完整安装必须验证 Node.js、Python 及全部业务依赖（pythonDependencies：requests、urllib3、certifi、charset_normalizer、idna、openpyxl、et_xmlfile、lxml、python-docx、typing_extensions）、Native Helper、Native Messaging、Connector 和 Codex 缓存。
+7. 天源 CLI 为可选外部依赖；完整/轻量包不包含其安装器，不自动下载、安装、修复或卸载。缺少 CLI 时给中文提示，请用户单独安装；已有 CLI 只做只读探测。缺失不得阻断核心安装，也不得被误报为已安装或已授权。
+8. 读取 `<安装根目录>\安装检查结果.json` 和 `<安装根目录>\安装检查结果.txt`。成功要求 status=success、allComponentsReady=true（readinessScope=required-components-only）、所有必需组件通过、Connector health 正常。optionalDependencies.cli.required=false；CLI unavailable 可以与核心成功同时存在。核心失败必须非零退出。控制台/重定向日志按 UTF-8 读取，JSON 报告为机器判定依据。
+9. 在浏览器扩展管理页手动加载报告 paths.extension，核对真实路径，不进入旧的隐藏目录。桌面“天源工作台-浏览器扩展”入口和文档中的路径说明可帮助定位；OneDrive 重定向时入口也会被写入对应位置。不要编辑浏览器 profile 或绕过受限页面；必要的浏览器加载由用户本人完成。
+10. 核对扩展 ID `lkflndcnklpeaejohaacoaolnmhgigoc`、版本/build/runtimeBuildId、Native Host 实际调用、目录选择回显和重新打开后的持久化。目录失败要记录中文提示、阶段和 OS 错误码，保留原设置，不能凭统一错误码断言权限不足。
+11. 若需要 MCP 或 CLI 授权，由用户本人完成；不得要求用户把 token 发送到聊天中，不读取、复制或输出 token、Cookie、Authorization、密码、验证码。CLI 未安装时先提示安装，不要求先授权。
+12. 只读验收可执行 connection_status、list_capabilities、list_sessions、get_context。不得执行上传、保存、清理附件、退出编辑、填写结论或其他正式底稿写入。
 
-## 提示词开始
-
-请在这台 Windows 电脑上自动下载、安装并只读验证“天源浏览器工作台”。不要只提供说明，请实际执行；除浏览器安全确认和用户本人输入凭据外，不要把操作转交给用户。
-
-### 1. 确认环境
-
-1. 确认系统为 64 位 Windows 10 或 Windows 11。
-2. 确认 Google Chrome 或 Microsoft Edge 已安装。
-3. 不要把运行文件安装到 OneDrive、企业微信缓存、下载目录、ZIP 预览目录或项目源码目录。
-4. 不要关闭 Windows Defender、SmartScreen 或其他安全软件。
-
-### 2. 取得安装包
-
-1. 如果当前文件所在目录存在 `install.cmd`、`VERSION.txt` 和 `SHA256SUMS`，优先使用当前完整解压目录。
-2. 如果没有本地完整安装包，从公开仓库查询 Latest Release：
-   `https://github.com/zer0-lyz/tianyuan-browser-workbench-releases`
-3. 下载最新版：
-   - `tianyuan-workbench-v*-windows-x64.zip`
-   - 对应的 `.zip.sha256`
-   - `update-manifest.json`
-4. 下载和解压暂存目录必须使用短路径：
-   `%TEMP%\TW-install`
-   每次安装前新建空目录，不要叠加旧版本文件。
-5. 使用 `.sha256` 或 `update-manifest.json` 校验 ZIP 的 SHA-256。校验不一致时立即停止，不得绕过。
-6. 必须完整解压 ZIP，不能在压缩包预览窗口中直接运行。
-
-### 3. 自动安装或更新
-
-1. 先读取当前目录的 `VERSION.txt`：
-   - `package_type=lite-update` 表示这是已有安装用户的轻量更新包；
-   - 没有该字段或不是 `lite-update` 表示这是完整安装包。
-2. 完整安装包执行 `install-agent.cmd`；如果该文件不存在，执行 `install.cmd /Agent`。
-3. 轻量更新包不要直接运行普通安装模式，必须在 PowerShell 中执行：
-   ```powershell
-   $env:TIANYUAN_UPDATE_MODE = "1"
-   $env:TIANYUAN_AGENT_MODE = "1"
-   powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\install.ps1 -Agent
-   ```
-   轻量更新包要求本机已有完整工作台运行环境；如果缺少 Node、Python/openpyxl 或 CLI，应改用完整安装包。
-4. 等待安装程序全部步骤完成。成功标准不是“扩展文件已复制”，而是同步并验证完整运行环境：Node.js、Python 及全部业务依赖、Native Helper、Native Messaging Host、Connector Bridge、Connector 插件、Codex 插件缓存和天源 CLI。
-5. Agent 不得跳过缺失依赖；如果轻量包检测到任何运行环境不完整，必须停止轻量安装并改用同版本完整包。
-6. 安装失败时读取机器可读结果和文本报告：
-   `%LOCALAPPDATA%\TianyuanWorkbench\安装检查结果.json`
-   `%LOCALAPPDATA%\TianyuanWorkbench\安装检查结果.txt`
-7. 不要通过手工复制单个文件、修改来源不明的注册表项目或关闭安全校验来拼接运行环境。
-
-### 4. 验证安装结果
-
-优先读取 `%LOCALAPPDATA%\TianyuanWorkbench\安装检查结果.json`，再读取文本报告，确认：
-
-- 扩展目录存在：
-  `%LOCALAPPDATA%\TianyuanWorkbench\projects\天源评估系统\extension`
-- Native Helper 存在：
-  `%LOCALAPPDATA%\TianyuanWorkbench\native-helper`
-- Connector 存在：
-  `%USERPROFILE%\plugins\tianyuan-browser-connector`
-- Codex Connector 缓存存在：
-  `%USERPROFILE%\.codex\plugins\cache\personal\tianyuan-browser-connector`
-- Chrome 和 Edge Native Messaging Host 已注册。
-- Connector Bridge 可以启动并返回健康状态。
-- 实际运行 Python 可以导入 `openpyxl`、`et_xmlfile`、`lxml`、`python-docx` 和 `typing_extensions`。
-- 实际运行 Node.js、Native Helper 和天源 CLI 均可执行只读自检。
-- 安装报告没有失败步骤，JSON 中 `pythonDependencies` 为 `ok`。
-- JSON 中组件状态与 `manualActions` 分开判断；MCP token、CLI 授权和浏览器扩展加载不属于安装失败。
-
-### 5. 加载浏览器扩展
-
-1. 完全退出并重新打开 Chrome 或 Edge。
-2. 打开 `chrome://extensions/` 或 `edge://extensions/`。
-3. 开启开发者模式。
-4. 优先双击桌面“天源工作台-浏览器扩展”入口定位目录；备用路径记录在“文档\天源工作台\浏览器扩展路径.txt”。
-5. 加载该入口打开的已解压扩展目录，不要求用户手工进入隐藏目录。
-6. 确认扩展名称为“天源浏览器工作台”，扩展 ID 为：
-   `lkflndcnklpeaejohaacoaolnmhgigoc`
-7. 如果浏览器安全策略不允许 Agent 点击“加载已解压的扩展程序”，请打开正确的扩展管理页和目录，只提示用户完成这一次点击，不要让用户重新配置其他组件。
-
-### 6. 连接配置
-
-1. 打开用户已经登录的天源系统页面和工作台侧栏。
-2. 进入“连接配置”，执行“启动/检查”。
-3. MCP token 必须由用户本人在侧栏输入：
-   - 不得要求用户把 token 发送到聊天中；
-   - 不得读取、复制、记录或回显 token；
-   - 不得把 token 写入项目文件、GitHub、日志或截图。
-4. 点击“配置 MCP”时，工作台会打开 MCP 接入页：
-   `https://mcp.zhrdc.net/connect?source=valuation`
-   用户本人在该页面完成配置后，回到工作台粘贴 token。
-5. 如需 CLI 授权，点击“授权 CLI”，工作台会打开 CLI 授权页：
-   `https://mcp.zhrdc.net/connect?source=valuation&tab=cli`
-   让用户本人完成账号、密码和验证码操作。
-6. 授权后重新检查 Helper、MCP、CLI 和 Connector 状态。
-7. 如果当前 Agent 支持 MCP 配置，将统一 Connector 注册到当前 Agent；如需重启 Agent，完成重启后的只读复测。
-
-### 7. 只读验收
-
-只允许执行：
-
-- `connection_status`
-- `list_capabilities`
-- `list_sessions`
-- `get_context`
-- 检查版本更新
-
-不得执行上传、保存、清理附件、退出编辑、填写结论或其他真实底稿写入。
-
-### 8. 最终报告
-
-输出：
-
-- 最新版本号；
-- 安装包 SHA-256 校验结果；
-- 实际安装模式和耗时；
-- 扩展加载路径、桌面入口和路径说明文件；
-- Node.js、Python 全部依赖、Native Host、Native Messaging、Connector、Codex 缓存和 CLI 的逐项结果；
-- Native Host 注册结果；
-- Connector 安装和运行状态；
-- Helper、MCP、CLI 状态；
-- 是否需要重启当前 Agent；
-- 仍需用户完成的操作；
-- 失败项、准确错误信息和下一步建议。
-
-安全要求：不得保存或输出 MCP token、Cookie、Authorization、密码、验证码；不得绕过 SHA-256 校验、编辑锁或浏览器安全策略。CLI 探测最多等待 5 秒，超时后终止探测进程树并继续安装其他工作台组件。
-
-## 提示词结束
+最终报告分别给出包校验、预检、完整安装、浏览器/Native Host、CLI 可选状态和目录 GUI 场景的“通过/失败/未覆盖”，附实际路径、截图/日志、错误阶段及风险。预检通过不能记为安装器通过，源码/组件自检不能记为完整实机验收通过。

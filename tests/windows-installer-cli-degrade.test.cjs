@@ -5,50 +5,38 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const repoRoot = path.resolve(__dirname, "..");
-const installer = fs.readFileSync(
-  path.join(repoRoot, "release", "windows-x64", "install.ps1"),
-  "utf8",
-);
-const runtimeInstaller = fs.readFileSync(
-  path.join(repoRoot, "scripts", "install-local-runtime.mjs"),
-  "utf8",
-);
+const installer = fs.readFileSync(path.join(repoRoot, "release", "windows-x64", "install.ps1"), "utf8");
+const runtimeInstaller = fs.readFileSync(path.join(repoRoot, "scripts", "install-local-runtime.mjs"), "utf8");
+const fullBuilder = fs.readFileSync(path.join(repoRoot, "release", "build_windows_x64_release.sh"), "utf8");
+const candidateBuilder = fs.readFileSync(path.join(repoRoot, "release", "build_windows_x64_candidate.ps1"), "utf8");
+const updater = fs.readFileSync(path.join(repoRoot, "native-helper", "update_installer.js"), "utf8");
+const windowsAdapter = fs.readFileSync(path.join(repoRoot, "native-helper", "platform", "windows.js"), "utf8");
 
-assert.equal(installer.includes("function Get-TycpvVersionInfo"), true);
-assert.equal(installer.includes("function Invoke-TycpvProbe"), true);
-assert.equal(installer.includes("$VersionInfo = Get-TycpvVersionInfo $ResolvedPath $TrustedDirectories"), true);
-assert.equal(installer.includes("WaitForExit($TimeoutSeconds * 1000)"), true);
-assert.equal(installer.includes("taskkill.exe /PID $Process.Id /T /F"), true);
-assert.equal(installer.includes('Get-TycpvPackageVersion $ResolvedPath'), true);
-assert.equal(installer.includes("天源 CLI 无法运行。"), false);
-assert.equal(installer.includes("天源 CLI 已运行安装程序，但没有找到"), false);
-assert.equal(installer.includes("CLI 修复失败不会阻断工作台其他组件更新"), true);
-assert.equal(installer.includes("待修复（未阻断工作台组件安装）"), true);
-assert.equal(installer.includes("Remove-Item Env:TYCPV_BIN"), true);
-assert.equal(installer.includes("天源 CLI 状态：$TycpvStatus"), true);
-assert.equal(installer.includes("工作台组件更新完成，天源 CLI 待修复"), true);
-assert.equal(runtimeInstaller.includes("function resolveTycpvBin(runtimeConfigPath)"), true);
-assert.equal(runtimeInstaller.includes("tycpvBin: resolveTycpvBin(runtimeConfigPath)"), true);
-assert.equal(runtimeInstaller.includes("for (let attempt = 1; attempt <= 3; attempt += 1)"), true);
-assert.equal(runtimeInstaller.includes("fs.cpSync("), false);
-assert.equal(runtimeInstaller.includes("function copyTreeSync"), true);
-assert.equal(runtimeInstaller.includes("function validateDirectoryMirror"), true);
-assert.equal(runtimeInstaller.includes("COPIED_FILE_SIZE_MISMATCH"), true);
-assert.equal(runtimeInstaller.includes("COPY_DIRECTORY_FAILED"), true);
-assert.equal(runtimeInstaller.includes("COPY_DIRECTORY_REPLACE_FAILED"), true);
-assert.equal(runtimeInstaller.includes("copyDirectoryDirect(src, dest, requiredRelativePaths)"), true);
-assert.equal(runtimeInstaller.includes('mustExist(dest, "installed directory")'), true);
-assert.equal(runtimeInstaller.includes('action: "install_local_runtime"'), true);
-assert.equal(installer.includes("$InstallFailure = $InstallJson | ConvertFrom-Json"), true);
-assert.equal(installer.includes("function Resolve-NodeForInstall"), true);
-assert.equal(installer.includes("轻量更新包需要复用已安装的 Node.js"), true);
-assert.equal(installer.includes("轻量更新包需要复用已安装的 Python/openpyxl"), true);
+assert.match(installer, /function Find-Tycpv/);
+assert.match(installer, /Find-Tycpv/);
+assert.match(installer, /optionalDependencies\s*=\s*\[ordered\]@\{/);
+assert.match(installer, /cli\s*=\s*\[ordered\]@\{ required = \$false/);
+assert.match(installer, /REQUIRED_COMPONENT_VALIDATION_FAILED/);
+assert.match(installer, /LITE_INSTALL_ROOT_UNKNOWN/);
+assert.match(installer, /TIANYUAN_RUNTIME_LAYOUT/);
+assert.match(installer, /workbench-runtime/);
+assert.doesNotMatch(installer, /runtime\\tycpv-setup-0\.1\.0-win-x64\.exe/);
+assert.doesNotMatch(installer, /Start-Process -FilePath \$TycpvInstaller/);
 
-const cliStep = installer.slice(
-  installer.indexOf('Write-Step "2/7 安装或检查天源 CLI"'),
-  installer.indexOf('Write-Step "3/7 检查已有 Python"'),
-);
-assert.match(cliStep, /try \{[\s\S]+Start-Process[\s\S]+catch \{/);
-assert.equal(/\bthrow "天源 CLI 无法运行/.test(cliStep), false);
+assert.match(runtimeInstaller, /function resolveTycpvBin\(runtimeConfigPath\)/);
+assert.match(runtimeInstaller, /installRoot: configuredInstallRoot/);
+assert.match(runtimeInstaller, /layout: runtimeLayout/);
+assert.match(runtimeInstaller, /cli-runtime\.js/);
+assert.match(runtimeInstaller, /COPY_DIRECTORY_TARGET_OVERLAP/);
+assert.match(runtimeInstaller, /function classifyDirectoryCopyTarget/);
+assert.match(runtimeInstaller, /function ensureNodeRuntime\(\)/);
 
-console.log("windows installer CLI degrade tests passed");
+assert.doesNotMatch(fullBuilder, /TYCPV_SOURCE/);
+assert.doesNotMatch(fullBuilder, /tycpv-setup-0\.1\.0-win-x64\.exe/);
+assert.match(candidateBuilder, /runtime\/tycpv/);
+assert.match(updater, /installRoot: platformAdapter\.installRoot/);
+assert.match(windowsAdapter, /TIANYUAN_INSTALL_ROOT/);
+assert.match(windowsAdapter, /AppendAllText\(\$LogPath, \[string\]\$InstallerOutput, \$Utf8NoBom\)/);
+assert.match(windowsAdapter, /-Agent -InstallRoot \$InstallRoot/);
+
+console.log("Windows installer optional CLI and visible runtime layout checks passed");

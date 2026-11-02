@@ -24,8 +24,6 @@ CACHE_DIR="$WORKBENCH_ROOT/release-cache"
 WINDOWS_CACHE="$CACHE_DIR/windows-x64"
 WHEEL_CACHE="$CACHE_DIR/python-wheels"
 POSTJECT_DIR="$CACHE_DIR/postject"
-TYCPV_SOURCE="$WORKBENCH_ROOT/dependencies/天源评估系统/tycpv-setup-0.1.0-win-x64.exe"
-
 NODE_VERSION="24.14.0"
 NODE_ARCHIVE="$WINDOWS_CACHE/node-v${NODE_VERSION}-win-x64.zip"
 NODE_SHASUMS="$WINDOWS_CACHE/SHASUMS256-node-v${NODE_VERSION}.txt"
@@ -57,11 +55,6 @@ mkdir -p "$STAGE/runtime/python-portable/Lib/site-packages" \
   "$WINDOWS_CACHE" \
   "$WHEEL_CACHE"
 
-[[ -f "$TYCPV_SOURCE" ]] || {
-  echo "Missing Windows tycpv installer: $TYCPV_SOURCE" >&2
-  exit 1
-}
-
 if [[ ! -f "$NODE_ARCHIVE" ]]; then
   curl -L --fail --retry 3 --output "$NODE_ARCHIVE" "$NODE_URL"
 fi
@@ -88,7 +81,12 @@ python3 -m pip download \
   "openpyxl==3.1.5" \
   "et_xmlfile==2.0.0" \
   "python-docx==1.2.0" \
-  "typing_extensions==4.16.0"
+  "typing_extensions==4.16.0" \
+  "requests==2.34.2" \
+  "urllib3==2.8.0" \
+  "certifi==2026.7.22" \
+  "charset-normalizer==3.5.1" \
+  "idna==3.20"
 
 python3 -m pip download \
   --quiet \
@@ -155,7 +153,7 @@ cat > "$STAGE/native-helper/runtime-compat.json" <<EOF
 EOF
 
 /usr/bin/unzip -q "$PYTHON_ARCHIVE" -d "$STAGE/runtime/python-portable"
-for wheel in "$WHEEL_CACHE"/openpyxl-3.1.5-*.whl "$WHEEL_CACHE"/et_xmlfile-2.0.0-*.whl "$WHEEL_CACHE"/python_docx-1.2.0-*.whl "$WHEEL_CACHE"/typing_extensions-4.16.0-*.whl "$WHEEL_CACHE"/lxml-6.1.0-*-win_amd64.whl; do
+for wheel in "$WHEEL_CACHE"/openpyxl-3.1.5-*.whl "$WHEEL_CACHE"/et_xmlfile-2.0.0-*.whl "$WHEEL_CACHE"/python_docx-1.2.0-*.whl "$WHEEL_CACHE"/typing_extensions-4.16.0-*.whl "$WHEEL_CACHE"/lxml-6.1.0-*-win_amd64.whl "$WHEEL_CACHE"/requests-2.34.2-*.whl "$WHEEL_CACHE"/urllib3-2.8.0-*.whl "$WHEEL_CACHE"/certifi-2026.7.22-*.whl "$WHEEL_CACHE"/charset_normalizer-3.5.1-*.whl "$WHEEL_CACHE"/idna-3.20-*.whl; do
   /usr/bin/unzip -q "$wheel" -d "$STAGE/runtime/python-portable/Lib/site-packages"
   cp "$wheel" "$STAGE/runtime/python-wheels/"
 done
@@ -169,12 +167,11 @@ EOF
 /usr/bin/ditto "$ROOT_DIR/extension" "$STAGE/extension"
 cp "$STAGE/native-helper/runtime-compat.json" "$STAGE/extension/runtime-compat.json"
 /usr/bin/ditto "$ROOT_DIR/skills" "$STAGE/skills"
+cp "$ROOT_DIR/skills/zj-land-publicity/scrape_zj_land.py" "$STAGE/runtime/python-portable/Lib/site-packages/scrape_zj_land.py"
 /usr/bin/ditto "$ROOT_DIR/plugins" "$STAGE/plugins"
 cp "$ROOT_DIR/scripts/install-local-runtime.mjs" "$STAGE/scripts/install-local-runtime.mjs"
 cp "$ROOT_DIR/scripts/runtime-fingerprint.mjs" "$STAGE/scripts/runtime-fingerprint.mjs"
 cp "$ROOT_DIR/scripts/print-runtime-build-id.mjs" "$STAGE/scripts/print-runtime-build-id.mjs"
-cp "$TYCPV_SOURCE" "$STAGE/runtime/tycpv-setup-0.1.0-win-x64.exe"
-
 node "$ROOT_DIR/scripts/prepare-windows-launchers.mjs" \
   "$ROOT_DIR/release/windows-x64" \
   "$STAGE" >/dev/null
@@ -197,8 +194,6 @@ node_version=$NODE_VERSION
 node_sha256=$NODE_SHA256
 python_version=$PYTHON_VERSION
 python_embed_sha256=$PYTHON_SHA256
-tycpv_version=0.1.0
-tycpv_sha256=$(/usr/bin/shasum -a 256 "$TYCPV_SOURCE" | awk '{ print $1 }')
 postject_version=$POSTJECT_VERSION
 EOF
 

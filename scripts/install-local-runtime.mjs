@@ -26,15 +26,30 @@ const CONNECTOR_VERSION = JSON.parse(fs.readFileSync(
 )).version;
 const isWindows = platformAdapter.isWindows;
 const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
-const runtimeProjectRoot = process.env.TIANYUAN_PROJECT_RUNTIME_ROOT || (isWindows
+const requestedInstallRoot = String(process.env.TIANYUAN_INSTALL_ROOT || "").trim();
+const runtimeLayout = String(process.env.TIANYUAN_RUNTIME_LAYOUT || "visible-root-v1").trim();
+const installRoot = requestedInstallRoot ? path.resolve(requestedInstallRoot)
+  : (runtimeLayout === "visible-root-v1" ? repoRoot : "");
+const usesVisibleInstallRoot = runtimeLayout === "visible-root-v1" && Boolean(installRoot);
+const runtimeProjectRoot = process.env.TIANYUAN_PROJECT_RUNTIME_ROOT || (usesVisibleInstallRoot
+  ? installRoot
+  : (isWindows
   ? path.join(localAppData, "TianyuanWorkbench", "projects", PROJECT_NAME)
-  : path.join(os.homedir(), ".tianyuan-workbench", "projects", PROJECT_NAME));
-const nativeRuntimeRoot = process.env.TIANYUAN_NATIVE_RUNTIME_ROOT || (isWindows
+  : path.join(os.homedir(), ".tianyuan-workbench", "projects", PROJECT_NAME)));
+const legacyNativeRuntimeRoot = isWindows
   ? path.join(localAppData, "TianyuanWorkbench", "native-helper")
-  : path.join(os.homedir(), ".tianyuan-workbench", "native-helper"));
-const printSkillsRoot = process.env.TIANYUAN_PRINT_SKILLS_ROOT || (isWindows
+  : path.join(os.homedir(), ".tianyuan-workbench", "native-helper");
+const nativeRuntimeRoot = process.env.TIANYUAN_NATIVE_RUNTIME_ROOT || (usesVisibleInstallRoot
+  ? path.join(installRoot, "workbench-runtime", "native-helper")
+  : legacyNativeRuntimeRoot);
+const configuredInstallRoot = installRoot || (runtimeLayout === "visible-root-v1"
+  ? path.dirname(path.dirname(nativeRuntimeRoot))
+  : path.dirname(nativeRuntimeRoot));
+const printSkillsRoot = process.env.TIANYUAN_PRINT_SKILLS_ROOT || (usesVisibleInstallRoot
+  ? path.join(installRoot, "workbench-runtime", "print-format-skills")
+  : (isWindows
   ? path.join(localAppData, "TianyuanWorkbench", "print-format-skills")
-  : path.join(os.homedir(), ".tianyuan-workbench", "dependencies", PROJECT_NAME, "print-format-skills"));
+  : path.join(os.homedir(), ".tianyuan-workbench", "dependencies", PROJECT_NAME, "print-format-skills")));
 const userPluginRoot = path.join(os.homedir(), "plugins", "tianyuan-browser-connector");
 const codexPluginRoot = path.join(
   os.homedir(),
@@ -52,16 +67,23 @@ const NATIVE_RUNTIME_BACKUP_FILES = [
   "native_host.exe",
   "native_host.js",
   "native_host_bootstrap.js",
+  "cli-runtime.js",
   "connector_bridge.js",
+  "report-pending.js",
+  "report-snapshot.js",
+  "report-structure-pending.js",
   "codex_catalog.js",
   "process_launcher.js",
   "update_checker.js",
   "update_installer.js",
+  "directory-picker.js",
   "file-archive.js",
   "file-archive-conversations.js",
   "depreciation-capex-forecast.js",
   "alibaba-auction.js",
+  "alibaba-lease.js",
   "anjuke-property.js",
+  "land-publicity-http.js",
   "map-assets/leaflet.js",
   "map-assets/leaflet.css",
   "map-assets/leaflet.markercluster.js",
@@ -92,6 +114,42 @@ function validateCopiedDirectory(dest, requiredRelativePaths = []) {
   for (const relativePath of requiredRelativePaths) {
     mustExist(path.join(dest, relativePath), `installed file ${relativePath}`);
   }
+}
+
+function canonicalPathIdentity(targetPath) {
+  const absolute = path.resolve(targetPath);
+  let probe = absolute;
+  const missingSegments = [];
+  while (!fs.existsSync(probe)) {
+    const parent = path.dirname(probe);
+    if (parent === probe) break;
+    missingSegments.unshift(path.basename(probe));
+    probe = parent;
+  }
+  let canonical = absolute;
+  try {
+    canonical = path.join(fs.realpathSync.native(probe), ...missingSegments);
+  } catch {
+    // path.resolve still normalizes dot segments if no existing ancestor can be resolved.
+  }
+  return isWindows ? canonical.toLowerCase() : canonical;
+}
+
+function pathContains(parent, child) {
+  const relative = path.relative(parent, child);
+  return relative === "" || (
+    relative !== ".."
+    && !relative.startsWith(`..${path.sep}`)
+    && !path.isAbsolute(relative)
+  );
+}
+
+function classifyDirectoryCopyTarget(sourcePath, destinationPath) {
+  const source = canonicalPathIdentity(sourcePath);
+  const destination = canonicalPathIdentity(destinationPath);
+  if (source === destination) return "same";
+  if (pathContains(source, destination) || pathContains(destination, source)) return "overlap";
+  return "separate";
 }
 
 function waitBeforeRetry(milliseconds) {
@@ -182,6 +240,19 @@ function copyDirectoryDirect(src, dest, requiredRelativePaths = []) {
 
 function copyDir(src, dest, requiredRelativePaths = []) {
   mustExist(src, "source directory");
+  if (!fs.statSync(src).isDirectory() || fs.lstatSync(src).isSymbolicLink()) {
+    throw new Error(`SOURCE_DIRECTORY_INVALID: ${src}`);
+  }
+  validateCopiedDirectory(src, requiredRelativePaths);
+  directoryTreeSnapshot(src);
+  const targetRelation = classifyDirectoryCopyTarget(src, dest);
+  if (targetRelation === "same") return;
+  if (targetRelation === "overlap") {
+    throw new Error(`COPY_DIRECTORY_TARGET_OVERLAP: ${src} -> ${dest}`);
+  }
+  if (fs.existsSync(dest) && fs.lstatSync(dest).isSymbolicLink()) {
+    throw new Error(`COPY_DESTINATION_SYMLINK_UNSUPPORTED: ${dest}`);
+  }
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   const suffix = `${process.pid}-${randomBytes(5).toString("hex")}`;
   const staging = `${dest}.staging-${suffix}`;
@@ -232,8 +303,60 @@ function copyDir(src, dest, requiredRelativePaths = []) {
   }
 }
 
+function copyConnectorPlugin(src, dest) {
+  mustExist(src, "connector plugin");
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  const staging = `${dest}.staging-${process.pid}-${randomBytes(5).toString("hex")}`;
+  copyTreeSync(src, staging);
+  validateDirectoryMirror(src, staging);
+  const relativeConfig = path.join("runtime", "agent-config.json");
+  if (fs.existsSync(path.join(staging, relativeConfig))) throw new Error("CONNECTOR_SOURCE_CONFIG_CONFLICT");
+  const backups = path.join(os.homedir(), ".tianyuan-workbench", "backups");
+  fs.mkdirSync(backups, { recursive: true, mode: 0o700 });
+  const container = fs.mkdtempSync(path.join(backups, "connector-plugin-"));
+  if (!isWindows) fs.chmodSync(container, 0o700);
+  const previous = path.join(container, "previous");
+  const failed = path.join(container, "failed-new");
+  let previousMoved = false;
+  let stagedMoved = false;
+  let configMoved = false;
+  try {
+    if (fs.existsSync(dest)) {
+      fs.renameSync(dest, previous);
+      previousMoved = true;
+    }
+    fs.renameSync(staging, dest);
+    stagedMoved = true;
+    const previousConfig = path.join(previous, relativeConfig);
+    let configStat = null;
+    if (previousMoved) {
+      try { configStat = fs.lstatSync(previousConfig); } catch (error) { if (error.code !== "ENOENT") throw error; }
+    }
+    if (configStat) {
+      if (!configStat.isFile()) throw new Error("CONNECTOR_CONFIG_UNSAFE");
+      const targetConfig = path.join(dest, relativeConfig);
+      fs.mkdirSync(path.dirname(targetConfig), { recursive: true });
+      fs.renameSync(previousConfig, targetConfig);
+      configMoved = true;
+    }
+  } catch (error) {
+    try {
+      if (configMoved) fs.renameSync(path.join(dest, relativeConfig), path.join(previous, relativeConfig));
+      if (stagedMoved) fs.renameSync(dest, failed);
+      if (previousMoved) fs.renameSync(previous, dest);
+    } catch (restoreError) {
+      throw new Error(`CONNECTOR_PLUGIN_RESTORE_FAILED: ${container}; ${restoreError.code || "unknown"}`);
+    }
+    throw new Error(`CONNECTOR_PLUGIN_REPLACE_FAILED: ${error.code || error.message}`);
+  }
+}
+
 function copyFileAtomic(src, dest) {
   mustExist(src, "source file");
+  if (canonicalPathIdentity(src) === canonicalPathIdentity(dest)) {
+    if (!fs.statSync(src).isFile()) throw new Error(`SOURCE_FILE_INVALID: ${src}`);
+    return;
+  }
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   const temporary = `${dest}.tmp-${process.pid}-${randomBytes(5).toString("hex")}`;
   fs.copyFileSync(src, temporary);
@@ -484,8 +607,8 @@ function findPrintPython() {
       if (!fs.existsSync(candidate)) continue;
       const output = execFileSync(
         candidate,
-        ["-c", "import docx, et_xmlfile, lxml, openpyxl, typing_extensions; print(openpyxl.__version__)"],
-        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+        ["-c", "import requests, urllib3, certifi, charset_normalizer, idna, docx, et_xmlfile, lxml, openpyxl, typing_extensions; print(openpyxl.__version__)"],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15000 },
       ).trim();
       if (versionAtLeast(output, [3, 1, 5])) {
         return { path: candidate, openpyxlVersion: output };
@@ -501,16 +624,28 @@ function writeMacNativeHost(nodeBin, pythonBin) {
   const hostDir = path.join(os.homedir(), "Library", "Application Support", "Google", "Chrome", "NativeMessagingHosts");
   const launcherPath = path.join(nativeRuntimeRoot, "native_host_launcher.sh");
   const logPath = path.join(nativeRuntimeRoot, "native_host.log");
+  const runtimeConfigPath = path.join(nativeRuntimeRoot, "runtime-config.json");
+  fs.writeFileSync(runtimeConfigPath, JSON.stringify({
+    version: 1,
+    installRoot: configuredInstallRoot,
+    layout: runtimeLayout,
+    tycpvBin: resolveTycpvBin(runtimeConfigPath),
+    nodeBin,
+    pythonBin,
+    printSkillsDir: printSkillsRoot,
+    depreciationSkillDir: path.join(runtimeProjectRoot, "skills", "depreciation-capex-forecast"),
+  }, null, 2) + "\n", { mode: 0o600 });
   fs.mkdirSync(hostDir, { recursive: true });
   fs.writeFileSync(
     launcherPath,
-    [
-      "#!/bin/bash",
-      `echo "$(date '+%Y-%m-%d %H:%M:%S') start native host" >> ${JSON.stringify(logPath)}`,
-      `export TIANYUAN_PYTHON_BIN=${JSON.stringify(pythonBin)}`,
-      `exec ${JSON.stringify(nodeBin)} ${JSON.stringify(path.join(nativeRuntimeRoot, "native_host.js"))} 2>> ${JSON.stringify(logPath)}`,
-      "",
-    ].join("\n"),
+    buildMacNativeHostLauncher({
+      logPath,
+      runtimeConfigPath,
+      pythonBin,
+      printSkillsRoot,
+      nodeBin,
+      nativeRuntimeRoot,
+    }),
     { mode: 0o755 },
   );
   const manifestPath = path.join(hostDir, `${HOST_NAME}.json`);
@@ -522,6 +657,29 @@ function writeMacNativeHost(nodeBin, pythonBin) {
     allowed_origins: EXTENSION_IDS.map((id) => `chrome-extension://${id}/`),
   }, null, 2) + "\n");
   return manifestPath;
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+function buildMacNativeHostLauncher({
+  logPath,
+  runtimeConfigPath,
+  pythonBin,
+  printSkillsRoot,
+  nodeBin,
+  nativeRuntimeRoot: runtimeRoot,
+}) {
+  return [
+    "#!/bin/bash",
+    `echo "$(date '+%Y-%m-%d %H:%M:%S') start native host" >> ${shellQuote(logPath)}`,
+    `export TIANYUAN_RUNTIME_CONFIG_PATH=${shellQuote(runtimeConfigPath)}`,
+    `export TIANYUAN_PYTHON_BIN=${shellQuote(pythonBin)}`,
+    `export TIANYUAN_PRINT_SKILLS_DIR=${shellQuote(printSkillsRoot)}`,
+    `exec ${shellQuote(nodeBin)} ${shellQuote(path.posix.join(runtimeRoot, "native_host.js"))} 2>> ${shellQuote(logPath)}`,
+    "",
+  ].join("\n");
 }
 
 function resolveTycpvBin(runtimeConfigPath) {
@@ -546,7 +704,10 @@ function writeWindowsNativeHost(nodeBin, pythonBin) {
   const runtimeConfigPath = path.join(nativeRuntimeRoot, "runtime-config.json");
   fs.writeFileSync(runtimeConfigPath, JSON.stringify({
     version: 1,
+    installRoot: configuredInstallRoot,
+    layout: runtimeLayout,
     tycpvBin: resolveTycpvBin(runtimeConfigPath),
+    nodeBin,
     pythonBin,
     printSkillsDir: printSkillsRoot,
     depreciationSkillDir: path.join(runtimeProjectRoot, "skills", "depreciation-capex-forecast"),
@@ -590,14 +751,13 @@ function writeWindowsNativeHost(nodeBin, pythonBin) {
 }
 
 function ensureNodeRuntime() {
-  if (!isWindows) {
-    return process.env.TIANYUAN_NODE_BIN || findExecutable(["node"]);
-  }
-  const source = process.env.TIANYUAN_BUNDLED_NODE_SOURCE
-    || (path.basename(process.execPath).toLowerCase() === "node.exe" ? process.execPath : "")
-    || findExecutable(["node.exe", "node"]);
-  mustExist(source, "Windows Node.js runtime");
-  const managedNode = path.join(nativeRuntimeRoot, "node", "node.exe");
+  const bundled = process.env.TIANYUAN_BUNDLED_NODE_SOURCE || "";
+  const source = bundled
+    || (isWindows && path.basename(process.execPath).toLowerCase() === "node.exe" ? process.execPath : "")
+    || process.env.TIANYUAN_NODE_BIN
+    || findExecutable(isWindows ? ["node.exe", "node"] : ["node"]);
+  mustExist(source, `${isWindows ? "Windows " : ""}Node.js runtime`);
+  const managedNode = path.join(nativeRuntimeRoot, "node", isWindows ? "node.exe" : "node");
   if (path.resolve(source) !== path.resolve(managedNode)) {
     copyFileAtomic(source, managedNode);
   }
@@ -606,6 +766,9 @@ function ensureNodeRuntime() {
 
 function main() {
   writeUpdateStatus("installing", 84, { message: "正在校验并同步本机运行文件" });
+  if (runtimeLayout === "visible-root-v1" && !installRoot) {
+    throw new Error("VISIBLE_INSTALL_ROOT_REQUIRED: 可见目录布局必须显式指定安装根目录。");
+  }
   mustExist(path.join(repoRoot, "extension", "manifest.json"), "extension manifest");
   mustExist(path.join(repoRoot, "native-helper", "native_host.js"), "native host");
   mustExist(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), "connector plugin");
@@ -626,12 +789,17 @@ function main() {
       "version.json",
       "src/content/content.js",
       "src/injected/page_adapter.js",
+      "src/injected/report_adapter.js",
       "src/sidepanel/sidepanel.js",
+      "src/sidepanel/report-result.mjs",
+      "src/core/connector-session-recovery.mjs",
+      "src/core/runtime-reload.mjs",
       "src/core/event-bus.js",
       "src/core/feature-flags.js",
       "src/core/module-registry.js",
       "src/core/module-scope.js",
       "src/core/module-storage.js",
+      "src/core/directory-picker.js",
       "src/app/legacy-feature-modules.js",
       "src/modules/updates/module.js",
       "src/modules/updates/template.js",
@@ -660,7 +828,7 @@ function main() {
   copyDir(
     path.join(repoRoot, "native-helper"),
     path.join(runtimeProjectRoot, "native-helper"),
-    ["native_host.js", "native_host_bootstrap.js", "connector_bridge.js", "codex_catalog.js", "process_launcher.js", "update_checker.js", "update_installer.js", "file-archive.js", "file-archive-conversations.js", "depreciation-capex-forecast.js", "alibaba-auction.js", "anjuke-property.js", "update-sources.json"],
+    ["native_host.js", "native_host_bootstrap.js", "cli-runtime.js", "connector_bridge.js", "report-pending.js", "report-snapshot.js", "report-structure-pending.js", "codex_catalog.js", "process_launcher.js", "update_checker.js", "update_installer.js", "directory-picker.js", "file-archive.js", "file-archive-conversations.js", "depreciation-capex-forecast.js", "alibaba-auction.js", "alibaba-lease.js", "anjuke-property.js", "land-publicity-http.js", "update-sources.json"],
   );
   copyDir(path.join(repoRoot, "skills"), path.join(runtimeProjectRoot, "skills"), [
     "depreciation-capex-forecast/SKILL.md",
@@ -681,8 +849,8 @@ function main() {
     "anjuke-property-case-fetcher/scripts/fetch_anjuke_property_cases.py",
   ]);
   copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), path.join(runtimeProjectRoot, "plugins", "tianyuan-browser-connector"));
-  copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), userPluginRoot);
-  copyDir(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), codexPluginRoot);
+  copyConnectorPlugin(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), userPluginRoot);
+  copyConnectorPlugin(path.join(repoRoot, "plugins", "tianyuan-browser-connector"), codexPluginRoot);
   for (const skillName of [
     "appraisal-detail-print-format",
     "appraisal-declaration-print-format",
@@ -695,13 +863,20 @@ function main() {
   }
 
   backupNativeRuntime();
+  copyFileAtomic(path.join(repoRoot, "native-helper", "land-publicity-http.js"), path.join(nativeRuntimeRoot, "land-publicity-http.js"));
+  copyFileAtomic(path.join(repoRoot, "native-helper", "alibaba-lease.js"), path.join(nativeRuntimeRoot, "alibaba-lease.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "native_host.js"), path.join(nativeRuntimeRoot, "native_host.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "native_host_bootstrap.js"), path.join(nativeRuntimeRoot, "native_host_bootstrap.js"));
+  copyFileAtomic(path.join(repoRoot, "native-helper", "cli-runtime.js"), path.join(nativeRuntimeRoot, "cli-runtime.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "connector_bridge.js"), path.join(nativeRuntimeRoot, "connector_bridge.js"));
+  copyFileAtomic(path.join(repoRoot, "native-helper", "report-pending.js"), path.join(nativeRuntimeRoot, "report-pending.js"));
+  copyFileAtomic(path.join(repoRoot, "native-helper", "report-snapshot.js"), path.join(nativeRuntimeRoot, "report-snapshot.js"));
+  copyFileAtomic(path.join(repoRoot, "native-helper", "report-structure-pending.js"), path.join(nativeRuntimeRoot, "report-structure-pending.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "codex_catalog.js"), path.join(nativeRuntimeRoot, "codex_catalog.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "process_launcher.js"), path.join(nativeRuntimeRoot, "process_launcher.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "update_checker.js"), path.join(nativeRuntimeRoot, "update_checker.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "update_installer.js"), path.join(nativeRuntimeRoot, "update_installer.js"));
+  copyFileAtomic(path.join(repoRoot, "native-helper", "directory-picker.js"), path.join(nativeRuntimeRoot, "directory-picker.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "file-archive.js"), path.join(nativeRuntimeRoot, "file-archive.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "file-archive-conversations.js"), path.join(nativeRuntimeRoot, "file-archive-conversations.js"));
   copyFileAtomic(path.join(repoRoot, "native-helper", "depreciation-capex-forecast.js"), path.join(nativeRuntimeRoot, "depreciation-capex-forecast.js"));
@@ -738,7 +913,7 @@ function main() {
   }
   const runtimeCompatibility = writeRuntimeCompatibility(extensionManifest.version, runtimeBuildId);
   for (const pluginRoot of [userPluginRoot, codexPluginRoot]) {
-    writeAgentConfig(pluginRoot, codexAgentSource);
+    if (!fs.existsSync(path.join(pluginRoot, "runtime", "agent-config.json"))) writeAgentConfig(pluginRoot, codexAgentSource);
   }
 
   const nodeBin = ensureNodeRuntime();
@@ -752,6 +927,24 @@ function main() {
   const selfTestArgs = selfTestCommand === nodeBin
     ? [path.join(nativeRuntimeRoot, "native_host.js"), "--self-test"]
     : ["--self-test"];
+  const isolatedSelfTestHome = String(process.env.TIANYUAN_SELFTEST_ISOLATED_HOME || "").trim();
+  const selfTestEnv = isolatedSelfTestHome && !isWindows
+    ? {
+        HOME: isolatedSelfTestHome,
+        PATH: process.env.PATH || "/usr/bin:/bin",
+        TMPDIR: isolatedSelfTestHome,
+        TIANYUAN_PYTHON_BIN: printPython.path,
+        TIANYUAN_NATIVE_RUNTIME_ROOT: nativeRuntimeRoot,
+        TIANYUAN_PRINT_SKILLS_DIR: printSkillsRoot,
+        TIANYUAN_DEPRECIATION_SKILL_DIR: path.join(runtimeProjectRoot, "skills", "depreciation-capex-forecast"),
+        TIANYUAN_RUNTIME_CONFIG_PATH: path.join(isolatedSelfTestHome, "no-runtime-config.json"),
+        TYCPV_BIN: path.join(isolatedSelfTestHome, "no-cli"),
+      }
+    : {
+        ...process.env,
+        TIANYUAN_PYTHON_BIN: printPython.path,
+        TIANYUAN_RUNTIME_CONFIG_PATH: path.join(nativeRuntimeRoot, "runtime-config.json"),
+      };
   let selfTestOutput = "";
   try {
     if (isWindows) unblockWindowsFile(selfTestCommand);
@@ -760,11 +953,7 @@ function main() {
       selfTestArgs,
       {
         encoding: "utf8",
-        env: {
-          ...process.env,
-          TIANYUAN_PYTHON_BIN: printPython.path,
-          TIANYUAN_RUNTIME_CONFIG_PATH: path.join(nativeRuntimeRoot, "runtime-config.json"),
-        },
+        env: selfTestEnv,
         stdio: ["ignore", "pipe", "pipe"],
         timeout: 15000,
       },
@@ -883,4 +1072,10 @@ if (isExecutedAsMainModule()) {
   }
 }
 
-export { copyDir, copyFileAtomic, copyTreeSync, directoryTreeSnapshot };
+export {
+  buildMacNativeHostLauncher,
+  copyDir,
+  copyFileAtomic,
+  copyTreeSync,
+  directoryTreeSnapshot,
+};

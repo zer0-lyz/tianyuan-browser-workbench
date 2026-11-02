@@ -155,32 +155,49 @@ export const declarationTableWorkflowModule = {
     }
 
     async function chooseInputs(kind) {
+      const pickerButton = kind === "files" ? elements.chooseDeclarationTableWorkflowFiles : elements.chooseDeclarationTableWorkflowFolder;
+      context.clearDirectoryPickerStatus(pickerButton);
       try {
         const action = kind === "files" ? "select_print_workbook_files" : "select_print_workbook_directory";
         const result = await context.sendNativeMessage({ action }, 130000);
-        if (result?.cancelled || result?.canceled) return;
-        if (!result?.ok) throw new Error(result?.reason || "WORKBOOK_SELECTION_FAILED");
+        if (context.isDirectoryPickerCancelled(result)) return;
+        if (!result?.ok) {
+          const feedback = context.setDirectoryPickerStatus(pickerButton, result, { subject: kind === "files" ? "申报表输入文件" : "申报表输入文件夹" });
+          setMessage(elements.declarationTableWorkflowMessage, feedback?.message || "无法完成选择，请重新选择。", "error");
+          return;
+        }
         inputPaths = Array.isArray(result.paths) ? result.paths : [];
         render();
+        context.clearDirectoryPickerStatus(pickerButton);
         context.setStatus(`已选择 ${inputPaths.length} 个申报表`, "ok");
       } catch (error) {
-        setMessage(elements.declarationTableWorkflowMessage, `选择文件失败：${error?.message || String(error)}`, "error");
+        const feedback = context.setDirectoryPickerStatus(pickerButton, error, { subject: kind === "files" ? "申报表输入文件" : "申报表输入文件夹" });
+        setMessage(elements.declarationTableWorkflowMessage, feedback?.message || "无法完成选择，请重新选择。", "error");
         context.setStatus("申报表输入选择失败", "error");
       }
     }
 
-    async function chooseDirectory(target) {
+    async function chooseDirectory(target, button) {
+      context.clearDirectoryPickerStatus(button);
       try {
         const result = await context.sendNativeMessage({ action: "select_print_output_directory", directoryName: "申报表导出与整理" }, 130000);
-        if (result?.cancelled || result?.canceled) return;
+        if (context.isDirectoryPickerCancelled(result)) return;
         const selected = result?.outputDirectory || result?.path || result?.paths?.[0] || "";
-        if (!result?.ok || !selected) throw new Error(result?.reason || "OUTPUT_DIRECTORY_SELECTION_FAILED");
+        if (!result?.ok || !selected) {
+          const feedback = context.setDirectoryPickerStatus(button, result?.ok ? { reason: result.reason || "OUTPUT_DIRECTORY_SELECTION_FAILED" } : result, { subject: "申报表输出目录" });
+          setMessage(elements.declarationTableWorkflowMessage, feedback?.message || "无法完成目录选择，请重新选择。", "error");
+          context.setStatus(feedback?.message || "无法完成目录选择，请重新选择。", "error");
+          return;
+        }
         target.value = selected;
         if (target === elements.declarationTableWorkflowExportDirectory) config.exportDirectory = target.value;
         else config.outputDirectory = target.value;
+        context.clearDirectoryPickerStatus(button);
         setMessage(elements.declarationTableWorkflowMessage, `已选择上级目录，并创建专用子文件夹：${result.directoryName || "申报表导出与整理"}。保存设置后生效`, "ok");
       } catch (error) {
-        setMessage(elements.declarationTableWorkflowMessage, `选择文件夹失败：${error?.message || String(error)}`, "error");
+        const feedback = context.setDirectoryPickerStatus(button, error, { subject: "申报表输出目录" });
+        setMessage(elements.declarationTableWorkflowMessage, feedback?.message || "无法完成目录选择，请重新选择。", "error");
+        context.setStatus(feedback?.message || "无法完成目录选择，请重新选择。", "error");
       }
     }
 
@@ -265,8 +282,8 @@ export const declarationTableWorkflowModule = {
         context.scope.on(elements.declarationTableWorkflowOutputMode, "change", () => { config = readForm(); render(); });
         context.scope.on(elements.chooseDeclarationTableWorkflowFiles, "click", () => chooseInputs("files"));
         context.scope.on(elements.chooseDeclarationTableWorkflowFolder, "click", () => chooseInputs("folder"));
-        context.scope.on(elements.chooseDeclarationTableWorkflowExportDirectory, "click", () => chooseDirectory(elements.declarationTableWorkflowExportDirectory));
-        context.scope.on(elements.chooseDeclarationTableWorkflowOutput, "click", () => chooseDirectory(elements.declarationTableWorkflowOutputDirectory));
+        context.scope.on(elements.chooseDeclarationTableWorkflowExportDirectory, "click", () => chooseDirectory(elements.declarationTableWorkflowExportDirectory, elements.chooseDeclarationTableWorkflowExportDirectory));
+        context.scope.on(elements.chooseDeclarationTableWorkflowOutput, "click", () => chooseDirectory(elements.declarationTableWorkflowOutputDirectory, elements.chooseDeclarationTableWorkflowOutput));
         context.scope.on(elements.runDeclarationTableWorkflow, "click", run);
         context.scope.on(elements.saveDeclarationTableWorkflow, "click", save);
         context.scope.on(elements.resetDeclarationTableWorkflow, "click", reset);

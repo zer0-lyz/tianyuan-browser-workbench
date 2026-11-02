@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { randomBytes, createHash } = require("node:crypto");
+const directoryPicker = require("./directory-picker.js");
 
 const SKILL_NAME = "depreciation-capex-forecast";
 const WORKBOOK_NAME = "折旧摊销预测输入模板.xlsx";
@@ -59,22 +60,6 @@ function isXlsxPath(value) {
 
 function selectedPath(result) {
   return String(result?.paths?.[0] || result?.path || "").trim();
-}
-
-function managedOutputDirectory(value) {
-  const parentPath = fs.realpathSync(ensureAbsolutePath(value, "EXPORT_DIRECTORY_INVALID"));
-  if (!fs.statSync(parentPath).isDirectory()) throw new Error("EXPORT_DIRECTORY_NOT_DIRECTORY");
-  const outputPath = path.basename(parentPath) === "折旧摊销预测"
-    ? parentPath
-    : path.join(parentPath, "折旧摊销预测");
-  const alreadyExists = fs.existsSync(outputPath);
-  fs.mkdirSync(outputPath, { recursive: true, mode: 0o700 });
-  return {
-    path: fs.realpathSync(outputPath),
-    parentPath,
-    directoryName: "折旧摊销预测",
-    createdDirectory: !alreadyExists,
-  };
 }
 
 function atomicWriteJson(filePath, payload) {
@@ -322,19 +307,26 @@ function createDepreciationCapexForecastService(options = {}) {
     const result = await platformAdapter.chooseDirectory("选择折旧摊销预测底稿导出目录");
     const selected = selectedPath(result);
     if (!result?.ok || !selected) {
+      const failedSelection = directoryPicker.directorySelectionFailure(result, {
+        action: "depreciation_capex_forecast_output_directory_selected",
+        failureReason: "DEPRECIATION_OUTPUT_DIRECTORY_CREATE_FAILED",
+      });
       return {
-        ...result,
-        action: "depreciation_capex_forecast_output_directory_selection_cancelled",
+        ...failedSelection,
+        ...(failedSelection.cancelled
+          ? { action: "depreciation_capex_forecast_output_directory_selection_cancelled" }
+          : {}),
         namespace: NAMESPACE,
         security: security(),
       };
     }
-    const managed = managedOutputDirectory(selected);
-    return {
-      ok: true,
+    const managed = directoryPicker.prepareManagedOutputDirectory(selected, "折旧摊销预测", {
       action: "depreciation_capex_forecast_output_directory_selected",
-      namespace: NAMESPACE,
+      failureReason: "DEPRECIATION_OUTPUT_DIRECTORY_CREATE_FAILED",
+    });
+    return {
       ...managed,
+      namespace: NAMESPACE,
       security: security({ fileContentsReturned: false }),
     };
   }

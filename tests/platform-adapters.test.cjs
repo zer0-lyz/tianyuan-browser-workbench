@@ -28,7 +28,7 @@ async function run() {
     env: windowsEnv,
     execFileSync: windowsExecFileSync,
     execFile(_command, _args, _options, callback) {
-      callback(null, "C:\\Exports\r\n");
+      callback(null, `TIANYUAN_PICKER_RESULT:${JSON.stringify({ cancelled: false, paths: ["C:\\Exports"] })}\r\n`);
     },
   });
   assert.equal(windows.id, "windows");

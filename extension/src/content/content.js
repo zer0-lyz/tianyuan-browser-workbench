@@ -1,5 +1,5 @@
 (() => {
-const ADAPTER_VERSION = "2026-08-12-page-tree-visible-only-v32";
+const ADAPTER_VERSION = "2026-10-31-report-tree-controls-v1";
 const CONTENT_STATE_KEY = "__tianyuanWorkbenchContentScriptState";
 const INJECTED_SCRIPT_ID = `tianyuan-workbench-page-adapter-${ADAPTER_VERSION}`;
 const EXT_REQUEST_TYPE = "TIANYUAN_WORKBENCH_GET_CONTEXT_V2";
@@ -21,27 +21,32 @@ if (existingContentState?.listener) {
 let adapterInjectionPromise = null;
 
 function injectPageAdapter() {
-  adapterInjectionPromise = new Promise((resolve, reject) => {
-    const existing = document.getElementById(INJECTED_SCRIPT_ID);
-    if (existing) {
-      resolve();
-      return;
-    }
+  if (adapterInjectionPromise) return adapterInjectionPromise;
+  function injectScript(scriptId, scriptPath) {
+    return new Promise((resolve, reject) => {
+      const existing = document.getElementById(scriptId);
+      if (existing) {
+        resolve();
+        return;
+      }
 
-    const script = document.createElement("script");
-    script.id = INJECTED_SCRIPT_ID;
-    script.src = `${chrome.runtime.getURL("src/injected/page_adapter.js")}?v=${encodeURIComponent(ADAPTER_VERSION)}`;
-    script.onload = () => {
-      script.remove();
-      resolve();
-    };
-    script.onerror = () => {
-      adapterInjectionPromise = null;
-      script.remove();
-      reject(new Error("PAGE_ADAPTER_INJECT_FAILED"));
-    };
-    (document.documentElement || document.head).appendChild(script);
-  });
+      const script = document.createElement("script");
+      script.id = scriptId;
+      script.src = `${chrome.runtime.getURL(scriptPath)}?v=${encodeURIComponent(ADAPTER_VERSION)}`;
+      script.onload = () => {
+        script.remove();
+        resolve();
+      };
+      script.onerror = () => {
+        adapterInjectionPromise = null;
+        script.remove();
+        reject(new Error("PAGE_ADAPTER_INJECT_FAILED"));
+      };
+      (document.documentElement || document.head).appendChild(script);
+    });
+  }
+  adapterInjectionPromise = injectScript(`${INJECTED_SCRIPT_ID}-report`, "src/injected/report_adapter.js")
+    .then(() => injectScript(INJECTED_SCRIPT_ID, "src/injected/page_adapter.js"));
 
   return adapterInjectionPromise;
 }
@@ -82,7 +87,7 @@ async function requestPageAdapter(type, responseType, payload = {}, timeoutMs = 
 const contentMessageListener = (message, _sender, sendResponse) => {
   if (message?.type !== EXT_REQUEST_TYPE && message?.type !== EXT_ACTION_REQUEST_TYPE) return false;
 
-  const actionTimeout = ["upload_audit_attachment", "batch_upload_audit_attachments", "set_audit_check_result", "batch_set_audit_check_results"].includes(message.payload?.action)
+  const actionTimeout = ["upload_audit_attachment", "batch_upload_audit_attachments", "set_audit_check_result", "batch_set_audit_check_results", "report_execute", "report_save", "report_readback"].includes(message.payload?.action)
     ? 120000
     : 45000;
   const adapterRequest = message.type === EXT_ACTION_REQUEST_TYPE

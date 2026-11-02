@@ -262,7 +262,8 @@ finally:
 function runPythonCase(name) {
   const skills = path.join(repoRoot, "skills/zj-land-publicity");
   const body = PYTHON_CASES[name].replaceAll("%(skills)s", skills);
-  const result = spawnSync("python3", ["-c", body], { encoding: "utf8", timeout: 120000 });
+  const python = process.env.TIANYUAN_TEST_PYTHON_BIN || process.env.TIANYUAN_PYTHON_BIN || "python3";
+  const result = spawnSync(python, ["-c", body], { encoding: "utf8", timeout: 120000 });
   if (result.status !== 0) {
     throw new Error(`python case ${name} failed:\n${result.stdout}\n${result.stderr}`);
   }

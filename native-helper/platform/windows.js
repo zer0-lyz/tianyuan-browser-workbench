@@ -13,8 +13,25 @@ function createWindowsAdapter(options = {}) {
   const env = options.env || process.env;
   const homeDir = options.homeDir || os.homedir();
   const localAppData = env.LOCALAPPDATA || path.join(homeDir, "AppData", "Local");
-  const runtimeRoot = path.join(localAppData, "TianyuanWorkbench");
+  const legacyInstallRoot = path.join(localAppData, "TianyuanWorkbench");
+  const runtimeConfig = options.runtimeConfig && typeof options.runtimeConfig === "object"
+    ? options.runtimeConfig
+    : {};
+  const installRoot = path.resolve(String(runtimeConfig.installRoot || env.TIANYUAN_INSTALL_ROOT || legacyInstallRoot));
+  const runtimeLayout = String(runtimeConfig.layout || env.TIANYUAN_RUNTIME_LAYOUT || "legacy-hidden");
+  const usesVisibleInstallRoot = runtimeLayout === "visible-root-v1";
+  const runtimeRoot = usesVisibleInstallRoot
+    ? path.join(installRoot, "workbench-runtime")
+    : legacyInstallRoot;
+  const defaultPythonBin = runtimeConfig.pythonBin || (usesVisibleInstallRoot
+    ? path.join(runtimeRoot, "python", "python.exe")
+    : path.join(runtimeRoot, "python", "python.exe"));
+  const defaultPrintSkillsDir = runtimeConfig.printSkillsDir || (usesVisibleInstallRoot
+    ? path.join(runtimeRoot, "print-format-skills")
+    : path.join(runtimeRoot, "print-format-skills"));
   const WINDOWS_SAFE_PATH_LIMIT = 240;
+  const UPDATE_EXTRACT_RESULT_MARKER = "TIANYUAN_UPDATE_RESULT:";
+  const UPDATE_EXTRACT_ERROR_MARKER = "TIANYUAN_UPDATE_ERROR:";
 
   function redactPowerShellText(value) {
     return String(value || "")
@@ -54,9 +71,22 @@ function createWindowsAdapter(options = {}) {
         encoding: "utf8",
         env: { ...env, ...extraEnv },
       }, (error, stdout) => {
-        resolve(error ? common.pickerFailure(error) : common.pickerResult(stdout));
+        resolve(error ? common.pickerFailure(error, { platform: "windows" }) : common.pickerResult(stdout, { requireMarker: true }));
       });
     });
+  }
+
+  function pickerCancelledScript() {
+    return `[Console]::Out.WriteLine('${common.PICKER_RESULT_MARKER}{"cancelled":true,"paths":[]}')`;
+  }
+
+  function pickerSuccessScript(pathsExpression) {
+    return [
+      `$pickerPaths = @(${pathsExpression})`,
+      "$pickerPayload = [ordered]@{ cancelled = $false; paths = $pickerPaths }",
+      "$pickerJson = ConvertTo-Json -InputObject $pickerPayload -Compress",
+      `[Console]::Out.WriteLine('${common.PICKER_RESULT_MARKER}' + $pickerJson)`,
+    ].join("\n");
   }
 
   function powerShellPreamble() {
@@ -74,8 +104,8 @@ function createWindowsAdapter(options = {}) {
       "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
       `$dialog.Description = '${safePrompt}'`,
       "$dialog.ShowNewFolderButton = $true",
-      "if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { exit 2 }",
-      "[Console]::Out.WriteLine($dialog.SelectedPath)",
+      `if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { ${pickerCancelledScript()}; return }`,
+      pickerSuccessScript("$dialog.SelectedPath"),
     ].join("\n"));
   }
 
@@ -96,8 +126,8 @@ function createWindowsAdapter(options = {}) {
       "$dialog.Title = '选择需要调整打印格式的 Excel 文件'",
       "$dialog.Filter = 'Excel 工作簿 (*.xlsx;*.xlsm)|*.xlsx;*.xlsm'",
       "$dialog.Multiselect = $true",
-      "if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { exit 2 }",
-      "$dialog.FileNames | ForEach-Object { [Console]::Out.WriteLine($_) }",
+      `if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { ${pickerCancelledScript()}; return }`,
+      pickerSuccessScript("$dialog.FileNames"),
     ].join("\n"));
   }
 
@@ -108,8 +138,8 @@ function createWindowsAdapter(options = {}) {
       "$dialog.Title = '选择需要统一表格格式的 Word 文档（.docx）'",
       "$dialog.Filter = 'Word 文档 (*.docx)|*.docx'",
       "$dialog.Multiselect = $true",
-      "if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { exit 2 }",
-      "$dialog.FileNames | ForEach-Object { [Console]::Out.WriteLine($_) }",
+      `if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { ${pickerCancelledScript()}; return }`,
+      pickerSuccessScript("$dialog.FileNames"),
     ].join("\n"));
   }
 
@@ -120,8 +150,8 @@ function createWindowsAdapter(options = {}) {
       "$dialog.Title = '选择折旧摊销预测输入工作簿（.xlsx）'",
       "$dialog.Filter = 'Excel 工作簿 (*.xlsx)|*.xlsx'",
       "$dialog.Multiselect = $false",
-      "if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { exit 2 }",
-      "[Console]::Out.WriteLine($dialog.FileName)",
+      `if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { ${pickerCancelledScript()}; return }`,
+      pickerSuccessScript("$dialog.FileName"),
     ].join("\n"));
   }
 
@@ -160,6 +190,8 @@ function createWindowsAdapter(options = {}) {
     fs.mkdirSync(destination, { recursive: true });
     const script = [
       "$ErrorActionPreference = 'Stop'",
+      "$ProgressPreference = 'SilentlyContinue'",
+      "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
       "Add-Type -AssemblyName System.IO.Compression.FileSystem",
       "$ZipPath = [System.IO.Path]::GetFullPath($env:TIANYUAN_UPDATE_ZIP_PATH)",
       "$Destination = [System.IO.Path]::GetFullPath($env:TIANYUAN_UPDATE_DESTINATION)",
@@ -187,7 +219,7 @@ function createWindowsAdapter(options = {}) {
       "  $Stage = 'extracting'",
       "  Expand-Archive -LiteralPath $ZipPath -DestinationPath $Destination -Force",
       "  $payload = [ordered]@{ ok = $true; stage = 'complete'; destination = $Destination; longestEntry = $longest; longestTargetLength = $longestLength }",
-      "  [Console]::Out.WriteLine('TIANYU_UPDATE_RESULT:' + ($payload | ConvertTo-Json -Compress))",
+      `  [Console]::Out.WriteLine('${UPDATE_EXTRACT_RESULT_MARKER}' + ($payload | ConvertTo-Json -Compress))`,
       "} catch {",
       "  if ($zip) { $zip.Dispose() }",
       "  $raw = [string]$_.Exception.Message",
@@ -195,7 +227,7 @@ function createWindowsAdapter(options = {}) {
       "  $errorCode = if ($parts[0] -in @('UPDATE_PATH_TOO_LONG','UPDATE_ZIP_PATH_TRAVERSAL')) { $parts[0] } else { 'UPDATE_EXTRACT_FAILED' }",
       "  $reason = if ($parts.Length -gt 1) { $parts[1] } else { $raw }",
       "  $payload = [ordered]@{ ok = $false; errorCode = $errorCode; stage = $Stage; message = '更新包解压失败'; reason = $reason; zipPath = $ZipPath; destination = $Destination }",
-      "  [Console]::Error.WriteLine('TIANYUAN_UPDATE_ERROR:' + ($payload | ConvertTo-Json -Compress))",
+      `  [Console]::Error.WriteLine('${UPDATE_EXTRACT_ERROR_MARKER}' + ($payload | ConvertTo-Json -Compress))`,
       "  exit 1",
       "}",
     ].join("\n");
@@ -219,8 +251,8 @@ function createWindowsAdapter(options = {}) {
         },
       }, (error, stdout, stderr) => resolve({ error, stdout, stderr }));
     });
-    const parsed = parsePowerShellMarker(result.stderr, "TIANYUAN_UPDATE_ERROR:")
-      || parsePowerShellMarker(result.stdout, "TIANYUAN_UPDATE_ERROR:");
+    const parsed = parsePowerShellMarker(result.stderr, UPDATE_EXTRACT_ERROR_MARKER)
+      || parsePowerShellMarker(result.stdout, UPDATE_EXTRACT_ERROR_MARKER);
     if (result.error || parsed?.ok === false) {
       const errorCode = parsed?.errorCode || "UPDATE_EXTRACT_FAILED";
       const details = [
@@ -243,7 +275,7 @@ function createWindowsAdapter(options = {}) {
       failure.exitCode = result.error?.code || null;
       throw failure;
     }
-    const success = parsePowerShellMarker(result.stdout, "TIANYUAN_UPDATE_RESULT:");
+    const success = parsePowerShellMarker(result.stdout, UPDATE_EXTRACT_RESULT_MARKER);
     if (!success?.ok) {
       const failure = new Error(`UPDATE_EXTRACT_FAILED:解压过程未返回成功结果; stage=extracting; stderr=${redactPowerShellText(result.stderr)}`);
       failure.code = "UPDATE_EXTRACT_FAILED";
@@ -280,7 +312,9 @@ function createWindowsAdapter(options = {}) {
     logPath,
     parentPid,
     cleanupPath = "",
+    installRoot: requestedInstallRoot = "",
   }) {
+    const targetInstallRoot = path.resolve(String(requestedInstallRoot || installRoot));
     const runnerPath = path.join(path.dirname(statusPath), "run-update.ps1");
     const quote = (value) => String(value).replace(/'/g, "''");
     fs.writeFileSync(runnerPath, [
@@ -290,6 +324,8 @@ function createWindowsAdapter(options = {}) {
       `$StatusPath = '${quote(statusPath)}'`,
       `$LogPath = '${quote(logPath)}'`,
       `$CleanupPath = '${quote(cleanupPath)}'`,
+      `$InstallRoot = '${quote(targetInstallRoot)}'`,
+      `$RuntimeLayout = '${quote(runtimeLayout)}'`,
       "$InstallerPid = $RunnerPid",
       "$Utf8NoBom = [System.Text.UTF8Encoding]::new($false)",
       "function Protect-UpdateMessage([string]$Message) { return ($Message -replace '(?i)(bearer\\s+)[^\\s]+', '$1[REDACTED]' -replace '(?i)(authorization|cookie|password|验证码|token)\\s*[:=]\\s*[^\\s,;]+', '$1=[REDACTED]') }",
@@ -302,18 +338,22 @@ function createWindowsAdapter(options = {}) {
       "}",
       "$LogDirectory = Split-Path -Parent $LogPath",
       "New-Item -ItemType Directory -Path $LogDirectory -Force | Out-Null",
-      "\"runnerPid=$RunnerPid\" | Set-Content -LiteralPath $LogPath -Encoding UTF8",
+      "[System.IO.File]::WriteAllText($LogPath, (\"runnerPid=$RunnerPid\" + [Environment]::NewLine), $Utf8NoBom)",
       "Write-UpdateStatus 'preparing' 74 '更新程序已启动，正在准备停止工作台服务'",
       "$Deadline = (Get-Date).AddSeconds(15)",
       "while ((Get-Date) -lt $Deadline -and (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue)) { Start-Sleep -Milliseconds 200 }",
       "if (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) { throw 'UPDATE_PARENT_PROCESS_NOT_EXITED' }",
       "Write-UpdateStatus 'stopping_services' 76 '正在停止工作台服务并等待文件释放'",
       "$env:TIANYUAN_UPDATE_MODE = '1'",
+      "$env:TIANYUAN_AGENT_MODE = '1'",
+      "$env:TIANYUAN_INSTALL_ROOT = $InstallRoot",
+      "$env:TIANYUAN_RUNTIME_LAYOUT = $RuntimeLayout",
       `$env:TIANYUAN_UPDATE_STATUS_PATH = '${quote(statusPath)}'`,
       `$env:TIANYUAN_UPDATE_LOG_PATH = '${quote(logPath)}'`,
       "$env:TIANYUAN_UPDATE_INSTALLER_PID = \"$InstallerPid\"",
-      `& '${quote(installerPath)}' *>> '${quote(logPath)}'`,
+      `$InstallerOutput = (& '${quote(installerPath)}' -Agent -InstallRoot $InstallRoot *>&1 | Out-String)`,
       "$InstallerExitCode = [int]$LASTEXITCODE",
+      "[System.IO.File]::AppendAllText($LogPath, [string]$InstallerOutput, $Utf8NoBom)",
       "if ($InstallerExitCode -ne 0) { throw \"UPDATE_INSTALLER_EXIT_$InstallerExitCode\" }",
       "if (-not (Test-Path -LiteralPath $StatusPath)) { throw 'UPDATE_COMPLETION_STATUS_MISSING' }",
       "$final = Get-Content -LiteralPath $StatusPath -Raw -Encoding UTF8 | ConvertFrom-Json",
@@ -475,8 +515,10 @@ function createWindowsAdapter(options = {}) {
     isWindows: true,
     isMacOS: false,
     runtimeRoot,
-    defaultPythonBin: path.join(runtimeRoot, "python", "python.exe"),
-    defaultPrintSkillsDir: path.join(runtimeRoot, "print-format-skills"),
+    installRoot,
+    runtimeLayout,
+    defaultPythonBin,
+    defaultPrintSkillsDir,
     cliCandidates: [
       path.join(localAppData, "Programs", "tycpv", "tycpv.exe"),
       path.join(localAppData, "Programs", "tycpv", "bin", "tycpv.exe"),

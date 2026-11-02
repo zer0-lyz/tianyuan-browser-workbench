@@ -17,6 +17,10 @@ const nativeHost = fs.readFileSync(
   path.join(repoRoot, "native-helper", "native_host.js"),
   "utf8",
 );
+const cliRuntime = fs.readFileSync(
+  path.join(repoRoot, "native-helper", "cli-runtime.js"),
+  "utf8",
+);
 
 const cliBlock = installer.slice(
   installer.indexOf("function Add-TycpvPathCandidates"),
@@ -42,6 +46,11 @@ assert.match(launcher, /-NonInteractive/);
 assert.match(launcher, /-Agent/);
 assert.equal(launcher.includes('"if \\"%AGENT_MODE%\\"==\\"0\\" pause"'), true);
 assert.match(nativeHost, /const probeArgs = IS_WINDOWS \? \["--help"\] : \["--version"\]/);
-assert.match(nativeHost, /timeout: 5000/);
+assert.match(nativeHost, /discoverWindowsCliCandidates/);
+assert.match(nativeHost, /timeoutMs: IS_WINDOWS \? 15_000 : 5_000/);
+assert.match(nativeHost, /maxDurationMs: IS_WINDOWS \? 30_000 : 5_000/);
+assert.match(cliRuntime, /maxDurationMs = 30_000/);
+assert.match(cliRuntime, /reason === "TYCPV_TIMEOUT"/);
+assert.match(cliRuntime, /taskkill\.exe/);
 
 console.log("Windows installer safety tests passed.");

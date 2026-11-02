@@ -1,6 +1,6 @@
 # 天源浏览器连接器
 
-版本 `0.4.6`。此插件把已注册的本机 Agent 路由到其有权访问的天源浏览器页面，并提供受控编辑块的读取、预演、执行和回读。
+版本 `0.4.6`。此插件把已注册的本机 Agent 路由到其有权访问的天源浏览器页面。功能可用性必须以绑定会话中的实际扩展与 Bridge 为准。
 
 ## 来源与绑定
 
@@ -63,11 +63,16 @@ Connector 不提供任意浏览器点击、任意 URL、任意 JavaScript 或绕
 
 - `tianyuan.edit_block_format_preview` / `tianyuan.edit_block_format_execute` / `tianyuan.edit_block_format_readback`：设置字体、字号、字体颜色、文本高亮、取消高亮、对齐、行高和缩进；`highlightColor` 仅支持 `transparent`、`none` 或 `#RRGGBB`，执行确认文本为 `确认设置编辑格式`。
 - `tianyuan.table_preview` / `tianyuan.table_execute` / `tianyuan.table_readback`：在授权编辑块内插入表格、修改单元格或设置表格格式；单元格行列索引从 `0` 开始，执行确认文本为 `确认执行表格操作`。
-- 新报告页的表格插入使用页面 ProseMirror 状态事务，并确认事务返回值、模型表格节点和可见 DOM；随后通过 `/ty/api/assignment_draft/seq/save` 保存。只有保存业务成功且保存后回读一致才返回成功，模型未渲染或保存失败会回滚本次模型事务。刷新页面后可用执行结果中的 `blockId`、`caretReference`、`tableId` 和 `expectedTableHash` 调用 `tianyuan.table_readback`。
-- `insert` 在没有文字选区时可使用上下文返回的 `selection.mode=caret` / `caretReference`，要求外层 `contenteditable`、节点路径、光标偏移、`blockId` 和编辑块哈希一致，表格会插入光标处而非编辑块末尾；无有效光标时返回 `TABLE_CARET_NOT_AVAILABLE`。
+- 上述编辑块和表格工具是接口定义，不能据此认定当前 Bridge 和扩展已接通。`0.14.32` 报告页的修改、表格插入和保存尚未完成接入和真实页面验收。
 - 表格操作只接受 `insert`、`update_cell` 和 `format`，要求稳定 `tableId`、表格哈希和绑定上下文；保存没有可靠证据时只返回内存状态，不报告成功。
 
 编辑块只支持天源页面中已识别的 `contenteditable` 块；不会读取或修改密码框、隐藏字段、Token、Cookie、验证码或块外 DOM，也不提供任意 JavaScript。
+
+## 报告编辑页受控操作（v2）
+
+报告编辑页动作族已实现并经隔离 fixture 测试：`tianyuan.report_inspect`（只读分页探查）、`report_capabilities`（能力发现，以页面实时返回为准）、`report_navigate`（选择/展开/检索）、`report_node_read`、`report_preview`（8 类 op 批量预演）、`report_execute`（预演执行，串行、首错停止、planHash 一次性）、`report_save`、`report_editor`（编辑框开启/工具栏 24 命令/保存/关闭）、`report_readback`（回读哈希）。
+
+节点定位使用 `nodeRef`（树根索引链、标签和可用候选 ID 复验）；候选 ID 跨刷新稳定性尚未验证。写入动作受 Bridge 门禁、侧栏授权与页面适配器预演快照保护。结构操作须独立预演并使用 `确认执行报告结构修改`，其他修改使用 `确认执行报告修改`；保存结果不明时不得盲目重试。生产报告在门禁关闭时只读。协议细节、操作种类与错误码见仓库 `docs/report-authoring-connector.md`；实机写入路径尚未验收，能力以 `report_capabilities` 实时返回为准。
 
 资产基础法底稿批量保存和批量退出编辑已作为 MCP 工具暴露给 Codex：
 

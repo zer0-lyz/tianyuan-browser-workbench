@@ -9,14 +9,25 @@ const common = require("./common.js");
 function createMacOSAdapter(options = {}) {
   const runFile = options.execFile || execFile;
   const runFileSync = options.execFileSync || execFileSync;
+  const launchProcess = options.spawn || spawn;
+  const env = options.env || process.env;
   const homeDir = options.homeDir || os.homedir();
-  const runtimeRoot = path.join(homeDir, ".tianyuan-workbench");
+  const legacyInstallRoot = path.join(homeDir, ".tianyuan-workbench");
+  const runtimeConfig = options.runtimeConfig && typeof options.runtimeConfig === "object"
+    ? options.runtimeConfig
+    : {};
+  const installRoot = path.resolve(String(runtimeConfig.installRoot || env.TIANYUAN_INSTALL_ROOT || legacyInstallRoot));
+  const runtimeLayout = String(runtimeConfig.layout || env.TIANYUAN_RUNTIME_LAYOUT || "legacy-hidden");
+  const usesVisibleInstallRoot = runtimeLayout === "visible-root-v1";
+  const runtimeRoot = usesVisibleInstallRoot
+    ? path.join(installRoot, "workbench-runtime")
+    : legacyInstallRoot;
   const supportedLitePythonAbis = ["3.9", "3.14"];
 
   function runAppleScript(script, timeout = 120000) {
     return new Promise((resolve) => {
       runFile("/usr/bin/osascript", ["-e", script], { timeout }, (error, stdout) => {
-        resolve(error ? common.pickerFailure(error) : common.pickerResult(stdout));
+        resolve(error ? common.pickerFailure(error, { platform: "macos" }) : common.pickerResult(stdout));
       });
     });
   }
@@ -199,7 +210,8 @@ function createMacOSAdapter(options = {}) {
       const candidate = String(value || "").trim();
       if (candidate && !configured.includes(candidate)) configured.push(candidate);
     };
-    addConfigured(process.env.TIANYUAN_PYTHON_BIN);
+    addConfigured(env.TIANYUAN_PYTHON_BIN);
+    addConfigured(runtimeConfig.pythonBin);
     addConfigured(path.join(runtimeRoot, "python", "bin", "python3"));
     for (const configPath of [
       path.join(runtimeRoot, "runtime-config.json"),
@@ -223,7 +235,9 @@ function createMacOSAdapter(options = {}) {
     const requiredImports = "import docx, et_xmlfile, lxml, openpyxl, typing_extensions";
     const versionScript = "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')";
     const venvScript = "import ensurepip, venv";
-    const managedPython = path.join(runtimeRoot, "python", "bin", "python3");
+    const managedPython = runtimeConfig.pythonBin
+      ? path.resolve(runtimeConfig.pythonBin)
+      : path.resolve(path.join(runtimeRoot, "python", "bin", "python3"));
     for (const candidate of configured) {
       if (!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) continue;
       let version = "";
@@ -249,7 +263,7 @@ function createMacOSAdapter(options = {}) {
       } catch {
         // A bare interpreter may still create the managed venv from package wheels.
       }
-      const isManagedPython = candidate === managedPython;
+      const isManagedPython = path.resolve(candidate) === managedPython;
       if (dependenciesReady && isManagedPython) {
         return {
           ok: true,
@@ -313,23 +327,31 @@ function createMacOSAdapter(options = {}) {
     statusPath,
     logPath,
     parentPid,
+    installRoot: requestedInstallRoot = "",
   }) {
+    const targetInstallRoot = path.resolve(String(requestedInstallRoot || installRoot));
     const runnerPath = path.join(path.dirname(statusPath), "run-update.sh");
+    const shellQuote = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
     fs.writeFileSync(runnerPath, [
       "#!/bin/bash",
       "set +e",
       `deadline=$(( $(/bin/date +%s) + 5 ))`,
       `while [ $(/bin/date +%s) -lt "$deadline" ] && /bin/kill -0 ${Number(parentPid)} 2>/dev/null; do /bin/sleep 0.2; done`,
       `export TIANYUAN_UPDATE_MODE=1`,
-      `export TIANYUAN_UPDATE_STATUS_PATH=${JSON.stringify(statusPath)}`,
-      `/bin/bash ${JSON.stringify(installerPath)} >> ${JSON.stringify(logPath)} 2>&1`,
+      `export TIANYUAN_AGENT_MODE=1`,
+      `export TIANYUAN_INSTALL_ROOT=${shellQuote(targetInstallRoot)}`,
+      `export TIANYUAN_RUNTIME_LAYOUT=${shellQuote(runtimeLayout)}`,
+      `export TIANYUAN_UPDATE_STATUS_PATH=${shellQuote(statusPath)}`,
+      `export TIANYUAN_PYTHON_BIN=${shellQuote(runtimeConfig.pythonBin || "")}`,
+      `export TIANYUAN_NODE_BIN=${shellQuote(runtimeConfig.nodeBin || "")}`,
+      `/bin/bash ${shellQuote(installerPath)} >> ${shellQuote(logPath)} 2>&1`,
       "exit $?",
       "",
     ].join("\n"), { mode: 0o700 });
-    const child = spawn("/bin/bash", [runnerPath], {
+    const child = launchProcess("/bin/bash", [runnerPath], {
       detached: true,
       stdio: "ignore",
-      env: { ...process.env },
+      env: { ...env },
     });
     child.unref();
     return { pid: child.pid, runnerPath };
@@ -401,15 +423,17 @@ function createMacOSAdapter(options = {}) {
     isWindows: false,
     isMacOS: true,
     runtimeRoot,
-    defaultPythonBin: "/usr/bin/python3",
-    defaultPrintSkillsDir: path.join(
+    installRoot,
+    runtimeLayout,
+    defaultPythonBin: runtimeConfig.pythonBin || "/usr/bin/python3",
+    defaultPrintSkillsDir: runtimeConfig.printSkillsDir || path.join(
       runtimeRoot,
       "dependencies",
       "天源评估系统",
       "print-format-skills",
     ),
-    cliCandidates: ["/usr/local/bin/tycpv"],
-    cliFallback: "/usr/local/bin/tycpv",
+    cliCandidates: ["/usr/local/bin/tycpv", "/opt/homebrew/bin/tycpv"],
+    cliFallback: "tycpv",
     chooseDirectory,
     openPath,
     chooseWorkbookFiles,
