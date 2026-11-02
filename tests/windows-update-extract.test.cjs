@@ -63,6 +63,27 @@ async function run() {
   assert.match(script, /Expand-Archive/);
   assert.equal(lastPowerShell.options.env.TIANYUAN_UPDATE_ZIP_PATH.endsWith("update.zip"), true);
 
+  let successScript = "";
+  const successAdapter = createWindowsAdapter({
+    platform: "win32",
+    homeDir: root,
+    env: {
+      LOCALAPPDATA: path.join(root, "local-app-data"),
+      TEMP: path.join(root, "temp"),
+    },
+    execFile: (_file, args, _options, callback) => {
+      successScript = decodePowerShellScript(args);
+      const marker = successScript.match(/Console\]::Out\.WriteLine\('([^']+)'\s*\+/)?.[1];
+      assert.equal(marker, "TIANYUAN_UPDATE_RESULT:");
+      callback(null, `${marker}${JSON.stringify({ ok: true, stage: "complete" })}\r\n`, "#< CLIXML <Objs S=\"progress\" />");
+    },
+  });
+  const extracted = await successAdapter.extractZip("C:\\temp\\valid.zip", path.join(stagingRoot, "success"));
+  assert.equal(extracted.ok, true);
+  assert.equal(extracted.stage, "complete");
+  assert.match(successScript, /\$ProgressPreference = 'SilentlyContinue'/);
+  assert.match(successScript, /Console\]::OutputEncoding = \[System\.Text\.UTF8Encoding\]::new\(\$false\)/);
+
   let traversalAdapter = createWindowsAdapter({
     platform: "win32",
     homeDir: root,

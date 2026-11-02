@@ -720,6 +720,7 @@ function createWorkbenchUpdater({
         logPath,
         parentPid: process.pid,
         cleanupPath: updateRoot,
+        installRoot: platformAdapter.installRoot,
       });
       if (!launch || !Number.isInteger(Number(launch.pid)) || Number(launch.pid) <= 0) {
         throw new Error("UPDATE_INSTALLER_NOT_STARTED");

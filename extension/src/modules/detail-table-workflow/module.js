@@ -56,6 +56,8 @@ function elementMap(documentRef) {
     "detailTableWorkflowProgressBar",
     "detailTableWorkflowMessage",
     "detailTableWorkflowResultList",
+    "saveDetailTableWorkflow",
+    "resetDetailTableWorkflow",
   ];
   return Object.fromEntries(ids.map((id) => [id, documentRef.getElementById(id)]));
 }
@@ -177,32 +179,49 @@ export const detailTableWorkflowModule = {
     }
 
     async function chooseInputs(kind) {
+      const pickerButton = kind === "files" ? elements.chooseDetailTableWorkflowFiles : elements.chooseDetailTableWorkflowFolder;
+      context.clearDirectoryPickerStatus(pickerButton);
       try {
         const action = kind === "files" ? "select_print_workbook_files" : "select_print_workbook_directory";
         const result = await context.sendNativeMessage({ action }, 130000);
-        if (result?.cancelled || result?.canceled) return;
-        if (!result?.ok) throw new Error(result?.reason || "WORKBOOK_SELECTION_FAILED");
+        if (context.isDirectoryPickerCancelled(result)) return;
+        if (!result?.ok) {
+          const feedback = context.setDirectoryPickerStatus(pickerButton, result, { subject: kind === "files" ? "明细表输入文件" : "明细表输入文件夹" });
+          setMessage(elements.detailTableWorkflowMessage, feedback?.message || "无法完成选择，请重新选择。", "error");
+          return;
+        }
         inputPaths = Array.isArray(result.paths) ? result.paths : [];
         render();
+        context.clearDirectoryPickerStatus(pickerButton);
         context.setStatus(`已选择 ${inputPaths.length} 个工作簿`, "ok");
       } catch (error) {
-        setMessage(elements.detailTableWorkflowMessage, `选择文件失败：${error?.message || String(error)}`, "error");
+        const feedback = context.setDirectoryPickerStatus(pickerButton, error, { subject: kind === "files" ? "明细表输入文件" : "明细表输入文件夹" });
+        setMessage(elements.detailTableWorkflowMessage, feedback?.message || "无法完成选择，请重新选择。", "error");
         context.setStatus("明细表输入选择失败", "error");
       }
     }
 
-    async function chooseDirectory(target) {
+    async function chooseDirectory(target, button) {
+      context.clearDirectoryPickerStatus(button);
       try {
         const result = await context.sendNativeMessage({ action: "select_print_output_directory", directoryName: "明细表导出与整理" }, 130000);
-        if (result?.cancelled || result?.canceled) return;
+        if (context.isDirectoryPickerCancelled(result)) return;
         const selected = result?.outputDirectory || result?.path || result?.paths?.[0] || "";
-        if (!result?.ok || !selected) throw new Error(result?.reason || "OUTPUT_DIRECTORY_SELECTION_FAILED");
+        if (!result?.ok || !selected) {
+          const feedback = context.setDirectoryPickerStatus(button, result?.ok ? { reason: result.reason || "OUTPUT_DIRECTORY_SELECTION_FAILED" } : result, { subject: "明细表输出目录" });
+          setMessage(elements.detailTableWorkflowMessage, feedback?.message || "无法完成目录选择，请重新选择。", "error");
+          context.setStatus(feedback?.message || "无法完成目录选择，请重新选择。", "error");
+          return;
+        }
         target.value = selected;
         if (target === elements.detailTableWorkflowExportDirectory) config.exportDirectory = target.value;
         else config.outputDirectory = target.value;
+        context.clearDirectoryPickerStatus(button);
         setMessage(elements.detailTableWorkflowMessage, `已选择上级目录，并创建专用子文件夹：${result.directoryName || "明细表导出与整理"}。保存设置后生效`, "ok");
       } catch (error) {
-        setMessage(elements.detailTableWorkflowMessage, `选择文件夹失败：${error?.message || String(error)}`, "error");
+        const feedback = context.setDirectoryPickerStatus(button, error, { subject: "明细表输出目录" });
+        setMessage(elements.detailTableWorkflowMessage, feedback?.message || "无法完成目录选择，请重新选择。", "error");
+        context.setStatus(feedback?.message || "无法完成目录选择，请重新选择。", "error");
       }
     }
 
@@ -290,8 +309,8 @@ export const detailTableWorkflowModule = {
         context.scope.on(elements.detailTableWorkflowOutputMode, "change", () => { config = readForm(); render(); });
         context.scope.on(elements.chooseDetailTableWorkflowFiles, "click", () => chooseInputs("files"));
         context.scope.on(elements.chooseDetailTableWorkflowFolder, "click", () => chooseInputs("folder"));
-        context.scope.on(elements.chooseDetailTableWorkflowExportDirectory, "click", () => chooseDirectory(elements.detailTableWorkflowExportDirectory));
-        context.scope.on(elements.chooseDetailTableWorkflowOutput, "click", () => chooseDirectory(elements.detailTableWorkflowOutputDirectory));
+        context.scope.on(elements.chooseDetailTableWorkflowExportDirectory, "click", () => chooseDirectory(elements.detailTableWorkflowExportDirectory, elements.chooseDetailTableWorkflowExportDirectory));
+        context.scope.on(elements.chooseDetailTableWorkflowOutput, "click", () => chooseDirectory(elements.detailTableWorkflowOutputDirectory, elements.chooseDetailTableWorkflowOutput));
         context.scope.on(elements.runExportDetail, "click", run);
         context.scope.on(elements.saveDetailTableWorkflow, "click", save);
         context.scope.on(elements.resetDetailTableWorkflow, "click", reset);

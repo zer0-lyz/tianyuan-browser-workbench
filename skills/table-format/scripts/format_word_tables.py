@@ -141,29 +141,30 @@ def repair_null_relationships(document_path: Path) -> int:
                         standalone=True,
                     )
 
-            if not relationship_updates:
-                return 0
+            if relationship_updates:
+                with tempfile.NamedTemporaryFile(
+                    prefix=f".{document_path.stem}.tianyuan-repair-",
+                    suffix=document_path.suffix,
+                    dir=document_path.parent,
+                    delete=False,
+                ) as temporary:
+                    temporary_path = Path(temporary.name)
+                with zipfile.ZipFile(temporary_path, "w", zipfile.ZIP_DEFLATED) as target_zip:
+                    for info in source_zip.infolist():
+                        data = relationship_updates.get(info.filename, source_zip.read(info.filename))
+                        target_zip.writestr(info, data)
+                with zipfile.ZipFile(temporary_path, "r") as validation_zip:
+                    bad_member = validation_zip.testzip()
+                    if bad_member:
+                        raise ValueError(f"TABLE_FORMAT_REPAIR_CORRUPT:{bad_member}")
 
-            with tempfile.NamedTemporaryFile(
-                prefix=f".{document_path.stem}.tianyuan-repair-",
-                suffix=document_path.suffix,
-                dir=document_path.parent,
-                delete=False,
-            ) as temporary:
-                temporary_path = Path(temporary.name)
-            with zipfile.ZipFile(temporary_path, "w", zipfile.ZIP_DEFLATED) as target_zip:
-                for info in source_zip.infolist():
-                    data = relationship_updates.get(info.filename, source_zip.read(info.filename))
-                    target_zip.writestr(info, data)
-            with zipfile.ZipFile(temporary_path, "r") as validation_zip:
-                bad_member = validation_zip.testzip()
-                if bad_member:
-                    raise ValueError(f"TABLE_FORMAT_REPAIR_CORRUPT:{bad_member}")
-            mode = document_path.stat().st_mode & 0o777
-            os.replace(temporary_path, document_path)
-            temporary_path = None
-            os.chmod(document_path, mode)
-            return removed_count
+        if not relationship_updates:
+            return 0
+        mode = document_path.stat().st_mode & 0o777
+        os.replace(temporary_path, document_path)
+        temporary_path = None
+        os.chmod(document_path, mode)
+        return removed_count
     finally:
         if temporary_path and temporary_path.exists():
             temporary_path.unlink()

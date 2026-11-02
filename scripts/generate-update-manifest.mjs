@@ -284,7 +284,7 @@ const windowsFullName = `tianyuan-workbench-v${versionConfig.productVersion}-win
 const windowsLiteName = `tianyuan-workbench-v${versionConfig.productVersion}-windows-x64-lite.zip`;
 const windowsHandoff = `# Windows Codex 打包发布交接 — v${versionConfig.productVersion}
 
-本文件由发布脚本自动生成。macOS 主线只交付源码和交接要求；Windows 专机上的 Codex 负责配置 Windows 安装包、真实安装/更新验收、生成发布清单并上传 GitHub Release。
+本文件由发布脚本自动生成。macOS 主线只交付源码和交接要求；Windows 发布环境负责配置 Windows 安装包、生成发布清单并上传 GitHub Release。天源 CLI 是可选外部依赖，任何工作台安装包都不得包含 CLI 安装器。
 
 ## 固定源码基线
 
@@ -305,7 +305,7 @@ const windowsHandoff = `# Windows Codex 打包发布交接 — v${versionConfig.
 
 ### 1. 固定并检查源码
 
-1. 克隆或更新上述仓库，切换到 \`main\`，确认 \`HEAD=${commit}\`。
+1. 克隆或更新上述仓库，检出本交接列出的源码提交 \`${commit}\`，确认 \`HEAD=${commit}\`。
 2. 先检查工作树；如有未提交修改，停止并报告，不得使用 \`reset --hard\`、\`git clean\` 或整树覆盖。
 3. 读取 \`extension/version.json\`，确认版本、build 和本交接一致。
 4. 当前 \`release/build_windows_x64*.sh\` 是 macOS 交叉打包参考脚本；Windows 上不要直接硬跑。按其文件清单配置 Windows 原生暂存和压缩流程，必要时只补 Windows 发布脚本，不改业务模块。
@@ -313,7 +313,7 @@ const windowsHandoff = `# Windows Codex 打包发布交接 — v${versionConfig.
 ### 2. 配置完整安装包
 
 1. ZIP 内层根目录固定为 \`TianyuanWorkbench\`，使用短暂存目录，例如 \`%TEMP%\TW-build\`。
-2. 完整包必须包含 Extension、完整 Native Helper、skills、plugins、安装脚本、运行指纹脚本、Node.js、便携 Python、离线 Python wheels、\`native_host.exe\` 和天源 CLI 安装器。
+2. 完整包必须包含 Extension、完整 Native Helper、skills、plugins、安装脚本、运行指纹脚本、Node.js、便携 Python、离线 Python wheels 和 \`native_host.exe\`。天源 CLI 安装器不得进入完整包或轻量包。
 3. Python 环境必须实际导入：\`openpyxl>=3.1.5\`、\`et_xmlfile\`、\`lxml\`、\`python-docx\`、\`typing_extensions\`。
 4. \`VERSION.txt\` 必须写入产品版本、build、\`git_commit=${commit}\`、\`source_dirty=false\` 和本交接中的 \`runtime_build_id\`。
 5. 完整包和轻量包都必须生成包内 \`SHA256SUMS\`；轻量包不得伪装成首次安装包。
@@ -321,7 +321,7 @@ const windowsHandoff = `# Windows Codex 打包发布交接 — v${versionConfig.
 
 ### 3. Windows 真机验收
 
-1. 用完整包执行 \`install-agent.cmd\`，确认不是只复制扩展，而是同步 Node.js、Python 依赖、Native Host、Native Messaging、Connector Bridge、Connector 插件、Codex 插件缓存和 CLI。
+1. 用完整包执行 \`install-agent.cmd\`，确认不是只复制扩展，而是同步 Node.js、Python 依赖、Native Host、Native Messaging、Connector Bridge 和 Codex 插件缓存；单独记录可选 CLI 探测状态。CLI 缺失不得阻断核心安装。
 2. 读取 \`%LOCALAPPDATA%\TianyuanWorkbench\安装检查结果.json\`；Extension、Native Helper、Native Messaging、Connector、Python 依赖必须为 \`ok\`。
 3. 桌面必须出现“天源工作台-浏览器扩展”入口，并能定位真实扩展目录；不要让用户进入隐藏目录查找。
 4. 先测试首次安装，再从上一 build 测试“测试更新模块”和“更新全部组件”；检查下载、SHA、解压、安装、重启和版本回读。
@@ -347,7 +347,7 @@ const windowsHandoff = `# Windows Codex 打包发布交接 — v${versionConfig.
 
 Gitee raw 匿名下载对大文件会被拒绝（\`large file require login for access\`）。0.14.32 起 macOS 轻量包改为复用本机运行环境、不再捆绑 lxml wheel，包体保持在 raw 匿名限制以内；如未来某个安装包再次超过该限制，应优先压缩包体，确需直发大文件时才把该包作为 Gitee Release 附件上传，并把发行版页面实际返回的 \`browser_download_url\`（含附件数字 ID，不要自行拼接）逐个写入 \`TIANYUAN_GITEE_ASSET_URL_MAP\`；该映射只对 Gitee 候选生效，未映射文件仍按 \`TIANYUAN_GITEE_BASE_URL\` 拼接，且必须同时设置 \`TIANYUAN_GITEE_BASE_URL\`。manifest、SHA 文件等小文件继续走 raw 镜像，不得重新压缩。
 
-核对 \`update-manifest.json\` 中 build、源码 commit、运行指纹、Windows 包文件名、大小和 SHA-256 与真实文件一致；Gitee 与 GitHub 候选必须使用同一文件名、同一 ZIP 字节和同一 SHA-256。
+核对 \`update-manifest.json\` 中 build、源码 commit、运行指纹、Windows 包文件名、大小和 SHA-256 与真实文件一致；如同时发布 Gitee 镜像，必须使用同一文件名、同一 ZIP 字节和同一 SHA-256。
 
 ### 5. 上传 GitHub Release
 
